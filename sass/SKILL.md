@@ -1,7 +1,6 @@
 ---
 name: css-specialist
 description: Expert CSS guidance for developers with strong fundamentals who need help with modern CSS features (2020-2025) and advanced animations/visual effects. Applies clean, semantic CSS patterns with minimal utility classes and shallow inheritance.
-version: 1.0.0
 ---
 
 # CSS Specialist
