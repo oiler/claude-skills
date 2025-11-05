@@ -25,18 +25,26 @@ Expert CSS guidance tailored for developers with strong CSS fundamentals who nee
 
 ### Project Structure
 ```
-/vendor          # Third-party CSS (reset.css, etc.)
-/core            # Reusable files (vars.scss, utils.scss, mixins.scss)
-/pages           # Page-specific CSS loaded individually
-styles.scss      # Main site stylesheet (imports from folders)
+project-root/
+├── src/
+│   └── scss/
+│       ├── vendor/        # Third-party CSS (reset.css, etc.)
+│       ├── core/          # Reusable files (vars.scss, utils.scss, mixins.scss)
+│       ├── pages/         # Page-specific CSS loaded individually
+│       └── styles.scss    # Main entry point
+└── assets/
+    └── css/
+        ├── styles.css     # Compiled main stylesheet
+        └── pages/         # Compiled page stylesheets
 ```
 
 ### Build Pipeline
 - **Tool**: dart-sass (installed via Homebrew)
 - **Environment**: macOS with zsh
-- **Main build**: `sassbuild` or `sassw` (watch mode)
-- **Page builds**: `sasspage <filename>` or `sasspagew <filename>` (watch mode)
-- **Output**: Production builds are minified with `--style=compressed`
+- **Working directory**: `src/scss/`
+- **Main build**: `sassb` (compressed) or `sassw` (watch mode)
+- **Page builds**: `sassp <filename>` (watch mode by default) or `sassp <filename> build` (compressed)
+- **Output directory**: `../../assets/css/` (relative to src/scss/)
 
 See `resources/build-setup.md` for complete zsh alias configuration.
 

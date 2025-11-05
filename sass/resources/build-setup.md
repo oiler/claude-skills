@@ -18,24 +18,21 @@ Add these aliases to `~/.zshrc`:
 
 ```bash
 # Main stylesheet builds
-alias sassbuild='sass styles.scss:dist/styles.css --style=compressed'
-alias sassw='sass styles.scss:dist/styles.css --watch'
+alias sassw='sass styles.scss:../../assets/css/styles.css --watch'
+alias sassb='sass styles.scss:../../assets/css/styles.css --style=compressed'
 
 # Page-specific builds
-sasspage() {
+sassp() {
     if [[ -z "$1" ]]; then
-        echo "Usage: sasspage <filename> (without .scss extension)"
+        echo "Usage: sasspage <filename> [watch]"
         return 1
     fi
-    sass pages/${1}.scss:dist/pages/${1}.css --style=compressed
-}
-
-sasspagew() {
-    if [[ -z "$1" ]]; then
-        echo "Usage: sasspagew <filename> (without .scss extension)" 
-        return 1
+    
+    if [[ "$2" == "build" ]]; then
+        sass pages/${1}.scss:../../assets/css/pages/${1}.css --style=compressed
+    else
+        sass pages/${1}.scss:../../assets/css/pages/${1}.css --watch
     fi
-    sass pages/${1}.scss:dist/pages/${1}.css --watch
 }
 ```
 
@@ -68,18 +65,21 @@ sasspagew guides
 
 ```
 project-root/
-├── vendor/
-│   └── reset.css
-├── core/
-│   ├── vars.scss
-│   ├── utils.scss
-│   └── mixins.scss
-├── pages/
-│   ├── single.scss
-│   ├── guides.scss
-│   └── post.scss
-├── styles.scss          # Main entry point
-└── dist/
+
+├── src/
+│   └── scss/
+│       ├── vendor/
+│       │   └── reset.css
+│       ├── core/
+│       │   ├── vars.scss
+│       │   ├── utils.scss
+│       │   └── mixins.scss
+│       ├── pages/
+│       │   ├── single.scss
+│       │   ├── guides.scss
+│       │   └── post.scss
+│       ├── styles.scss          # Main entry point
+└── assets/
     ├── styles.css       # Compiled main stylesheet
     └── pages/
         ├── single.css
