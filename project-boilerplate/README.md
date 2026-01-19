@@ -91,6 +91,6 @@ Don't over-document:
 
 ## Example CLAUDE.md Template
 
-- (CLAUDE.md)[CLAUDE.md]
-- (SINGLE_FILE_GUIDE.md)[SINGLE_FILE_GUIDE.md]
-- (COMPLETE_GUIDE.md)[COMPLETE_GUIDE.md]
+- [CLAUDE.md](CLAUDE.md)
+- [SINGLE_FILE_GUIDE.md](SINGLE_FILE_GUIDE.md)
+- [COMPLETE_GUIDE.md](COMPLETE_GUIDE.md)
