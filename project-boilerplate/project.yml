@@ -1,0 +1,159 @@
+# project.yml - Structured Project Metadata
+# This file provides machine-readable project information for Claude and other tools
+
+project:
+  name: ""
+  version: "0.1.0"
+  description: ""
+  type: "" # Options: javascript, wordpress-theme, wordpress-plugin, python-script, python-web, other
+  created: ""
+  updated: ""
+  status: "development" # Options: planning, development, testing, staging, production, maintenance
+
+team:
+  lead: ""
+  developers: []
+  reviewers: []
+
+repository:
+  url: ""
+  main_branch: "main"
+  protected_branches:
+    - main
+    - production
+
+technology:
+  languages:
+    primary: ""
+    additional: []
+  
+  frameworks: []
+  
+  runtime:
+    node: "" # e.g., "18.x" or leave empty
+    python: "" # e.g., "3.11" or leave empty
+    php: "" # e.g., "8.1" or leave empty
+  
+  browser_support:
+    - "Chrome >= 90"
+    - "Firefox >= 88"
+    - "Safari >= 14"
+    - "Edge >= 90"
+  
+  build_tools: []
+
+dependencies:
+  required: {}
+  
+  development: {}
+
+testing:
+  framework: "" # e.g., jest, pytest, phpunit
+  coverage_target: 80
+  
+  enabled_types:
+    unit: true
+    integration: true
+    e2e: false
+    visual: false
+    performance: false
+    security: true
+    accessibility: true
+  
+  critical_paths: []
+
+features:
+  core: []
+  
+  optional: []
+  
+  planned: []
+
+security:
+  authentication: false
+  authorization: false
+  sensitive_data:
+    - type: ""
+      handling: ""
+  
+  requirements:
+    - "Input validation"
+    - "Output escaping"
+    - "CSRF protection"
+    - "SQL injection prevention"
+    - "XSS prevention"
+
+performance:
+  targets:
+    page_load_ms: 3000
+    time_to_interactive_ms: 5000
+    api_response_ms: 500
+    database_query_ms: 100
+  
+  optimization_priorities:
+    - "Initial load speed"
+    - "Runtime performance"
+
+accessibility:
+  wcag_level: "AA" # Options: A, AA, AAA
+  requirements:
+    - "Screen reader support"
+    - "Keyboard navigation"
+    - "Color contrast compliance"
+    - "Focus management"
+
+deployment:
+  environments:
+    development:
+      url: ""
+      database: ""
+    
+    staging:
+      url: ""
+      database: ""
+    
+    production:
+      url: ""
+      database: ""
+  
+  environment_variables: []
+  
+  build_command: ""
+  test_command: ""
+  deploy_command: ""
+
+integration:
+  external_services: []
+  
+  internal_systems: []
+
+documentation:
+  readme: true
+  api_docs: false
+  user_guide: false
+  changelog: true
+
+monitoring:
+  error_tracking: ""
+  performance_monitoring: ""
+  analytics: ""
+
+maintenance:
+  update_schedule:
+    dependencies: "monthly"
+    security_patches: "as-needed"
+  backup_frequency: ""
+  backup_retention: ""
+
+claude:
+  skills_to_use:
+    - ""
+  
+  focus_areas: []
+  
+  specific_guidance: ""
+
+metadata:
+  last_test_run: ""
+  last_deployment: ""
+  last_security_audit: ""
