@@ -1,192 +1,212 @@
 ---
 name: python-expert
-description: Expert guidance for Python programming covering modern best practices, standard library usage, popular frameworks (Flask, Django, FastAPI), data science libraries (pandas, numpy), async programming, testing, type hints, packaging, debugging, and performance optimization.
+description: Expert guidance for Python programming. Use when user asks to write Python code, create scripts, build web apps with Django/Flask/FastAPI, run one-off tools with uv, debug Python errors, optimize performance, or asks about Python best practices, packaging, testing, or async patterns. Covers modern Python 3.10+ idioms, uv-based scripting, Django, Flask, FastAPI, data science, testing, and production deployment.
 ---
 
 # Python Expert
 
-Provides expert guidance on Python programming across all domains and skill levels.
+Expert Python guidance across scripting, web frameworks, and production systems.
 
-## Core Expertise Areas
+## Important — Read Reference Files First
 
-### Language Fundamentals
+Before writing code, load the reference file that matches the user's task:
 
-**Modern Python Features**
-- Use type hints for better code clarity and IDE support
-- Leverage dataclasses for data-oriented classes
-- Apply f-strings for string formatting
-- Use match-case statements (Python 3.10+)
-- Implement context managers with contextlib
+| User wants to... | Read first |
+|---|---|
+| Run a quick script, one-off tool, CLI utility, or use inline dependencies | `references/uv-scripts.md` |
+| Build or modify a Django project (models, views, admin, DRF APIs) | `references/django.md` |
+| Build or modify a Flask or FastAPI project (routes, middleware, APIs) | `references/flask-fastapi.md` |
 
-**Object-Oriented Programming**
-- Design classes with clear responsibilities
-- Use properties for controlled attribute access
-- Implement special methods (__init__, __str__, __repr__, etc.)
-- Apply inheritance and composition appropriately
-- Follow SOLID principles
+If none of those match, use the core principles below directly.
 
-**Functional Programming**
-- Use comprehensions (list, dict, set, generator)
-- Apply map, filter, reduce when appropriate
-- Create and use decorators
-- Implement higher-order functions
-- Use functools and itertools modules
+---
 
-### Standard Library Mastery
+## Core Principles (Always Apply)
 
-**Essential Modules**
-- collections: defaultdict, Counter, deque, namedtuple
-- itertools: chain, combinations, groupby, islice
-- functools: lru_cache, partial, wraps
-- pathlib: modern file path operations
-- datetime: time and date handling
-- json/csv: data serialization
-- logging: application logging
-- argparse/click: CLI argument parsing
+### Modern Python Style (3.10+)
+
+Write Python that uses current idioms. Avoid legacy patterns.
+
+```python
+# Type hints on all public functions
+def fetch_users(limit: int = 50, active: bool = True) -> list[dict[str, Any]]:
+    ...
+
+# Dataclasses over manual __init__
+from dataclasses import dataclass, field
+
+@dataclass
+class Config:
+    host: str = "localhost"
+    port: int = 8000
+    tags: list[str] = field(default_factory=list)
+
+# match-case for dispatch
+match command:
+    case "start":
+        start_server()
+    case "stop" | "quit":
+        shutdown()
+    case _:
+        print(f"Unknown: {command}")
+
+# f-strings, never .format() or %
+msg = f"Processing {count:,} items in {elapsed:.2f}s"
+
+# pathlib, never os.path
+from pathlib import Path
+config_path = Path.home() / ".config" / "app" / "settings.toml"
+```
+
+### Project Structure Defaults
+
+When creating a new Python project (not a uv one-off script), use this layout:
+
+```
+project-name/
+├── pyproject.toml          # Single source of truth for metadata + deps
+├── src/
+│   └── project_name/       # Importable package
+│       ├── __init__.py
+│       └── main.py
+├── tests/
+│   ├── conftest.py
+│   └── test_main.py
+└── README.md
+```
+
+Use `pyproject.toml` as the single config file. Do not create `setup.py`, `setup.cfg`, or `requirements.txt` unless the user specifically asks for them.
+
+### Error Handling
+
+Be specific with exceptions. Never use bare `except:`.
+
+```python
+# Good — specific exceptions, useful messages
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError as e:
+    logger.error("Invalid JSON at line %d: %s", e.lineno, e.msg)
+    raise ValueError(f"Could not parse config: {e}") from e
+
+# Good — custom exceptions for domain logic
+class InsufficientFundsError(Exception):
+    def __init__(self, balance: Decimal, amount: Decimal):
+        self.balance = balance
+        self.amount = amount
+        super().__init__(f"Cannot withdraw {amount}: balance is {balance}")
+```
+
+### Testing with pytest
+
+Default to pytest for all testing. Structure tests to mirror source layout.
+
+```python
+# Use fixtures for shared setup
+import pytest
+
+@pytest.fixture
+def db_session():
+    session = create_test_session()
+    yield session
+    session.rollback()
+
+# Parametrize for multiple cases
+@pytest.mark.parametrize("input,expected", [
+    ("hello", "HELLO"),
+    ("", ""),
+    ("café", "CAFÉ"),
+])
+def test_uppercase(input, expected):
+    assert to_upper(input) == expected
+
+# Use tmp_path for file operations
+def test_export(tmp_path):
+    out = tmp_path / "report.csv"
+    export_report(out)
+    assert out.read_text().startswith("id,name")
+```
 
 ### Async Programming
 
-**async/await Pattern**
+Use async for I/O-bound work. Never use it for CPU-bound work (use multiprocessing instead).
+
 ```python
 import asyncio
+import httpx
 
-async def fetch_data(url):
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            return await response.json()
-
-async def main():
-    results = await asyncio.gather(
-        fetch_data(url1),
-        fetch_data(url2)
-    )
+async def fetch_all(urls: list[str]) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        tasks = [client.get(url) for url in urls]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        return [
+            r.json() for r in responses
+            if not isinstance(r, Exception)
+        ]
 ```
 
-**Key Concepts**
-- Use async/await for I/O-bound operations
-- Leverage asyncio.gather for concurrent tasks
-- Apply aiohttp for async HTTP requests
-- Understand event loops and coroutines
+Prefer `httpx` over `aiohttp` — it has sync and async APIs with the same interface.
 
-### Popular Frameworks
+### Dependencies and Packaging
 
-**Web Frameworks**
-- Flask: lightweight, flexible micro-framework
-- Django: full-featured framework with ORM
-- FastAPI: modern, high-performance API framework
+For full projects, use `pyproject.toml`:
 
-**Data Science**
-- pandas: data manipulation and analysis
-- numpy: numerical computing
-- matplotlib/seaborn: data visualization
-- scikit-learn: machine learning
+```toml
+[project]
+name = "my-project"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.0",
+]
 
-**Testing**
-- pytest: powerful testing framework
-- unittest: standard library testing
-- mock/unittest.mock: mocking dependencies
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff"]
 
-### Best Practices
+[tool.ruff]
+line-length = 100
+```
 
-**Code Quality**
-- Follow PEP 8 style guidelines
-- Use meaningful variable and function names
-- Keep functions small and focused
-- Add docstrings for modules, classes, functions
-- Use type hints for function signatures
+For quick scripts, use uv inline metadata — see `references/uv-scripts.md`.
 
-**Error Handling**
+### Logging (not print)
+
+Use structured logging for anything beyond throwaway scripts:
+
 ```python
-def process_file(filepath):
-    try:
-        with open(filepath, 'r') as f:
-            return f.read()
-    except FileNotFoundError:
-        logger.error(f"File not found: {filepath}")
-        raise
-    except PermissionError:
-        logger.error(f"Permission denied: {filepath}")
-        raise
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Configure once at entry point
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 ```
 
-**Virtual Environments**
-- Use venv or virtualenv for isolation
-- Maintain requirements.txt or pyproject.toml
-- Use pip-tools for dependency management
-- Consider poetry or pipenv for modern workflows
+### Common Pitfalls to Catch
 
-### Performance Optimization
+When reviewing or writing Python code, watch for:
 
-**Profiling & Optimization**
-- Use timeit for micro-benchmarks
-- Apply cProfile for performance profiling
-- Leverage memory_profiler for memory analysis
-- Use line_profiler for line-by-line profiling
-
-**Common Optimizations**
-- Use generators for large datasets
-- Apply set operations for membership tests
-- Cache expensive computations with lru_cache
-- Use appropriate data structures (list vs deque vs set)
-- Employ list comprehensions over loops when readable
-
-## Common Patterns
-
-**Context Manager**
-```python
-from contextlib import contextmanager
-
-@contextmanager
-def managed_resource():
-    resource = acquire_resource()
-    try:
-        yield resource
-    finally:
-        release_resource(resource)
-```
-
-**Decorator with Arguments**
-```python
-from functools import wraps
-
-def retry(max_attempts=3):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            for attempt in range(max_attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    if attempt == max_attempts - 1:
-                        raise
-        return wrapper
-    return decorator
-```
-
-**Property with Validation**
-```python
-class Temperature:
-    def __init__(self, celsius):
-        self.celsius = celsius
-    
-    @property
-    def celsius(self):
-        return self._celsius
-    
-    @celsius.setter
-    def celsius(self, value):
-        if value < -273.15:
-            raise ValueError("Temperature below absolute zero")
-        self._celsius = value
-```
+- Mutable default arguments (`def f(items=[])` — use `None` + conditional)
+- Late binding closures in loops (use `functools.partial` or default args)
+- Missing `if __name__ == "__main__":` guard in scripts
+- Using `datetime.now()` without timezone (use `datetime.now(timezone.utc)`)
+- Bare `except:` or `except Exception:` swallowing errors silently
+- `os.path` when `pathlib` would be clearer
+- `requests` in async contexts (use `httpx` instead)
 
 ## Troubleshooting Approach
 
-1. Read error messages carefully - Python errors are descriptive
-2. Use print statements or debugger (pdb, ipdb) for flow analysis
-3. Check variable types with type() and isinstance()
-4. Verify import paths and module availability
-5. Test with minimal reproducible examples
-6. Check Python version compatibility
-7. Review virtual environment and dependencies
-8. Use linters (pylint, flake8) for code issues
+When the user has an error or unexpected behavior:
+
+1. Read the full traceback — Python errors are specific and descriptive
+2. Identify the exception type and the failing line
+3. Check types with `type()` / `isinstance()` if the error suggests a type mismatch
+4. Reproduce minimally — strip away unrelated code
+5. Verify Python version compatibility (`python --version`)
+6. Check the virtual environment is activated and deps are installed
+7. Use `python -m pytest -x --tb=short` for quick test feedback
+8. Use `ruff check .` for lint issues instead of pylint/flake8 (faster, more modern)
