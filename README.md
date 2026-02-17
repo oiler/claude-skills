@@ -136,7 +136,17 @@ Solution: [How to fix]
 - **Include error handling** for every MCP call or script execution
 - **Reference bundled resources clearly** — `"Consult references/api-patterns.md for..."`
 - **Use progressive disclosure** — keep SKILL.md under ~5,000 words, move detail to references/
+- **Size reference files appropriately** — each reference file should be 500-1000 words (roughly 50-120 lines of mixed prose and code). This is small enough to load without wasting context, but large enough to be self-contained on its topic. If a reference exceeds ~1,500 words, split it into two files with a clear division.
 - **For critical validations, prefer scripts over language instructions** — code is deterministic
+
+### Keeping content current
+Skills that embed domain knowledge (security rules, API patterns, compliance standards, framework best practices) degrade silently when that knowledge goes stale. A skill can be well-structured, clearly written, and still teach the wrong thing if it references a superseded standard or deprecated API.
+
+When creating or reviewing knowledge-heavy skills:
+- **Pin to a version** when citing standards: "OWASP Top 10 (2021)" not just "OWASP Top 10"
+- **Prefer linking to framework docs** over hardcoding API signatures that may change
+- **Note the coverage date** in a comment if the skill covers a fast-moving domain
+- **Audit periodically** — schedule a review if the underlying domain changes frequently
 
 ### Fighting model laziness
 Add explicit encouragement (more effective in user prompts than in SKILL.md):
@@ -178,6 +188,18 @@ Decision tree based on input characteristics (file type, size, context) → rout
 ### Pattern 5: Domain-Specific Intelligence
 Embed specialized knowledge (compliance rules, best practices) → check before action → document decisions → audit trail.
 
+### Pattern 6: Coverage Mapping Against External Standards
+When a skill targets a domain with an established standard, taxonomy, or checklist (OWASP, WCAG, PCI-DSS, OpenAPI, RFC specs, etc.), map the skill's content against that standard to systematically find gaps. This prevents the common problem of a skill covering the author's familiar topics thoroughly while missing equally important areas.
+
+Steps:
+1. Identify the authoritative standard for the skill's domain
+2. List each category or requirement from the standard
+3. Check which ones the skill addresses, partially addresses, or misses entirely
+4. Prioritize gaps by impact — what would hurt most if a user encountered it?
+5. Add missing coverage, starting with highest-impact gaps
+
+This pattern is especially valuable during skill reviews and audits, but also useful during initial creation to ensure nothing obvious is missed.
+
 ---
 
 ## Testing Checklist
@@ -204,6 +226,7 @@ Compare with-skill vs without-skill on: message count, failed API calls, token c
 | Symptom | Likely Cause | Fix |
 |---|---|---|
 | "Could not find SKILL.md" | Wrong filename | Rename to exactly `SKILL.md` |
+| Skill silently never triggers | Filename is not exactly `SKILL.md` (e.g., `my-skill-SKILL.md`, `skill.md`, `Skill.md`) | Rename to exactly `SKILL.md`. This is the most common and hardest-to-debug failure — there is no error message, the skill simply doesn't exist to Claude. |
 | "Invalid frontmatter" | YAML formatting (missing `---`, unclosed quotes) | Fix YAML delimiters and quoting |
 | "Invalid skill name" | Spaces or capitals in name | Use kebab-case |
 | Skill never triggers | Description too vague / missing trigger phrases | Rewrite description with WHAT + WHEN + specific phrases |
@@ -211,6 +234,7 @@ Compare with-skill vs without-skill on: message count, failed API calls, token c
 | MCP calls fail | Connection/auth issue | Verify MCP connected, keys valid, test MCP independently |
 | Instructions not followed | Too verbose / buried / ambiguous | Condense, put critical items first, use scripts for validation |
 | Slow / degraded responses | Too much content loaded | Move detail to references/, keep SKILL.md under 5K words, reduce enabled skills |
+| Skill gives outdated advice | Embedded facts or standards are stale | Audit content against current versions of cited standards. Pin version numbers. |
 
 ---
 
@@ -244,8 +268,30 @@ When oiler asks to **update/fix an existing skill:**
 4. Re-validate against test cases
 
 When oiler asks to **review a skill:**
-1. Run through the full checklist (Reference A from the guide)
-2. Flag: vague descriptions, missing triggers, structural problems, over/under-triggering risks
-3. Suggest concrete improvements with examples
+
+Phase 1 — Structural audit:
+1. Verify the file is named exactly `SKILL.md` (not `skill.md`, not `MySkill-SKILL.md`). Wrong filenames are the #1 silent failure — the skill simply never loads and there is no error message.
+2. Check folder name is kebab-case and matches the `name:` field in frontmatter
+3. Verify YAML frontmatter has both `name` and `description`, no XML angle brackets
+4. Evaluate description quality: does it include WHAT + WHEN + specific trigger phrases?
+5. Check total SKILL.md size — if over ~500 lines or ~5,000 words, recommend restructuring into SKILL.md + references/
+
+Phase 2 — Content accuracy audit:
+6. Identify any factual claims, version numbers, API references, or industry standards cited in the skill (e.g., OWASP Top 10, framework APIs, library names)
+7. Verify these are current and correct — search if needed. Stale facts silently degrade skill quality even when the instructions themselves are well-written.
+8. Flag deprecated functions, renamed APIs, or superseded standards
+
+Phase 3 — Coverage gap analysis:
+9. Identify the domain or standard the skill is targeting (e.g., "web security" → OWASP Top 10, "accessibility" → WCAG, "API design" → OpenAPI spec)
+10. Map the skill's content against that standard or taxonomy to find missing areas (see Pattern 6)
+11. List gaps as concrete topics, not vague suggestions
+12. Prioritize: which gaps would cause real problems if a user hit them?
+
+Phase 4 — Architecture review:
+13. If references/ exist, check that each file is self-contained (500-1000 words is the sweet spot)
+14. Check that SKILL.md has clear routing ("when the user is working on X, load references/Y.md")
+15. Verify the skill doesn't assume it's the only skill loaded (composability)
+
+Present findings organized as: structural issues, accuracy issues, coverage gaps, and what's working well. Ask the user to prioritize before making changes.
 
 Always produce complete, ready-to-use skill files — not fragments or explanations.
