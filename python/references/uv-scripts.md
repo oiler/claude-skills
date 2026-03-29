@@ -188,6 +188,19 @@ if __name__ == "__main__":
     main()
 ```
 
+## Supply Chain Security
+
+For one-off uv scripts there's no `pyproject.toml` to configure. The machine-wide setting in `~/.config/uv/uv.toml` covers them:
+
+```toml
+# ~/.config/uv/uv.toml
+exclude-newer = "30 days"
+```
+
+This tells uv to ignore any PyPI package version published within the last 30 days — a rolling window that catches supply chain attacks before they reach your environment. The March 2026 litellm attack (malicious versions live for ~2 hours before yanked) is exactly what this prevents.
+
+Note: this setting only applies to registry (PyPI) packages, not git or local path dependencies.
+
 ## Key Rules
 
 - Never create a virtualenv or pyproject.toml for a uv one-off script

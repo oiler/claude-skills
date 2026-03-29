@@ -166,9 +166,34 @@ dev = ["pytest>=8.0", "ruff"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.uv]
+exclude-newer = "30 days"
 ```
 
 For quick scripts, use uv inline metadata — see `references/uv-scripts.md`.
+
+### Supply Chain Security (uv Projects)
+
+**Always include `exclude-newer = "30 days"` in every uv project.** This is a rolling window that tells uv to ignore any package version published within the last 30 days, protecting against supply chain attacks like the March 2026 litellm compromise (malicious versions were caught and yanked within hours).
+
+Two places to set this — both should be in place:
+
+**`pyproject.toml`** (per-project, committed to git):
+```toml
+[tool.uv]
+exclude-newer = "30 days"
+```
+
+**`~/.config/uv/uv.toml`** (machine-wide fallback, top-level key — no `[tool.uv]` section):
+```toml
+exclude-newer = "30 days"
+```
+
+Important caveats:
+- This only applies to registry packages (PyPI). Git and local path dependencies are not affected.
+- The timestamp is written into `uv.lock` at resolution time. The window doesn't move until you run `uv lock --upgrade` or `uv sync --upgrade`.
+- If a project genuinely needs a package released within the last 30 days, use `exclude-newer-package` to opt that specific package out: `exclude-newer-package = { some-package = false }`.
 
 ### Logging (not print)
 
