@@ -35,6 +35,7 @@
 | `url_mismatch` | high | Manifest source URL doesn't match registry repository URL | **No** |
 | `maintainer_change` | high | Registry publisher differs from snapshot's recorded publisher | **No** |
 | `repo_health` | info | Upstream GitHub repo is archived | Yes |
+| `malformed_manifest` | warn | An enumeration target's manifest file (plugin.json, hooks.json, etc.) couldn't be parsed | Yes |
 | `new_item` | info | Item present in current scan, absent in last snapshot | Yes |
 | `removed_item` | info | Item present in last snapshot, absent in current scan | Yes |
 
@@ -49,6 +50,7 @@ High-signal categories (`capability_diff`, `url_mismatch`, `maintainer_change`) 
 | `url_mismatch` | `manifest_url`, `registry_url` |
 | `maintainer_change` | `previous_publisher`, `current_publisher`, `previous_version`, `current_version` |
 | `repo_health` | `repository`, `archived`, `last_push_date` |
+| `malformed_manifest` | (none — see `signal` field for parse error message) |
 | `new_item`, `removed_item` | `source`, `version` |
 
 ## How the skill uses these
