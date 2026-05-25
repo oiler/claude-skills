@@ -49,3 +49,49 @@ def load_snapshot(path: Path) -> Snapshot:
         )
     items = [Item(**i) for i in data.get("items", [])]
     return Snapshot(items=items, schema_version=version)
+
+
+@dataclass(frozen=True)
+class Change:
+    kind: str                       # "added" | "removed" | "changed"
+    previous: Item | None
+    current: Item | None
+    added_capabilities: list[str] = field(default_factory=list)
+    removed_capabilities: list[str] = field(default_factory=list)
+
+
+def _key(i: Item) -> tuple[str, str]:
+    return (i.surface, i.name)
+
+
+def diff_snapshots(prev: Snapshot, curr: Snapshot) -> list[Change]:
+    prev_by_key = {_key(i): i for i in prev.items}
+    curr_by_key = {_key(i): i for i in curr.items}
+
+    changes: list[Change] = []
+
+    for key, item in curr_by_key.items():
+        if key not in prev_by_key:
+            changes.append(Change(kind="added", previous=None, current=item))
+
+    for key, item in prev_by_key.items():
+        if key not in curr_by_key:
+            changes.append(Change(kind="removed", previous=item, current=None))
+
+    for key, curr_item in curr_by_key.items():
+        if key not in prev_by_key:
+            continue
+        prev_item = prev_by_key[key]
+        if prev_item == curr_item:
+            continue
+        prev_caps = set(prev_item.capabilities)
+        curr_caps = set(curr_item.capabilities)
+        changes.append(Change(
+            kind="changed",
+            previous=prev_item,
+            current=curr_item,
+            added_capabilities=sorted(curr_caps - prev_caps),
+            removed_capabilities=sorted(prev_caps - curr_caps),
+        ))
+
+    return changes
