@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "startup",
+      "hooks": [{"type": "command", "command": "echo project-hook"}]
+    }]
+  }
+}

@@ -101,3 +101,30 @@ def test_enumerate_skills_hash_changes_when_content_changes(tmp_path: Path):
     md.write_text("---\nname: s\ndescription: x\n---\nB")
     h2 = enumerate_skills(tmp_path / "skills")[0].content_hash
     assert h1 != h2
+
+
+from enumerate import enumerate_hooks
+
+
+def test_enumerate_hooks_tags_scope_and_event(fixtures_dir: Path):
+    items = enumerate_hooks([
+        (fixtures_dir / "settings" / "user.json", "user"),
+        (fixtures_dir / "settings" / "project.json", "project"),
+    ])
+    names = sorted(i.name for i in items)
+    assert names == [
+        "project:SessionStart:echo project-hook",
+        "user:PreToolUse:/abs/path/to/script.sh",
+        "user:SessionStart:echo user-hook",
+    ]
+
+    by_name = {i.name: i for i in items}
+    h = by_name["user:PreToolUse:/abs/path/to/script.sh"]
+    assert h.surface == "hook"
+    assert h.source == "settings:user"
+    assert h.capabilities == ["event:PreToolUse", "matcher:Bash"]
+    assert h.content_hash is not None  # hash of command
+
+
+def test_enumerate_hooks_skips_missing_files(tmp_path: Path):
+    assert enumerate_hooks([(tmp_path / "nope.json", "user")]) == []

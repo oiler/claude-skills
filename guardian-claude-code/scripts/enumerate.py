@@ -178,3 +178,39 @@ def enumerate_skills(skills_root: Path) -> list[Item]:
             content_hash=h,
         ))
     return items
+
+
+def enumerate_hooks(settings_files: list[tuple[Path, str]]) -> list[Item]:
+    """settings_files: list of (path, scope) where scope is 'user' or 'project'."""
+    items: list[Item] = []
+    for path, scope in settings_files:
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            log.warning("skipping settings at %s: %s", path, e)
+            continue
+
+        for event, registrations in (data.get("hooks") or {}).items():
+            for reg in registrations:
+                matcher = reg.get("matcher", "")
+                for hook in reg.get("hooks", []):
+                    command = hook.get("command", "")
+                    name = f"{scope}:{event}:{command}"
+                    h = hashlib.sha256(command.encode()).hexdigest()
+                    items.append(Item(
+                        surface="hook",
+                        name=name,
+                        source=f"settings:{scope}",
+                        version=None,
+                        publish_date=None,
+                        publisher=None,
+                        capabilities=sorted([
+                            f"event:{event}",
+                            f"matcher:{matcher}",
+                        ]),
+                        source_url=None,
+                        content_hash=h,
+                    ))
+    return items
