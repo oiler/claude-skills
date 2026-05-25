@@ -70,3 +70,34 @@ def test_enumerate_plugins_skips_broken_manifest(fixtures_dir: Path, caplog):
     names = [i.name for i in items]
     assert "broken-plugin" not in names
     assert any("broken-plugin" in r.message for r in caplog.records)
+
+
+from enumerate import enumerate_skills
+
+
+def test_enumerate_skills_finds_skill_md(fixtures_dir: Path):
+    items = enumerate_skills(fixtures_dir / "skills")
+    assert len(items) == 1
+    s = items[0]
+    assert s.surface == "skill"
+    assert s.name == "example-skill"
+    assert s.source.startswith("local:")
+    assert s.content_hash is not None
+    assert len(s.content_hash) == 64  # sha256 hex
+    # capabilities pulled from frontmatter (description signals scope)
+    assert s.capabilities == []
+
+
+def test_enumerate_skills_handles_missing_dir(tmp_path: Path):
+    assert enumerate_skills(tmp_path / "nope") == []
+
+
+def test_enumerate_skills_hash_changes_when_content_changes(tmp_path: Path):
+    d = tmp_path / "skills" / "s"
+    d.mkdir(parents=True)
+    md = d / "SKILL.md"
+    md.write_text("---\nname: s\ndescription: x\n---\nA")
+    h1 = enumerate_skills(tmp_path / "skills")[0].content_hash
+    md.write_text("---\nname: s\ndescription: x\n---\nB")
+    h2 = enumerate_skills(tmp_path / "skills")[0].content_hash
+    assert h1 != h2

@@ -120,3 +120,61 @@ def enumerate_plugins(plugins_root: Path) -> list[Item]:
         ))
 
     return items
+
+
+import hashlib
+from datetime import datetime
+
+
+def _parse_frontmatter(text: str) -> dict[str, str]:
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 4)
+    if end == -1:
+        return {}
+    out = {}
+    for line in text[4:end].splitlines():
+        if ":" in line:
+            k, _, v = line.partition(":")
+            out[k.strip()] = v.strip()
+    return out
+
+
+def enumerate_skills(skills_root: Path) -> list[Item]:
+    items: list[Item] = []
+    if not skills_root.exists():
+        return items
+
+    for skill_dir in sorted(p for p in skills_root.iterdir() if p.is_dir()):
+        md = skill_dir / "SKILL.md"
+        if not md.exists():
+            continue
+        try:
+            text = md.read_text()
+        except OSError as e:
+            log.warning("skipping skill at %s: %s", skill_dir, e)
+            continue
+
+        fm = _parse_frontmatter(text)
+        name = fm.get("name") or skill_dir.name
+        mtime = datetime.fromtimestamp(md.stat().st_mtime).isoformat()
+        h = hashlib.sha256(text.encode()).hexdigest()
+
+        # Resolve symlink to detect upstream source
+        if skill_dir.is_symlink():
+            source = f"local:{skill_dir.resolve()}"
+        else:
+            source = f"local:{skill_dir}"
+
+        items.append(Item(
+            surface="skill",
+            name=name,
+            source=source,
+            version=mtime,
+            publish_date=None,
+            publisher=None,
+            capabilities=[],   # skills don't declare tools in frontmatter
+            source_url=None,
+            content_hash=h,
+        ))
+    return items
