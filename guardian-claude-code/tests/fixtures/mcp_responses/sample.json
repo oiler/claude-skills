@@ -1,0 +1,25 @@
+{
+  "servers": [
+    {
+      "name": "example-npm",
+      "scope": "user",
+      "command": "npx",
+      "args": ["-y", "@example/mcp-server@1.2.3"],
+      "tools": ["read_file", "list_files"]
+    },
+    {
+      "name": "example-pip",
+      "scope": "project",
+      "command": "uvx",
+      "args": ["example-mcp==0.5.0"],
+      "tools": ["query_db"]
+    },
+    {
+      "name": "example-git",
+      "scope": "local",
+      "command": "node",
+      "args": ["/abs/path/to/server.js"],
+      "tools": ["custom"]
+    }
+  ]
+}
