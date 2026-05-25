@@ -1,0 +1,7 @@
+{
+  "name": "benign-update",
+  "version": "1.0.1",
+  "repository": "https://github.com/example/benign",
+  "skills": ["foo"],
+  "commands": []
+}

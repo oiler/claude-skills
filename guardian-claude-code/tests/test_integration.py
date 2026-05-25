@@ -66,3 +66,52 @@ def test_deep_mode_writes_snapshot_and_emits_findings(tmp_path: Path):
     # Should still emit a notice
     assert any("offline" in (f["signal"] or "").lower() for f in payload["findings"]) \
         or payload.get("notices")
+
+
+import shutil
+
+
+def test_integration_three_fixture_plugins(tmp_path: Path, fixtures_dir: Path):
+    """End-to-end deep-mode run against the integration fixture tree."""
+    state = tmp_path / "guardian"
+    state.mkdir()
+
+    # Pre-seed snapshot: capability-expansion was 1.0.0 with only 'skill:base'
+    (state / "snapshot.json").write_text(json.dumps({
+        "schema_version": 1,
+        "items": [{
+            "surface": "plugin", "name": "capability-expansion",
+            "source": "git:https://github.com/example/cap-exp",
+            "version": "1.0.0",
+            "publish_date": None, "publisher": None,
+            "capabilities": ["skill:base"],
+            "source_url": "https://github.com/example/cap-exp",
+            "content_hash": None,
+        }],
+    }))
+
+    # Point HOME at our fixture so enumerate_plugins finds our plugin tree
+    fake_home = tmp_path / "home"
+    plugins = fake_home / ".claude" / "plugins" / "cache"
+    plugins.mkdir(parents=True)
+    shutil.copytree(fixtures_dir / "integration" / "plugins", plugins / "marketplace",
+                    dirs_exist_ok=True)
+
+    payload = run_audit("deep", {
+        "GUARDIAN_STATE_DIR": str(state),
+        "GUARDIAN_OFFLINE": "1",   # avoid network in CI
+        "HOME": str(fake_home),
+    })
+
+    findings_by_item = {}
+    for f in payload["findings"]:
+        findings_by_item.setdefault(f["item"], []).append(f["category"])
+
+    # capability-expansion went from {skill:base} to {skill:base, command:run-shell}
+    assert "capability_diff" in findings_by_item.get("capability-expansion", [])
+
+    # benign-update is brand new
+    assert "new_item" in findings_by_item.get("benign-update", [])
+
+    # url-mismatch is also new (offline mode skips the actual URL check)
+    assert "new_item" in findings_by_item.get("url-mismatch", [])
