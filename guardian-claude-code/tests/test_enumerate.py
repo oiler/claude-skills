@@ -128,3 +128,23 @@ def test_enumerate_hooks_tags_scope_and_event(fixtures_dir: Path):
 
 def test_enumerate_hooks_skips_missing_files(tmp_path: Path):
     assert enumerate_hooks([(tmp_path / "nope.json", "user")]) == []
+
+
+from enumerate import SkipEvent
+
+
+def test_enumerate_plugins_accumulates_skip_events_for_broken_manifest(fixtures_dir: Path):
+    skips: list[SkipEvent] = []
+    items = enumerate_plugins(fixtures_dir / "plugins", skips=skips)
+    names = [i.name for i in items]
+    assert "broken-plugin" not in names
+    assert len(skips) == 1
+    assert skips[0].surface == "plugin"
+    assert "broken-plugin" in skips[0].name
+    assert "malformed" in skips[0].reason.lower() or "expecting" in skips[0].reason.lower()
+
+
+def test_enumerate_plugins_skips_param_is_optional(fixtures_dir: Path):
+    """Backward compat: existing callers that don't pass skips=... still work."""
+    items = enumerate_plugins(fixtures_dir / "plugins")
+    assert "broken-plugin" not in [i.name for i in items]

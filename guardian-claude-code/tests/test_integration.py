@@ -115,3 +115,20 @@ def test_integration_three_fixture_plugins(tmp_path: Path, fixtures_dir: Path):
 
     # url-mismatch is also new (offline mode skips the actual URL check)
     assert "new_item" in findings_by_item.get("url-mismatch", [])
+
+
+def test_deep_mode_surfaces_malformed_manifest_finding(tmp_path: Path):
+    state = tmp_path / "guardian"
+    state.mkdir()
+    fake_home = tmp_path / "home"
+    plugins = fake_home / ".claude" / "plugins" / "cache" / "broken"
+    plugins.mkdir(parents=True)
+    (plugins / "plugin.json").write_text("{ this is not valid json")
+
+    payload = run_audit("deep", {
+        "GUARDIAN_STATE_DIR": str(state),
+        "GUARDIAN_OFFLINE": "1",
+        "HOME": str(fake_home),
+    })
+    categories = [f["category"] for f in payload["findings"]]
+    assert "malformed_manifest" in categories

@@ -21,7 +21,7 @@ from pathlib import Path
 from snapshot import Snapshot, load_snapshot, save_snapshot, diff_snapshots
 from enumerate import (
     enumerate_mcp_servers, enumerate_plugins,
-    enumerate_skills, enumerate_hooks,
+    enumerate_skills, enumerate_hooks, SkipEvent,
 )
 from findings import Finding, Category, Severity, Surface
 from registry import Registry
@@ -54,8 +54,9 @@ def state_dir() -> Path:
     return p
 
 
-def _enumerate_all() -> Snapshot:
+def _enumerate_all() -> tuple[Snapshot, list[SkipEvent]]:
     items = []
+    skips: list[SkipEvent] = []
     # MCP servers
     try:
         result = subprocess.run(
@@ -67,22 +68,37 @@ def _enumerate_all() -> Snapshot:
     except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError) as e:
         logging.warning("MCP enumeration skipped: %s", e)
     # Plugins
-    items += enumerate_plugins(Path.home() / ".claude" / "plugins" / "cache")
+    items += enumerate_plugins(Path.home() / ".claude" / "plugins" / "cache", skips=skips)
     # Skills
-    items += enumerate_skills(Path.home() / ".claude" / "skills")
+    items += enumerate_skills(Path.home() / ".claude" / "skills", skips=skips)
     # Hooks
     items += enumerate_hooks([
         (Path.home() / ".claude" / "settings.json", "user"),
         (Path.cwd() / ".claude" / "settings.json", "project"),
-    ])
-    return Snapshot(items=items)
+    ], skips=skips)
+    return Snapshot(items=items), skips
+
+
+def _skip_events_to_findings(skips: list[SkipEvent]) -> list[Finding]:
+    return [
+        Finding(
+            severity=Severity.WARN,
+            category=Category.MALFORMED_MANIFEST,
+            surface=Surface(s.surface),
+            item=s.name,
+            signal=s.reason,
+            evidence={},
+            fix_hint="Inspect the file; valid JSON required.",
+        )
+        for s in skips
+    ]
 
 
 def run_quick() -> int:
     sd = state_dir()
     snap_path = sd / "snapshot.json"
     prev = load_snapshot(snap_path)
-    current = _enumerate_all()
+    current, skips = _enumerate_all()
 
     if not prev.items:
         print(json.dumps({
@@ -95,6 +111,7 @@ def run_quick() -> int:
 
     changes = diff_snapshots(prev, current)
     findings = change_findings(changes)
+    findings += _skip_events_to_findings(skips)
     # Quick mode only emits change-derived findings (no network).
     print(json.dumps({
         "mode": "quick",
@@ -157,7 +174,7 @@ def run_deep() -> int:
     offline = os.environ.get("GUARDIAN_OFFLINE") == "1"
 
     prev = load_snapshot(snap_path)
-    current_raw = _enumerate_all()
+    current_raw, skips = _enumerate_all()
     notices: list[str] = []
 
     if offline:
@@ -184,6 +201,7 @@ def run_deep() -> int:
         findings += capability_diff_findings(changes)
         findings += change_findings(changes)
 
+    findings += _skip_events_to_findings(skips)
     findings = apply_overrides(findings, load_overrides(overrides_path))
 
     save_snapshot(current, snap_path)

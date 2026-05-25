@@ -17,6 +17,13 @@ log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class SkipEvent:
+    surface: str    # "plugin" | "skill" | "hook"
+    name: str       # best-effort identifier of what was skipped
+    reason: str     # human-readable cause, e.g. "malformed plugin.json: ..."
+
+
+@dataclass(frozen=True)
 class McpSource:
     kind: str           # "npm" | "pip" | "git" | "local"
     package: str        # registry name, git URL, or local path
@@ -73,7 +80,7 @@ def enumerate_mcp_servers(payload: dict[str, Any]) -> list[Item]:
     return items
 
 
-def enumerate_plugins(plugins_root: Path) -> list[Item]:
+def enumerate_plugins(plugins_root: Path, skips: list[SkipEvent] | None = None) -> list[Item]:
     """Walk plugin caches under plugins_root looking for plugin.json files."""
     items: list[Item] = []
     if not plugins_root.exists():
@@ -84,6 +91,12 @@ def enumerate_plugins(plugins_root: Path) -> list[Item]:
             data = json.loads(manifest.read_text())
         except (json.JSONDecodeError, OSError) as e:
             log.warning("skipping plugin at %s: %s", manifest.parent, e)
+            if skips is not None:
+                skips.append(SkipEvent(
+                    surface="plugin",
+                    name=manifest.parent.name,
+                    reason=f"malformed plugin.json: {e}",
+                ))
             continue
 
         name = data.get("name") or manifest.parent.name
@@ -106,6 +119,12 @@ def enumerate_plugins(plugins_root: Path) -> list[Item]:
                 capabilities += [f"hook:{event}" for event in hooks_data.keys()]
             except (json.JSONDecodeError, OSError) as e:
                 log.warning("skipping hooks.json at %s: %s", hooks_file, e)
+                if skips is not None:
+                    skips.append(SkipEvent(
+                        surface="hook",
+                        name=f"{name}:hooks.json",
+                        reason=f"malformed hooks.json: {e}",
+                    ))
 
         items.append(Item(
             surface="plugin",
@@ -140,7 +159,7 @@ def _parse_frontmatter(text: str) -> dict[str, str]:
     return out
 
 
-def enumerate_skills(skills_root: Path) -> list[Item]:
+def enumerate_skills(skills_root: Path, skips: list[SkipEvent] | None = None) -> list[Item]:
     items: list[Item] = []
     if not skills_root.exists():
         return items
@@ -153,6 +172,12 @@ def enumerate_skills(skills_root: Path) -> list[Item]:
             text = md.read_text()
         except OSError as e:
             log.warning("skipping skill at %s: %s", skill_dir, e)
+            if skips is not None:
+                skips.append(SkipEvent(
+                    surface="skill",
+                    name=skill_dir.name,
+                    reason=f"malformed SKILL.md: {e}",
+                ))
             continue
 
         fm = _parse_frontmatter(text)
@@ -180,7 +205,7 @@ def enumerate_skills(skills_root: Path) -> list[Item]:
     return items
 
 
-def enumerate_hooks(settings_files: list[tuple[Path, str]]) -> list[Item]:
+def enumerate_hooks(settings_files: list[tuple[Path, str]], skips: list[SkipEvent] | None = None) -> list[Item]:
     """settings_files: list of (path, scope) where scope is 'user' or 'project'."""
     items: list[Item] = []
     for path, scope in settings_files:
@@ -190,6 +215,12 @@ def enumerate_hooks(settings_files: list[tuple[Path, str]]) -> list[Item]:
             data = json.loads(path.read_text())
         except (json.JSONDecodeError, OSError) as e:
             log.warning("skipping settings at %s: %s", path, e)
+            if skips is not None:
+                skips.append(SkipEvent(
+                    surface="hook",
+                    name=f"{scope}:settings.json",
+                    reason=f"malformed settings.json: {e}",
+                ))
             continue
 
         for event, registrations in (data.get("hooks") or {}).items():
