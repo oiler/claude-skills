@@ -21,9 +21,10 @@ class Category(Enum):
     CAPABILITY_DIFF = "capability_diff"
     URL_MISMATCH = "url_mismatch"
     MAINTAINER_CHANGE = "maintainer_change"
-    REPO_HEALTH = "repo_health"
+    MALFORMED_MANIFEST = "malformed_manifest"
     NEW_ITEM = "new_item"
     REMOVED_ITEM = "removed_item"
+    REPO_HEALTH = "repo_health"
 
 
 class Surface(Enum):

@@ -47,3 +47,7 @@ def test_finding_json_roundtrip():
 
 def test_severity_ordering_high_above_warn_above_info():
     assert Severity.HIGH.rank > Severity.WARN.rank > Severity.INFO.rank
+
+
+def test_malformed_manifest_is_a_category():
+    assert Category.MALFORMED_MANIFEST.value == "malformed_manifest"

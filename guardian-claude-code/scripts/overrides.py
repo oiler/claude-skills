@@ -18,6 +18,7 @@ SILENCEABLE_CATEGORIES = {
     Category.REPO_HEALTH,
     Category.NEW_ITEM,
     Category.REMOVED_ITEM,
+    Category.MALFORMED_MANIFEST,
 }
 
 
