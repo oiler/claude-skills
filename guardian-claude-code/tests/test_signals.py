@@ -131,3 +131,35 @@ def test_maintainer_change_silent_when_publisher_unknown_in_either_snapshot():
                  publish_date=None, publisher="someone", capabilities=[],
                  source_url=None, content_hash=None)]
     assert maintainer_change_findings(prev, curr) == []
+
+
+from signals import repo_health_findings
+from registry import GithubRepoMetadata
+
+
+def test_repo_health_fires_info_for_archived_repo():
+    items = [Item(
+        surface="plugin", name="x", source="git:https://github.com/a/b",
+        version="1.0", publish_date=None, publisher=None, capabilities=[],
+        source_url="https://github.com/a/b", content_hash=None,
+    )]
+    repo_meta = {("plugin", "x"): GithubRepoMetadata(
+        full_name="a/b", last_push_date="2026-05-20", archived=True,
+    )}
+    findings = repo_health_findings(items, repo_meta)
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.INFO
+    assert findings[0].category is Category.REPO_HEALTH
+    assert "archived" in findings[0].signal.lower()
+
+
+def test_repo_health_silent_for_healthy_repo():
+    items = [Item(
+        surface="plugin", name="x", source="git:https://github.com/a/b",
+        version="1.0", publish_date=None, publisher=None, capabilities=[],
+        source_url="https://github.com/a/b", content_hash=None,
+    )]
+    repo_meta = {("plugin", "x"): GithubRepoMetadata(
+        full_name="a/b", last_push_date=days_ago(10), archived=False,
+    )}
+    assert repo_health_findings(items, repo_meta) == []

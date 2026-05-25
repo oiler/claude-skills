@@ -145,3 +145,28 @@ def maintainer_change_findings(
             fix_hint="Confirm legitimate ownership transfer before trusting future updates.",
         ))
     return out
+
+
+def repo_health_findings(
+    items: list[Item],
+    repo_meta: dict[tuple[str, str], object],   # GithubRepoMetadata | None
+) -> list[Finding]:
+    out = []
+    for i in items:
+        key = (i.surface, i.name)
+        meta = repo_meta.get(key)
+        if meta is None:
+            continue
+        if not getattr(meta, "archived", False):
+            continue
+        out.append(Finding(
+            severity=Severity.INFO,
+            category=Category.REPO_HEALTH,
+            surface=Surface(i.surface),
+            item=i.name,
+            signal=f"Upstream repository is archived: {meta.full_name}.",
+            evidence={"repository": meta.full_name, "archived": True,
+                      "last_push_date": getattr(meta, "last_push_date", None)},
+            fix_hint="Consider replacing with an actively-maintained alternative.",
+        ))
+    return out
