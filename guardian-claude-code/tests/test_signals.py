@@ -51,3 +51,83 @@ def test_change_findings_emits_new_and_removed_with_info_severity():
     assert Category.REMOVED_ITEM in by_category
     assert by_category[Category.NEW_ITEM].severity is Severity.INFO
     assert by_category[Category.NEW_ITEM].surface is Surface.PLUGIN
+
+
+from signals import capability_diff_findings, url_mismatch_findings, maintainer_change_findings
+
+
+def test_capability_diff_fires_high_when_capabilities_added():
+    changes = [Change(
+        kind="changed",
+        previous=item("x", surface="mcp"),
+        current=item("x", surface="mcp"),
+        added_capabilities=["exec"],
+        removed_capabilities=[],
+    )]
+    findings = capability_diff_findings(changes)
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.HIGH
+    assert findings[0].category is Category.CAPABILITY_DIFF
+    assert findings[0].evidence["added"] == ["exec"]
+
+
+def test_capability_diff_silent_when_only_capabilities_removed():
+    """Capability removal isn't a hijack signal; we don't fire on it."""
+    changes = [Change(
+        kind="changed",
+        previous=item("x"), current=item("x"),
+        added_capabilities=[], removed_capabilities=["something"],
+    )]
+    assert capability_diff_findings(changes) == []
+
+
+def test_url_mismatch_fires_high_when_registry_url_differs_from_manifest():
+    items = [item("x", surface="mcp")]
+    items[0] = Item(
+        surface="mcp", name="x", source="npm:x", version="1.0",
+        publish_date=None, publisher=None, capabilities=[],
+        source_url="https://github.com/claimed/repo",
+        content_hash=None,
+    )
+    registry_urls = {("mcp", "x"): "https://github.com/actual/different"}
+    findings = url_mismatch_findings(items, registry_urls)
+    assert len(findings) == 1
+    assert findings[0].category is Category.URL_MISMATCH
+    assert findings[0].severity is Severity.HIGH
+
+
+def test_url_mismatch_silent_when_urls_match():
+    items = [Item(
+        surface="mcp", name="x", source="npm:x", version="1.0",
+        publish_date=None, publisher=None, capabilities=[],
+        source_url="https://github.com/x/x", content_hash=None,
+    )]
+    assert url_mismatch_findings(items, {("mcp", "x"): "https://github.com/x/x"}) == []
+
+
+def test_maintainer_change_fires_high_when_publisher_differs():
+    prev_items = [Item(
+        surface="mcp", name="x", source="npm:x", version="1.0",
+        publish_date=None, publisher="alice", capabilities=[],
+        source_url=None, content_hash=None,
+    )]
+    curr_items = [Item(
+        surface="mcp", name="x", source="npm:x", version="1.1",
+        publish_date=None, publisher="mallory", capabilities=[],
+        source_url=None, content_hash=None,
+    )]
+    findings = maintainer_change_findings(prev_items, curr_items)
+    assert len(findings) == 1
+    assert findings[0].category is Category.MAINTAINER_CHANGE
+    assert findings[0].evidence["previous_publisher"] == "alice"
+    assert findings[0].evidence["current_publisher"] == "mallory"
+
+
+def test_maintainer_change_silent_when_publisher_unknown_in_either_snapshot():
+    prev = [Item(surface="mcp", name="x", source="npm:x", version="1",
+                 publish_date=None, publisher=None, capabilities=[],
+                 source_url=None, content_hash=None)]
+    curr = [Item(surface="mcp", name="x", source="npm:x", version="2",
+                 publish_date=None, publisher="someone", capabilities=[],
+                 source_url=None, content_hash=None)]
+    assert maintainer_change_findings(prev, curr) == []
