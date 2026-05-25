@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,32 @@ from urllib.parse import quote, urlparse
 import httpx
 
 log = logging.getLogger(__name__)
+
+_SSH_FORM = re.compile(r"^ssh://git@(?P<host>[^/]+)/(?P<path>.+)$")
+_SCP_FORM = re.compile(r"^git@(?P<host>[^:]+):(?P<path>.+)$")
+
+
+def canonicalize_repo_url(url: str | None) -> str | None:
+    """Canonicalize a git repository URL to https://host/owner/repo form.
+
+    Handles the common alternatives so equality comparison is meaningful:
+    - ssh://git@host/path.git -> https://host/path
+    - git@host:path.git       -> https://host/path
+    - git+https://host/path   -> https://host/path
+    - trailing /              -> stripped
+    - trailing .git           -> stripped
+    """
+    if not url:
+        return url
+    s = url.removeprefix("git+")
+
+    if m := _SSH_FORM.match(s):
+        s = f"https://{m['host']}/{m['path']}"
+    elif m := _SCP_FORM.match(s):
+        s = f"https://{m['host']}/{m['path']}"
+
+    s = s.removesuffix(".git").rstrip("/")
+    return s
 
 
 @dataclass(frozen=True)
@@ -93,7 +120,7 @@ class Registry:
         publisher = (version_data.get("_npmUser") or {}).get("name")
         repo = (version_data.get("repository") or {}).get("url")
         if repo:
-            repo = repo.removeprefix("git+").removesuffix(".git")
+            repo = canonicalize_repo_url(repo)
 
         return NpmMetadata(
             package=package, version=version,

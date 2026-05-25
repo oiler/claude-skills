@@ -92,13 +92,14 @@ def url_mismatch_findings(
     items: list[Item],
     registry_urls: dict[tuple[str, str], str | None],
 ) -> list[Finding]:
+    from registry import canonicalize_repo_url
     out = []
     for i in items:
         key = (i.surface, i.name)
         registry_url = registry_urls.get(key)
         if not i.source_url or not registry_url:
             continue
-        if i.source_url.rstrip("/") == registry_url.rstrip("/"):
+        if canonicalize_repo_url(i.source_url) == canonicalize_repo_url(registry_url):
             continue
         out.append(Finding(
             severity=Severity.HIGH,

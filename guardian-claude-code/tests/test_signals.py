@@ -163,3 +163,14 @@ def test_repo_health_silent_for_healthy_repo():
         full_name="a/b", last_push_date=days_ago(10), archived=False,
     )}
     assert repo_health_findings(items, repo_meta) == []
+
+
+def test_url_mismatch_silent_when_manifest_is_https_and_registry_is_ssh():
+    """SSH-form registry URL should match manifest's HTTPS form after canonicalization."""
+    items = [Item(
+        surface="mcp", name="x", source="npm:x", version="1.0",
+        publish_date=None, publisher=None, capabilities=[],
+        source_url="https://github.com/user/repo", content_hash=None,
+    )]
+    registry_urls = {("mcp", "x"): "ssh://git@github.com/user/repo.git"}
+    assert url_mismatch_findings(items, registry_urls) == []

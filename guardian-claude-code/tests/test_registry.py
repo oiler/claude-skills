@@ -88,3 +88,30 @@ def test_network_failure_returns_none(reg: Registry):
             side_effect=httpx.ConnectError("nope"),
         )
         assert reg.npm("missing", "1.0.0") is None
+
+
+from registry import canonicalize_repo_url
+
+
+def test_canonicalize_ssh_form():
+    assert canonicalize_repo_url("ssh://git@github.com/user/repo.git") == "https://github.com/user/repo"
+
+
+def test_canonicalize_scp_form():
+    assert canonicalize_repo_url("git@github.com:user/repo.git") == "https://github.com/user/repo"
+
+
+def test_canonicalize_git_plus_https():
+    assert canonicalize_repo_url("git+https://github.com/user/repo.git") == "https://github.com/user/repo"
+
+
+def test_canonicalize_already_https():
+    assert canonicalize_repo_url("https://github.com/user/repo") == "https://github.com/user/repo"
+
+
+def test_canonicalize_trailing_slash():
+    assert canonicalize_repo_url("https://github.com/user/repo/") == "https://github.com/user/repo"
+
+
+def test_canonicalize_none_returns_none():
+    assert canonicalize_repo_url(None) is None
