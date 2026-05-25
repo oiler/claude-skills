@@ -23,7 +23,14 @@ from enumerate import (
     enumerate_mcp_servers, enumerate_plugins,
     enumerate_skills, enumerate_hooks,
 )
-from signals import change_findings
+from findings import Finding, Category, Severity, Surface
+from registry import Registry
+from signals import (
+    cooldown_findings, capability_diff_findings,
+    url_mismatch_findings, maintainer_change_findings,
+    repo_health_findings, change_findings,
+)
+from overrides import load_overrides, apply_overrides
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -98,8 +105,96 @@ def run_quick() -> int:
     return 0
 
 
+def _enrich_with_registry(items: list, reg: Registry) -> tuple[list, dict, dict]:
+    """Populate publish_date/publisher and gather registry URLs + repo metadata."""
+    from snapshot import Item as _Item  # avoid circular hint
+    enriched: list = []
+    registry_urls: dict = {}
+    repo_meta: dict = {}
+    for i in items:
+        new_publish = i.publish_date
+        new_publisher = i.publisher
+        if i.surface == "mcp" and i.source.startswith("npm:") and i.version:
+            pkg = i.source.removeprefix("npm:")
+            meta = reg.npm(pkg, i.version)
+            if meta:
+                new_publish = meta.publish_date
+                new_publisher = meta.publisher
+                if meta.repository_url:
+                    registry_urls[(i.surface, i.name)] = meta.repository_url
+                    rm = reg.github_repo(meta.repository_url)
+                    if rm:
+                        repo_meta[(i.surface, i.name)] = rm
+        elif i.surface == "mcp" and i.source.startswith("pip:") and i.version:
+            pkg = i.source.removeprefix("pip:")
+            meta = reg.pypi(pkg, i.version)
+            if meta:
+                new_publish = meta.publish_date
+                new_publisher = meta.publisher
+                if meta.repository_url:
+                    registry_urls[(i.surface, i.name)] = meta.repository_url
+                    rm = reg.github_repo(meta.repository_url)
+                    if rm:
+                        repo_meta[(i.surface, i.name)] = rm
+        elif i.surface == "plugin" and i.source_url:
+            rm = reg.github_repo(i.source_url)
+            if rm:
+                repo_meta[(i.surface, i.name)] = rm
+
+        enriched.append(_Item(
+            surface=i.surface, name=i.name, source=i.source, version=i.version,
+            publish_date=new_publish, publisher=new_publisher,
+            capabilities=i.capabilities, source_url=i.source_url,
+            content_hash=i.content_hash,
+        ))
+    return enriched, registry_urls, repo_meta
+
+
 def run_deep() -> int:
-    print(json.dumps({"mode": "deep", "findings": []}))
+    sd = state_dir()
+    snap_path = sd / "snapshot.json"
+    overrides_path = sd / "trust-overrides.json"
+    offline = os.environ.get("GUARDIAN_OFFLINE") == "1"
+
+    prev = load_snapshot(snap_path)
+    current_raw = _enumerate_all()
+    notices: list[str] = []
+
+    if offline:
+        current = current_raw
+        notices.append("offline mode — registry, publisher, and repo-health checks skipped")
+        registry_urls: dict = {}
+        repo_meta: dict = {}
+    else:
+        reg = Registry(cache_dir=sd / "cache", ttl_seconds=3600)
+        items, registry_urls, repo_meta = _enrich_with_registry(
+            current_raw.items, reg,
+        )
+        current = Snapshot(items=items)
+
+    findings: list[Finding] = []
+    if not offline:
+        findings += cooldown_findings(current.items)
+        findings += url_mismatch_findings(current.items, registry_urls)
+        findings += maintainer_change_findings(prev.items, current.items)
+        findings += repo_health_findings(current.items, repo_meta)
+
+    if prev.items:
+        changes = diff_snapshots(prev, current)
+        findings += capability_diff_findings(changes)
+        findings += change_findings(changes)
+
+    findings = apply_overrides(findings, load_overrides(overrides_path))
+
+    save_snapshot(current, snap_path)
+
+    output = {
+        "mode": "deep",
+        "findings": [f.to_dict() for f in findings],
+    }
+    if notices:
+        output["notices"] = notices
+    print(json.dumps(output))
     return 0
 
 

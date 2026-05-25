@@ -47,3 +47,22 @@ def test_quick_mode_with_baseline_emits_change_findings(tmp_path: Path):
     # 'ghost' is in baseline but not in current state — should show as removed
     categories = [f["category"] for f in payload["findings"]]
     assert "removed_item" in categories
+
+
+def test_deep_mode_writes_snapshot_and_emits_findings(tmp_path: Path):
+    state = tmp_path / "guardian"
+    state.mkdir()
+    payload = run_audit("deep", {"GUARDIAN_STATE_DIR": str(state),
+                                  "GUARDIAN_OFFLINE": "1"})
+    assert payload["mode"] == "deep"
+    assert "findings" in payload
+    # Snapshot file was created
+    assert (state / "snapshot.json").exists()
+    # In offline mode, expect an info-level finding noting skipped network checks
+    info_skipped = [f for f in payload["findings"]
+                    if f["category"] in ("repo_health", "cooldown", "maintainer_change")]
+    # Offline = no findings from those categories
+    assert info_skipped == []
+    # Should still emit a notice
+    assert any("offline" in (f["signal"] or "").lower() for f in payload["findings"]) \
+        or payload.get("notices")
