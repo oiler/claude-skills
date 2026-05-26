@@ -1,11 +1,11 @@
 ---
-name: python-expert
-description: Expert guidance for Python programming. Use when user asks to write Python code, create scripts, build web apps with Django/Flask/FastAPI, run one-off tools with uv, debug Python errors, optimize performance, or asks about Python best practices, packaging, testing, or async patterns. Covers modern Python 3.10+ idioms, uv-based scripting, Django, Flask, FastAPI, data science, testing, and production deployment.
+name: python
+description: Expert guidance for Python programming. Use when user asks to write Python code, create scripts with uv, build web apps with Django/Flask/FastAPI, debug Python errors, set up type checking (mypy/pyright), configure ruff, manage packaging or dependencies, write tests with pytest, or asks about Python best practices, async patterns, or modern 3.12+ idioms. Covers uv-based scripting, uv project workflow, Django, Flask, FastAPI, type checking, testing, and supply-chain security.
 ---
 
 # Python Expert
 
-Expert Python guidance across scripting, web frameworks, and production systems.
+Expert Python guidance across scripting, web frameworks, type checking, and project tooling.
 
 ## Important — Read Reference Files First
 
@@ -13,52 +13,30 @@ Before writing code, load the reference file that matches the user's task:
 
 | User wants to... | Read first |
 |---|---|
-| Run a quick script, one-off tool, CLI utility, or use inline dependencies | `references/uv-scripts.md` |
-| Build or modify a Django project (models, views, admin, DRF APIs) | `references/django.md` |
-| Build or modify a Flask or FastAPI project (routes, middleware, APIs) | `references/flask-fastapi.md` |
+| Run a quick script, one-off tool, CLI utility with inline deps | `references/uv-scripts.md` |
+| Set up or manage a uv-based project (init/add/run/sync/lock, pyproject.toml) | `references/uv-projects.md` |
+| Write idiomatic modern Python, async, or avoid common pitfalls | `references/style.md` |
+| Add or improve type checking (mypy/pyright/ty) | `references/type-checking.md` |
+| Build or modify a Django project | `references/django.md` |
+| Build or modify a Flask app | `references/flask.md` |
+| Build or modify a FastAPI service | `references/fastapi.md` |
 
 If none of those match, use the core principles below directly.
 
 ---
 
-## Core Principles (Always Apply)
+## Default Toolchain
 
-### Modern Python Style (3.10+)
+When starting a new Python project, default to:
 
-Write Python that uses current idioms. Avoid legacy patterns.
+- **uv** — environment + dependency management (replaces `venv` + `pip` + `pip-tools` + `pipx`)
+- **ruff** — lint + format (replaces `black`, `isort`, `flake8`, `pylint`, `pyupgrade`). One tool, fast, zero config to start.
+- **pytest** — testing
+- **mypy --strict** (or **pyright**) — static type checking
 
-```python
-# Type hints on all public functions
-def fetch_users(limit: int = 50, active: bool = True) -> list[dict[str, Any]]:
-    ...
+Python baseline: **3.12+** unless the user has a reason to target older. (3.10 and 3.11 are entering EOL; 3.12 unlocks the `type` statement, `@override`, and improved f-string parsing.)
 
-# Dataclasses over manual __init__
-from dataclasses import dataclass, field
-
-@dataclass
-class Config:
-    host: str = "localhost"
-    port: int = 8000
-    tags: list[str] = field(default_factory=list)
-
-# match-case for dispatch
-match command:
-    case "start":
-        start_server()
-    case "stop" | "quit":
-        shutdown()
-    case _:
-        print(f"Unknown: {command}")
-
-# f-strings, never .format() or %
-msg = f"Processing {count:,} items in {elapsed:.2f}s"
-
-# pathlib, never os.path
-from pathlib import Path
-config_path = Path.home() / ".config" / "app" / "settings.toml"
-```
-
-### Project Structure Defaults
+## Project Structure Defaults
 
 When creating a new Python project (not a uv one-off script), use this layout:
 
@@ -77,151 +55,49 @@ project-name/
 
 Use `pyproject.toml` as the single config file. Do not create `setup.py`, `setup.cfg`, or `requirements.txt` unless the user specifically asks for them.
 
-### Error Handling
+## Error Handling Principle
 
-Be specific with exceptions. Never use bare `except:`.
+Be specific with exceptions. Never use bare `except:` or `except Exception:` that silently swallows errors. Catch the narrowest exception type that makes sense, log meaningfully, and re-raise or convert to a domain-specific exception when crossing a boundary.
 
 ```python
-# Good — specific exceptions, useful messages
 try:
     data = json.loads(raw)
 except json.JSONDecodeError as e:
     logger.error("Invalid JSON at line %d: %s", e.lineno, e.msg)
     raise ValueError(f"Could not parse config: {e}") from e
-
-# Good — custom exceptions for domain logic
-class InsufficientFundsError(Exception):
-    def __init__(self, balance: Decimal, amount: Decimal):
-        self.balance = balance
-        self.amount = amount
-        super().__init__(f"Cannot withdraw {amount}: balance is {balance}")
 ```
 
-### Testing with pytest
+## Logging Principle
 
-Default to pytest for all testing. Structure tests to mirror source layout.
-
-```python
-# Use fixtures for shared setup
-import pytest
-
-@pytest.fixture
-def db_session():
-    session = create_test_session()
-    yield session
-    session.rollback()
-
-# Parametrize for multiple cases
-@pytest.mark.parametrize("input,expected", [
-    ("hello", "HELLO"),
-    ("", ""),
-    ("café", "CAFÉ"),
-])
-def test_uppercase(input, expected):
-    assert to_upper(input) == expected
-
-# Use tmp_path for file operations
-def test_export(tmp_path):
-    out = tmp_path / "report.csv"
-    export_report(out)
-    assert out.read_text().startswith("id,name")
-```
-
-### Async Programming
-
-Use async for I/O-bound work. Never use it for CPU-bound work (use multiprocessing instead).
-
-```python
-import asyncio
-import httpx
-
-async def fetch_all(urls: list[str]) -> list[dict]:
-    async with httpx.AsyncClient() as client:
-        tasks = [client.get(url) for url in urls]
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-        return [
-            r.json() for r in responses
-            if not isinstance(r, Exception)
-        ]
-```
-
-Prefer `httpx` over `aiohttp` — it has sync and async APIs with the same interface.
-
-### Dependencies and Packaging
-
-For full projects, use `pyproject.toml`:
-
-```toml
-[project]
-name = "my-project"
-version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = [
-    "httpx>=0.27",
-    "pydantic>=2.0",
-]
-
-[project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff"]
-
-[tool.ruff]
-line-length = 100
-
-[tool.uv]
-exclude-newer = "30 days"
-```
-
-For quick scripts, use uv inline metadata — see `references/uv-scripts.md`.
-
-### Supply Chain Security (uv Projects)
-
-**Always include `exclude-newer = "30 days"` in every uv project.** This is a rolling window that tells uv to ignore any package version published within the last 30 days, protecting against supply chain attacks like the March 2026 litellm compromise (malicious versions were caught and yanked within hours).
-
-Two places to set this — both should be in place:
-
-**`pyproject.toml`** (per-project, committed to git):
-```toml
-[tool.uv]
-exclude-newer = "30 days"
-```
-
-**`~/.config/uv/uv.toml`** (machine-wide fallback, top-level key — no `[tool.uv]` section):
-```toml
-exclude-newer = "30 days"
-```
-
-Important caveats:
-- This only applies to registry packages (PyPI). Git and local path dependencies are not affected.
-- The timestamp is written into `uv.lock` at resolution time. The window doesn't move until you run `uv lock --upgrade` or `uv sync --upgrade`.
-- If a project genuinely needs a package released within the last 30 days, use `exclude-newer-package` to opt that specific package out: `exclude-newer-package = { some-package = false }`.
-
-### Logging (not print)
-
-Use structured logging for anything beyond throwaway scripts:
+Use `logging.getLogger(__name__)`, never `print`, for anything beyond throwaway scripts. Configure once at the entry point:
 
 ```python
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Configure once at entry point
+# At entry point only:
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 ```
 
-### Common Pitfalls to Catch
+## Supply Chain Security
 
-When reviewing or writing Python code, watch for:
+For uv-based projects, always set `exclude-newer = "30 days"` in `pyproject.toml` and `~/.config/uv/uv.toml` to protect against fresh-package supply-chain attacks. See `references/uv-projects.md` for full setup, caveats, and the `exclude-newer-package` opt-out.
 
-- Mutable default arguments (`def f(items=[])` — use `None` + conditional)
-- Late binding closures in loops (use `functools.partial` or default args)
-- Missing `if __name__ == "__main__":` guard in scripts
-- Using `datetime.now()` without timezone (use `datetime.now(timezone.utc)`)
-- Bare `except:` or `except Exception:` swallowing errors silently
-- `os.path` when `pathlib` would be clearer
-- `requests` in async contexts (use `httpx` instead)
+## Shared Rules for Web Frameworks
+
+When building any web app (Django, Flask, or FastAPI):
+
+- Use a factory pattern (Flask), lifespan context (FastAPI), or settings module split (Django) — never global state initialized at import time
+- Separate routes into modules/blueprints/routers once you have more than ~5 endpoints
+- Use environment variables for all configuration (secrets, database URLs, debug flags)
+- Return consistent error response shapes across all endpoints
+- Validate request input early — manually in Flask/Django, via Pydantic in FastAPI
+- Use the framework's test client, never hit a running server in tests
+- For production, use gunicorn (Flask/Django WSGI) or uvicorn with workers (FastAPI/ASGI), never the dev server
 
 ## Troubleshooting Approach
 
@@ -234,4 +110,5 @@ When the user has an error or unexpected behavior:
 5. Verify Python version compatibility (`python --version`)
 6. Check the virtual environment is activated and deps are installed
 7. Use `python -m pytest -x --tb=short` for quick test feedback
-8. Use `ruff check .` for lint issues instead of pylint/flake8 (faster, more modern)
+8. Use `ruff check .` for lint issues (faster and more modern than pylint/flake8)
+9. For type errors, run the project's configured checker (`mypy .` or `pyright .`) and see `references/type-checking.md` for top-error triage
