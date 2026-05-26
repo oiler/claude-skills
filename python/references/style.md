@@ -46,7 +46,7 @@ now = datetime.now(UTC)
 
 # type statement (PEP 695, 3.12+) — for type aliases
 type UserId = int
-type JsonValue = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 
 # @override decorator (3.12+) — catches signature drift in subclasses
 from typing import override
@@ -56,8 +56,6 @@ class JsonRenderer(BaseRenderer):
     def render(self, data: dict) -> str:
         return json.dumps(data)
 
-# f-string debug form (3.8+, easy to forget)
-print(f"{count=} {ratio=:.2%}")  # count=42 ratio=87.50%
 ```
 
 ## Choosing Between Data Containers
@@ -131,7 +129,7 @@ When reviewing or writing Python code, watch for:
 - Mutable default arguments (`def f(items=[])` — use `None` + conditional)
 - Late binding closures in loops (use `functools.partial` or default args)
 - Missing `if __name__ == "__main__":` guard in scripts
-- Using `datetime.now()` without timezone (use `datetime.now(timezone.utc)`)
+- Using `datetime.now()` without timezone (use `datetime.now(UTC)`)
 - Bare `except:` or `except Exception:` swallowing errors silently
 - `os.path` when `pathlib` would be clearer
 - `requests` in async contexts (use `httpx` instead)
