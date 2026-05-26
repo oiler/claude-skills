@@ -20,10 +20,8 @@ Pick one tool per project. Running two leads to conflicting suppressions.
 [tool.mypy]
 python_version = "3.12"
 strict = true
-warn_unused_ignores = true
-warn_redundant_casts = true
-warn_unreachable = true
-disallow_any_generics = true
+warn_unreachable = true   # not included in strict; catches dead branches
+
 # Per-module overrides when integrating with untyped libraries:
 [[tool.mypy.overrides]]
 module = "some_untyped_lib.*"
@@ -132,7 +130,7 @@ def process(x: "HeavyType") -> None: ...
 | `Argument has incompatible type` | Passing wrong type to a function | Check function signature; convert at the boundary |
 | `Missing type parameters for generic type` | Used `list` instead of `list[int]` | Add the parameter — `list[Any]` if you must |
 | `Item "None" of "X \| None" has no attribute "..."` | Forgot None check | Add `if x is not None:` or use `assert x is not None` |
-| `Module has no attribute "..."` | mypy can't find a stub | Install stubs (`types-requests`) or add `ignore_missing_imports` for that module |
+| `Module has no attribute "..."` | Attribute doesn't exist on the module, or stubs are missing/wrong | Check the attribute name first; if the module is untyped, install stubs (`types-<package>`) or add `ignore_missing_imports` for that module |
 | `Returning Any from function declared to return X` | Function returns `Any` (often from untyped lib) | Add explicit cast or fix the upstream type |
 
 ## Key rules
