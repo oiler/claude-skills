@@ -54,7 +54,7 @@ filemtime(get_template_directory() . '/inc/blocks/js/block-name.js')
 
 ```php
 wp_enqueue_script(
-    'block-name',
+    'block-name-block',
     get_template_directory_uri() . '/inc/blocks/js/block-name.js',
     array(
         'wp-blocks',           // Core block functionality
