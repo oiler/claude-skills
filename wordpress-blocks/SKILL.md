@@ -1,6 +1,6 @@
 ---
 name: wordpress-blocks
-description: WordPress custom Gutenberg block development with server-side PHP rendering. Includes block registration patterns, media upload integration, multiple item blocks, proper escaping/sanitization, and editor UI best practices. Maintains separation of concerns where editors control content while developers control design.
+description: WordPress custom Gutenberg block development with server-side PHP rendering and no build toolchain. Use when user asks to build, register, or modify WordPress blocks, work with `register_block_type()`, write a `render_callback`, add a `MediaUpload`/`MediaUploadCheck` image picker, create blocks with repeating items, escape or sanitize block output for WP VIP compliance, set up editor UI with WP components (`TextControl`, `TextareaControl`, `Button`), or enqueue block editor assets. Covers WordPress 6.5+ / PHP 8.1+. Teaches PHP-side `attributes` arrays plus vanilla JS using `wp.element` (no `block.json`, no JSX, no `@wordpress/scripts`).
 ---
 
 # WordPress Custom Gutenberg Blocks
@@ -26,7 +26,20 @@ Build custom Gutenberg blocks for WordPress themes that give content editors con
 - Reduced risk of breaking layouts
 - Cleaner, more maintainable codebase
 
-## Block File Structure
+## Platform baseline
+
+This skill assumes **WordPress 6.5+** and **PHP 8.1+**. WP 6.5 (April 2024) is the right cutoff for blocks work in 2026 — earlier releases miss block-editor APIs this skill relies on. PHP 8.1+ is required by WP 6.5 itself and unlocks readonly properties, enums, and `never` return types if your render functions want them.
+
+## Routing — read the right reference
+
+| User wants to... | Read first |
+|---|---|
+| Add or change attribute types (text, number, textarea, boolean) | [references/attributes.md](references/attributes.md) |
+| Add an image picker to a block | [references/media-upload.md](references/media-upload.md) |
+| Build a block with repeating items (multiple cards, list items) | [references/multiple-items.md](references/multiple-items.md) |
+| Audit escaping, sanitization, asset paths, or JS deps for VIP | [references/security.md](references/security.md) |
+
+## Block file structure
 
 Each block consists of three files:
 
@@ -45,7 +58,9 @@ inc/blocks/
 require get_template_directory() . '/inc/blocks/hp-lede.php';
 ```
 
-## Basic Block Template
+## Minimal block template
+
+A complete copy-pasteable starting point. Escape at the echo site, not at variable assignment — see [security.md](references/security.md) for the full rationale.
 
 ### PHP Registration File
 
@@ -79,17 +94,16 @@ function register_block_name_block() {
 add_action('init', 'register_block_name_block');
 
 function render_block_name_block($attributes) {
-    // Sanitize and escape all attributes
-    $block_title = isset($attributes['blockTitle']) ? esc_html($attributes['blockTitle']) : '';
-    $block_description = isset($attributes['blockDescription']) ? esc_html($attributes['blockDescription']) : '';
-    $block_link = isset($attributes['blockLink']) ? esc_url($attributes['blockLink']) : '';
-    
+    $block_title = $attributes['blockTitle'] ?? '';
+    $block_description = $attributes['blockDescription'] ?? '';
+    $block_link = $attributes['blockLink'] ?? '';
+
     ob_start();
     ?>
     <section class="block-name">
-        <h2><?php echo $block_title; ?></h2>
-        <p><?php echo $block_description; ?></p>
-        <a href="<?php echo $block_link; ?>" class="button">Learn More</a>
+        <h2><?php echo esc_html($block_title); ?></h2>
+        <p><?php echo esc_html($block_description); ?></p>
+        <a href="<?php echo esc_url($block_link); ?>" class="button">Learn More</a>
     </section>
     <?php
     return ob_get_clean();
@@ -99,7 +113,7 @@ function enqueue_block_name_block_editor_assets() {
     wp_enqueue_script(
         'block-name-block',
         get_template_directory_uri() . '/inc/blocks/js/block-name.js',
-        array('wp-blocks', 'wp-element', 'wp-editor', 'wp-components'),
+        array('wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components'),
         filemtime(get_template_directory() . '/inc/blocks/js/block-name.js'),
         false
     );
@@ -139,12 +153,12 @@ add_action('enqueue_block_editor_assets', 'enqueue_block_name_block_editor_asset
         edit: function(props) {
             const { attributes, setAttributes } = props;
 
-            return el('div', { 
+            return el('div', {
                 className: 'block-name-editor',
                 style: { padding: '20px', border: '1px solid #ddd' }
             },
                 el('h3', {}, 'Block Name'),
-                
+
                 el(TextControl, {
                     label: 'Block Title',
                     value: attributes.blockTitle,
@@ -152,7 +166,7 @@ add_action('enqueue_block_editor_assets', 'enqueue_block_name_block_editor_asset
                         setAttributes({ blockTitle: value });
                     }
                 }),
-                
+
                 el(TextareaControl, {
                     label: 'Description',
                     value: attributes.blockDescription,
@@ -161,7 +175,7 @@ add_action('enqueue_block_editor_assets', 'enqueue_block_name_block_editor_asset
                     },
                     rows: 4
                 }),
-                
+
                 el(TextControl, {
                     label: 'Link',
                     value: attributes.blockLink,
@@ -179,310 +193,7 @@ add_action('enqueue_block_editor_assets', 'enqueue_block_name_block_editor_asset
 })(window.wp);
 ```
 
-## Common Attribute Types
-
-### Text Fields
-
-**PHP:**
-```php
-'textField' => array(
-    'type' => 'string',
-    'default' => 'Default text'
-),
-```
-
-**JavaScript:**
-```javascript
-el(TextControl, {
-    label: 'Text Field',
-    value: attributes.textField,
-    onChange: function(value) {
-        setAttributes({ textField: value });
-    }
-})
-```
-
-### Textarea Fields
-
-**PHP:**
-```php
-'textareaField' => array(
-    'type' => 'string',
-    'default' => 'Default longer text'
-),
-```
-
-**JavaScript:**
-```javascript
-el(TextareaControl, {
-    label: 'Textarea Field',
-    value: attributes.textareaField,
-    onChange: function(value) {
-        setAttributes({ textareaField: value });
-    },
-    rows: 6
-})
-```
-
-### Number Fields
-
-**PHP:**
-```php
-'numberField' => array(
-    'type' => 'number',
-    'default' => 0
-),
-```
-
-**JavaScript:**
-```javascript
-el(TextControl, {
-    label: 'Number Field',
-    type: 'number',
-    value: attributes.numberField,
-    onChange: function(value) {
-        setAttributes({ numberField: parseInt(value) });
-    }
-})
-```
-
-## Media Uploader Pattern
-
-### Image Upload Attributes
-
-**PHP:**
-```php
-'imageId' => array(
-    'type' => 'number',
-    'default' => 0
-),
-'imageUrl' => array(
-    'type' => 'string',
-    'default' => ''
-),
-```
-
-### Image Upload in JavaScript
-
-```javascript
-const { MediaUpload, MediaUploadCheck } = wp.blockEditor;
-const { Button } = wp.components;
-
-// In edit function:
-el(MediaUploadCheck, {},
-    el(MediaUpload, {
-        onSelect: function(media) {
-            setAttributes({
-                imageId: media.id,
-                imageUrl: media.url
-            });
-        },
-        allowedTypes: ['image'],
-        value: attributes.imageId,
-        render: function(obj) {
-            return el('div', { className: 'media-upload-wrapper' },
-                attributes.imageUrl ? 
-                    el('div', {},
-                        el('img', {
-                            src: attributes.imageUrl,
-                            style: { maxWidth: '200px', display: 'block', marginBottom: '10px' }
-                        }),
-                        el(Button, {
-                            onClick: obj.open,
-                            className: 'button'
-                        }, 'Change Image'),
-                        el(Button, {
-                            onClick: function() {
-                                setAttributes({
-                                    imageId: 0,
-                                    imageUrl: ''
-                                });
-                            },
-                            className: 'button',
-                            style: { marginLeft: '10px' }
-                        }, 'Remove')
-                    ) :
-                    el(Button, {
-                        onClick: obj.open,
-                        className: 'button button-primary'
-                    }, 'Upload Image')
-            );
-        }
-    })
-)
-```
-
-### Image Rendering in PHP
-
-```php
-// Get image URL from ID
-$image_url = '';
-if (isset($attributes['imageId']) && $attributes['imageId']) {
-    $image_url = wp_get_attachment_image_url(absint($attributes['imageId']), 'full');
-} elseif (isset($attributes['imageUrl'])) {
-    $image_url = esc_url($attributes['imageUrl']);
-}
-
-// Render in template
-<?php if ($image_url) : ?>
-    <img src="<?php echo esc_url($image_url); ?>" alt="" class="block-image">
-<?php endif; ?>
-```
-
-## Multiple Item Blocks Pattern
-
-For blocks with repeating items:
-
-### PHP Attributes for Multiple Items
-
-```php
-'attributes' => array(
-    'blockTitle' => array(
-        'type' => 'string',
-        'default' => 'Additional Resources'
-    ),
-    // Item 1
-    'item1ImageId' => array('type' => 'number', 'default' => 0),
-    'item1ImageUrl' => array('type' => 'string', 'default' => ''),
-    'item1Header' => array('type' => 'string', 'default' => 'Item 1 Title'),
-    'item1Subhead' => array('type' => 'string', 'default' => 'Item 1 description'),
-    'item1Link' => array('type' => 'string', 'default' => '/item-1/'),
-    // Item 2
-    'item2ImageId' => array('type' => 'number', 'default' => 0),
-    'item2ImageUrl' => array('type' => 'string', 'default' => ''),
-    'item2Header' => array('type' => 'string', 'default' => 'Item 2 Title'),
-    'item2Subhead' => array('type' => 'string', 'default' => 'Item 2 description'),
-    'item2Link' => array('type' => 'string', 'default' => '/item-2/'),
-    // Item 3
-    'item3ImageId' => array('type' => 'number', 'default' => 0),
-    'item3ImageUrl' => array('type' => 'string', 'default' => ''),
-    'item3Header' => array('type' => 'string', 'default' => 'Item 3 Title'),
-    'item3Subhead' => array('type' => 'string', 'default' => 'Item 3 description'),
-    'item3Link' => array('type' => 'string', 'default' => '/item-3/'),
-),
-```
-
-### Helper Function for Media Uploaders
-
-```javascript
-function renderMediaUpload(itemNum) {
-    const imageIdAttr = 'item' + itemNum + 'ImageId';
-    const imageUrlAttr = 'item' + itemNum + 'ImageUrl';
-    
-    return el(MediaUploadCheck, {},
-        el(MediaUpload, {
-            onSelect: function(media) {
-                const attrs = {};
-                attrs[imageIdAttr] = media.id;
-                attrs[imageUrlAttr] = media.url;
-                setAttributes(attrs);
-            },
-            allowedTypes: ['image'],
-            value: attributes[imageIdAttr],
-            render: function(obj) {
-                return el('div', { className: 'media-upload-wrapper' },
-                    attributes[imageUrlAttr] ? 
-                        el('div', {},
-                            el('img', {
-                                src: attributes[imageUrlAttr],
-                                style: { maxWidth: '200px', display: 'block', marginBottom: '10px' }
-                            }),
-                            el(Button, {
-                                onClick: obj.open,
-                                className: 'button'
-                            }, 'Change Image'),
-                            el(Button, {
-                                onClick: function() {
-                                    const attrs = {};
-                                    attrs[imageIdAttr] = 0;
-                                    attrs[imageUrlAttr] = '';
-                                    setAttributes(attrs);
-                                },
-                                className: 'button',
-                                style: { marginLeft: '10px' }
-                            }, 'Remove')
-                        ) :
-                        el(Button, {
-                            onClick: obj.open,
-                            className: 'button button-primary'
-                        }, 'Upload Image')
-                );
-            }
-        })
-    );
-}
-
-// Use in edit function:
-el('h4', {}, 'Item 1'),
-renderMediaUpload(1),
-el(TextControl, {
-    label: 'Header',
-    value: attributes.item1Header,
-    onChange: function(value) {
-        setAttributes({ item1Header: value });
-    }
-}),
-// ... more fields
-```
-
-## WordPress VIP Compliance for Blocks
-
-### Always Escape Output in PHP
-
-```php
-// Text
-$title = isset($attributes['title']) ? esc_html($attributes['title']) : '';
-
-// Attributes
-$class = isset($attributes['className']) ? esc_attr($attributes['className']) : '';
-
-// URLs
-$link = isset($attributes['link']) ? esc_url($attributes['link']) : '';
-
-// Multi-paragraph text (preserves formatting)
-$description = isset($attributes['description']) ? wp_kses_post(wpautop($attributes['description'])) : '';
-```
-
-### Always Sanitize in PHP
-
-```php
-// Integers (for image IDs, etc.)
-$image_id = isset($attributes['imageId']) ? absint($attributes['imageId']) : 0;
-
-// Numbers
-$count = isset($attributes['count']) ? intval($attributes['count']) : 0;
-```
-
-### Proper Asset Paths
-
-```php
-// CORRECT:
-get_template_directory_uri() . '/inc/blocks/js/block-name.js'
-get_template_directory_uri() . '/assets/img/site/hero.jpg'
-
-// Use filemtime for cache busting
-filemtime(get_template_directory() . '/inc/blocks/js/block-name.js')
-```
-
-### Required JavaScript Dependencies
-
-```php
-wp_enqueue_script(
-    'block-name',
-    get_template_directory_uri() . '/inc/blocks/js/block-name.js',
-    array(
-        'wp-blocks',      // Core block functionality
-        'wp-element',     // React elements
-        'wp-editor',      // Editor components
-        'wp-components',  // UI components
-        'wp-block-editor' // For MediaUpload
-    ),
-    filemtime(get_template_directory() . '/inc/blocks/js/block-name.js'),
-    false // Load in header for editor
-);
-```
-
-## Block Icons
+## Block icons
 
 Common Dashicons for blocks:
 
@@ -497,12 +208,12 @@ icon: 'awards'          // Achievement
 icon: 'media-document'  // Article
 ```
 
-## Editor Styling Tips
+## Editor styling tips
 
 ### Add Visual Hierarchy in Editor
 
 ```javascript
-el('div', { 
+el('div', {
     className: 'block-editor',
     style: { padding: '20px', border: '1px solid #ddd' }
 },
@@ -525,233 +236,9 @@ el('div', { style: { marginTop: '15px', padding: '10px', backgroundColor: '#f0f0
 )
 ```
 
-## Complete Block Example
+## A note on block.json
 
-**HP Lede Block with Image, Text, and CTA:**
-
-### PHP File: `/inc/blocks/hp-lede.php`
-
-```php
-<?php
-/**
- * HP Lede Block
- */
-
-function register_hp_lede_block() {
-    register_block_type('theme/hp-lede', array(
-        'render_callback' => 'render_hp_lede_block',
-        'attributes' => array(
-            'ledeHeader' => array(
-                'type' => 'string',
-                'default' => ''
-            ),
-            'ledeSubhed' => array(
-                'type' => 'string',
-                'default' => ''
-            ),
-            'box1Title' => array(
-                'type' => 'string',
-                'default' => ''
-            ),
-            'box1Cta' => array(
-                'type' => 'string',
-                'default' => ''
-            ),
-            'box1Link' => array(
-                'type' => 'string',
-                'default' => ''
-            ),
-            'box2Title' => array(
-                'type' => 'string',
-                'default' => ''
-            ),
-            'box2Cta' => array(
-                'type' => 'string',
-                'default' => ''
-            ),
-            'box2Link' => array(
-                'type' => 'string',
-                'default' => ''
-            ),
-        ),
-    ));
-}
-add_action('init', 'register_hp_lede_block');
-
-function render_hp_lede_block($attributes) {
-    $lede_header = isset($attributes['ledeHeader']) ? esc_html($attributes['ledeHeader']) : '';
-    $lede_subhed = isset($attributes['ledeSubhed']) ? esc_html($attributes['ledeSubhed']) : '';
-    $box1_title = isset($attributes['box1Title']) ? esc_html($attributes['box1Title']) : '';
-    $box1_cta = isset($attributes['box1Cta']) ? esc_html($attributes['box1Cta']) : '';
-    $box1_link = isset($attributes['box1Link']) ? esc_url($attributes['box1Link']) : '';
-    $box2_title = isset($attributes['box2Title']) ? esc_html($attributes['box2Title']) : '';
-    $box2_cta = isset($attributes['box2Cta']) ? esc_html($attributes['box2Cta']) : '';
-    $box2_link = isset($attributes['box2Link']) ? esc_url($attributes['box2Link']) : '';
-    
-    $hero_image = get_template_directory_uri() . '/assets/img/site/hero-image-2.jpg';
-    
-    ob_start();
-    ?>
-    <section class="fullwidth-container page-home home-hero bg-yellow">
-        <div class="lede-image">
-            <img class="image" src="<?php echo esc_url($hero_image); ?>" alt="">
-        </div>
-        <div class="home-hero-text-container">
-            <div class="home-hero-text">
-                <h3 class="page-title"><?php echo $lede_header; ?></h3>
-                <p class="page-subtitle"><?php echo $lede_subhed; ?></p>
-            </div>
-            <div class="home-hero-box-container">
-                <a href="<?php echo $box1_link; ?>" class="home-lede-box box-1">
-                    <h2><?php echo $box1_title; ?></h2>
-                    <button class="button primary rounded red"><?php echo $box1_cta; ?></button>
-                </a>
-                <a href="<?php echo $box2_link; ?>" class="home-lede-box box-2">
-                    <h2><?php echo $box2_title; ?></h2>
-                    <button class="button primary rounded white"><?php echo $box2_cta; ?></button>
-                </a>
-            </div>
-        </div>
-    </section>
-    <?php
-    return ob_get_clean();
-}
-
-function enqueue_hp_lede_block_editor_assets() {
-    wp_enqueue_script(
-        'hp-lede-block',
-        get_template_directory_uri() . '/inc/blocks/js/hp-lede.js',
-        array('wp-blocks', 'wp-element', 'wp-editor', 'wp-components'),
-        filemtime(get_template_directory() . '/inc/blocks/js/hp-lede.js'),
-        false
-    );
-}
-add_action('enqueue_block_editor_assets', 'enqueue_hp_lede_block_editor_assets');
-```
-
-### JavaScript File: `/inc/blocks/js/hp-lede.js`
-
-```javascript
-(function(wp) {
-    const { registerBlockType } = wp.blocks;
-    const { TextControl } = wp.components;
-    const { createElement: el } = wp.element;
-
-    registerBlockType('theme/hp-lede', {
-        title: 'HP Lede',
-        icon: 'megaphone',
-        category: 'common',
-        attributes: {
-            ledeHeader: {
-                type: 'string',
-                default: ''
-            },
-            ledeSubhed: {
-                type: 'string',
-                default: ''
-            },
-            box1Title: {
-                type: 'string',
-                default: ''
-            },
-            box1Cta: {
-                type: 'string',
-                default: ''
-            },
-            box1Link: {
-                type: 'string',
-                default: ''
-            },
-            box2Title: {
-                type: 'string',
-                default: ''
-            },
-            box2Cta: {
-                type: 'string',
-                default: ''
-            },
-            box2Link: {
-                type: 'string',
-                default: ''
-            }
-        },
-
-        edit: function(props) {
-            const { attributes, setAttributes } = props;
-
-            return el('div', { className: 'hp-lede-editor' },
-                el('h3', {}, 'HP Lede Block'),
-                
-                el('h4', {}, 'Header Section'),
-                el(TextControl, {
-                    label: 'Lede Header',
-                    value: attributes.ledeHeader,
-                    onChange: function(value) {
-                        setAttributes({ ledeHeader: value });
-                    }
-                }),
-                el(TextControl, {
-                    label: 'Lede Subhed',
-                    value: attributes.ledeSubhed,
-                    onChange: function(value) {
-                        setAttributes({ ledeSubhed: value });
-                    }
-                }),
-                
-                el('h4', {}, 'Box 1'),
-                el(TextControl, {
-                    label: 'Box 1 Title',
-                    value: attributes.box1Title,
-                    onChange: function(value) {
-                        setAttributes({ box1Title: value });
-                    }
-                }),
-                el(TextControl, {
-                    label: 'Box 1 CTA Text',
-                    value: attributes.box1Cta,
-                    onChange: function(value) {
-                        setAttributes({ box1Cta: value });
-                    }
-                }),
-                el(TextControl, {
-                    label: 'Box 1 Link',
-                    value: attributes.box1Link,
-                    onChange: function(value) {
-                        setAttributes({ box1Link: value });
-                    }
-                }),
-                
-                el('h4', {}, 'Box 2'),
-                el(TextControl, {
-                    label: 'Box 2 Title',
-                    value: attributes.box2Title,
-                    onChange: function(value) {
-                        setAttributes({ box2Title: value });
-                    }
-                }),
-                el(TextControl, {
-                    label: 'Box 2 CTA Text',
-                    value: attributes.box2Cta,
-                    onChange: function(value) {
-                        setAttributes({ box2Cta: value });
-                    }
-                }),
-                el(TextControl, {
-                    label: 'Box 2 Link',
-                    value: attributes.box2Link,
-                    onChange: function(value) {
-                        setAttributes({ box2Link: value });
-                    }
-                })
-            );
-        },
-
-        save: function() {
-            return null;
-        }
-    });
-})(window.wp);
-```
+`block.json` is WordPress's canonical modern manifest for registering blocks. This skill teaches the PHP-only `register_block_type()` approach because it requires no build toolchain — no `@wordpress/scripts`, no JSX, no npm. If your project already uses `@wordpress/scripts` or you want JSX, see the [WordPress block-editor handbook](https://developer.wordpress.org/block-editor/reference-guides/block-api/block-metadata/) — this skill doesn't cover that path.
 
 ## Quick Reference
 
@@ -762,8 +249,8 @@ add_action('enqueue_block_editor_assets', 'enqueue_hp_lede_block_editor_assets')
 - [ ] Block registered with `register_block_type()`
 - [ ] Render callback function created
 - [ ] All attributes defined with types and defaults
-- [ ] All output escaped (`esc_html()`, `esc_url()`, `esc_attr()`)
-- [ ] Editor assets enqueued with dependencies
+- [ ] All output escaped at the echo site (`esc_html()`, `esc_url()`, `esc_attr()`)
+- [ ] Editor assets enqueued with dependencies (including `wp-block-editor` if using `MediaUpload`)
 - [ ] Block added to functions.php includes
 - [ ] Icon and category specified
 - [ ] `save` function returns `null` (using PHP render)
@@ -772,7 +259,7 @@ add_action('enqueue_block_editor_assets', 'enqueue_hp_lede_block_editor_assets')
 
 ```javascript
 const { registerBlockType } = wp.blocks;
-const { TextControl, TextareaControl, Button } = wp.components;
+const { TextControl, TextareaControl, ToggleControl, Button } = wp.components;
 const { MediaUpload, MediaUploadCheck } = wp.blockEditor;
 const { createElement: el } = wp.element;
 ```
@@ -780,9 +267,9 @@ const { createElement: el } = wp.element;
 ### Attribute Type Reference
 
 ```php
-'string' => array('type' => 'string', 'default' => '')
-'number' => array('type' => 'number', 'default' => 0)
+'string'  => array('type' => 'string',  'default' => '')
+'number'  => array('type' => 'number',  'default' => 0)
 'boolean' => array('type' => 'boolean', 'default' => false)
-'array' => array('type' => 'array', 'default' => [])
-'object' => array('type' => 'object', 'default' => {})
+'array'   => array('type' => 'array',   'default' => array())
+'object'  => array('type' => 'object',  'default' => array())
 ```
