@@ -101,3 +101,76 @@ el(TextControl, {
 }),
 // ... more fields
 ```
+
+## Helper Function for Text Fields
+
+Same wrapping pattern for `TextControl`, so the `edit` function isn't a 200-line wall of repetitive control declarations.
+
+```javascript
+function renderItemTextField(itemNum, fieldName, label) {
+    const attrKey = 'item' + itemNum + fieldName;
+
+    return el(TextControl, {
+        label: label,
+        value: attributes[attrKey],
+        onChange: function(value) {
+            const attrs = {};
+            attrs[attrKey] = value;
+            setAttributes(attrs);
+        }
+    });
+}
+
+// Use in edit function:
+el('h4', {}, 'Item 1'),
+renderMediaUpload(1),
+renderItemTextField(1, 'Header', 'Header'),
+renderItemTextField(1, 'Subhead', 'Description'),
+renderItemTextField(1, 'Link', 'Link URL'),
+
+el('h4', {}, 'Item 2'),
+renderMediaUpload(2),
+renderItemTextField(2, 'Header', 'Header'),
+// ...
+```
+
+`fieldName` is the PascalCase tail used in the attribute key (`itemNHeader` → pass `'Header'`). `label` is the user-facing string shown in the editor sidebar.
+
+## PHP Render: Loop Over Items
+
+Don't copy-paste the same render block per item. Use a `foreach` over the item indexes:
+
+```php
+function render_resources_block($attributes) {
+    ob_start();
+    ?>
+    <section class="resources">
+        <h2><?php echo esc_html($attributes['blockTitle'] ?? ''); ?></h2>
+        <div class="resources-grid">
+            <?php foreach ([1, 2, 3] as $i) :
+                $image_id    = absint($attributes['item' . $i . 'ImageId'] ?? 0);
+                $image_url   = $image_id
+                    ? wp_get_attachment_image_url($image_id, 'medium')
+                    : ($attributes['item' . $i . 'ImageUrl'] ?? '');
+                $header      = $attributes['item' . $i . 'Header']  ?? '';
+                $subhead     = $attributes['item' . $i . 'Subhead'] ?? '';
+                $link        = $attributes['item' . $i . 'Link']    ?? '';
+            ?>
+                <a href="<?php echo esc_url($link); ?>" class="resource-card">
+                    <?php if ($image_url) : ?>
+                        <img src="<?php echo esc_url($image_url); ?>" alt="">
+                    <?php endif; ?>
+                    <h3><?php echo esc_html($header); ?></h3>
+                    <p><?php echo esc_html($subhead); ?></p>
+                </a>
+            <?php endforeach; ?>
+        </div>
+    </section>
+    <?php
+    return ob_get_clean();
+}
+```
+
+Escapes happen at every echo site, not at variable assignment. To add a fourth item, change `[1, 2, 3]` to `[1, 2, 3, 4]` and add the matching attribute keys to `register_block_type()`.
+
+For escaping rules in full, see [security.md](security.md).
