@@ -16,7 +16,7 @@ Before writing code, load the reference file that matches the user's task:
 | Run a quick script, one-off tool, CLI utility with inline deps | `references/uv-scripts.md` |
 | Set up or manage a uv-based project (init/add/run/sync/lock, pyproject.toml) | `references/uv-projects.md` |
 | Write idiomatic modern Python, async, or avoid common pitfalls | `references/style.md` |
-| Add or improve type checking (mypy/pyright/ty) | `references/type-checking.md` |
+| Add or improve type checking (mypy/pyright) | `references/type-checking.md` |
 | Build or modify a Django project | `references/django.md` |
 | Build or modify a Flask app | `references/flask.md` |
 | Build or modify a FastAPI service | `references/fastapi.md` |
@@ -34,7 +34,7 @@ When starting a new Python project, default to:
 - **pytest** — testing
 - **mypy --strict** (or **pyright**) — static type checking
 
-Python baseline: **3.12+** unless the user has a reason to target older. (3.10 and 3.11 are entering EOL; 3.12 unlocks the `type` statement, `@override`, and improved f-string parsing.)
+Python baseline: **3.12+** unless the user has a reason to target older. (3.10 reaches EOL October 2026; 3.12 unlocks the `type` statement, `@override`, and improved f-string parsing.)
 
 ## Project Structure Defaults
 
@@ -95,7 +95,7 @@ When building any web app (Django, Flask, or FastAPI):
 - Separate routes into modules/blueprints/routers once you have more than ~5 endpoints
 - Use environment variables for all configuration (secrets, database URLs, debug flags)
 - Return consistent error response shapes across all endpoints
-- Validate request input early — manually in Flask/Django, via Pydantic in FastAPI
+- Validate request input early — via forms or a schema library in Flask/Django, via Pydantic models in FastAPI
 - Use the framework's test client, never hit a running server in tests
 - For production, use gunicorn (Flask/Django WSGI) or uvicorn with workers (FastAPI/ASGI), never the dev server
 
