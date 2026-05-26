@@ -13,6 +13,8 @@ uv run django-admin startproject config .
 uv run python manage.py startapp core
 ```
 
+For lint and formatting, add `ruff` to the project: `uv add --dev ruff`. Configure in `pyproject.toml` with `[tool.ruff]` (defaults are sensible — start minimal).
+
 This gives you a `pyproject.toml`-managed project with uv. The project config lives in `config/` and apps go alongside it:
 
 ```
