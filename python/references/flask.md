@@ -93,7 +93,7 @@ def create_item():
 ## Error Handling
 
 ```python
-# In create_app or a blueprint
+# Inside your create_app() factory:
 @app.errorhandler(404)
 def not_found(e):
     if request.path.startswith("/api/"):
@@ -117,10 +117,21 @@ from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
 
-def create_app():
+# Inside your create_app() factory (from above), add:
+def create_app(config=None):
     app = Flask(__name__)
-    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///app.db"
+    app.config.from_mapping(
+        SECRET_KEY="dev",
+        SQLALCHEMY_DATABASE_URI="sqlite:///app.db",
+    )
+    if config:
+        app.config.from_mapping(config)
+
     db.init_app(app)
+
+    from app.routes.main import bp as main_bp
+    app.register_blueprint(main_bp)
+
     return app
 
 # models.py

@@ -145,6 +145,7 @@ async def get_current_user(authorization: str = Header()):
 ## Error Handling
 
 ```python
+# In app/main.py, on the FastAPI() instance:
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -185,7 +186,7 @@ async def test_create_item(client):
     assert resp.json()["name"] == "Widget"
 ```
 
-Use `pytest-anyio` for async test support. Add to `pyproject.toml`:
+Use `anyio` for async test support (it ships its own pytest plugin — don't install `pytest-anyio`, which is a stub package). Add to `pyproject.toml`:
 
 ```toml
 [tool.pytest.ini_options]
