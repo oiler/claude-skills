@@ -1,5 +1,7 @@
 # Sass Workflow
 
+> For general Sass language reference (modern features, nesting, layers), see the `sass` skill. This file covers the WordPress-theme dart-sass workflow specifically.
+
 dart-sass via Homebrew for compiling a classic WordPress theme's SCSS. Watch mode for development, compressed builds for production, plus a helper function for per-page stylesheets.
 
 ## Setup (dart-sass via Homebrew)
@@ -36,3 +38,7 @@ sassp() {
   fi
 }
 ```
+
+## Why dart-sass + Homebrew
+
+Skips the node toolchain entirely (no `package.json`, no `node_modules` in a WordPress theme repo). Single binary install via Homebrew, fast compilation, and the `--watch` mode is responsive enough for live editing. dart-sass is the official, maintained Sass implementation; LibSass is deprecated.

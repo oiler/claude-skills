@@ -73,3 +73,7 @@ endif;
 - Always pass array for dependencies (even if empty)
 - Always pass version for cache busting
 - Use `true` for footer loading (better performance)
+
+## Why the version argument matters
+
+The dependencies array is required even when empty — `wp_enqueue_style` and `wp_enqueue_script` both expect it as the third argument. The version (fourth argument) is appended as a query string to the asset URL (e.g., `styles.css?ver=1.4.2`), which is how browsers know to invalidate their cache when the theme's `style.css` Version bumps. Without a version, browsers may serve stale assets indefinitely.

@@ -52,3 +52,7 @@ define( 'CUSTOM_THEME_TEXT_DOMAIN', 'custom-theme' );
 __( 'Read More', CUSTOM_THEME_TEXT_DOMAIN )
 the_content( __( 'Continue reading', CUSTOM_THEME_TEXT_DOMAIN ) );
 ```
+
+## i18n principle
+
+Translations always go through the text domain constant. Never hardcode user-visible strings in PHP templates — even strings that "won't be translated" today. Every `echo`, `print`, or rendered string in a template part should be wrapped in `__()`, `_e()`, or one of the escape variants (`esc_html__`, `esc_html_e`, `esc_attr__`) with `CUSTOM_THEME_TEXT_DOMAIN` as the second argument.

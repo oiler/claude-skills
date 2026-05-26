@@ -1,6 +1,8 @@
 # WordPress VIP Compliance
 
-VIP-compliant escape/sanitize discipline, file-path handling, and the pre-deploy checklist for classic themes.
+> For general OWASP / XSS / CSRF fundamentals, see the `web-security` skill. This file covers WordPress-specific escape/sanitize APIs and the VIP checklist.
+
+VIP-compliant escape/sanitize discipline, file-path handling, and the pre-deploy checklist for classic themes. Targets the WordPress VIP Coding Standards as of 2025.
 
 ## Always Escape Output
 

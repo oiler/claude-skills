@@ -42,7 +42,7 @@ theme-root/
 
 ## functions.php Pattern
 
-Keep functions.php as a clean table of contents with descriptive comments.
+Keep functions.php as a clean table of contents with descriptive comments. The `if ( ! function_exists( ... ) )` wrappers around theme functions are an oiler convention — defensive against re-declaration when a child theme overrides the same function name — not a default-WP requirement. Kept by choice.
 
 ```php
 <?php
