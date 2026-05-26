@@ -32,6 +32,8 @@ This skill assumes **WordPress 6.5+** and **PHP 8.1+**. WP 6.5 (April 2024) is t
 
 ## Routing — read the right reference
 
+**Starting a new block from scratch?** Read the **Minimal block template** section below first, then return here to pick the right reference for what you're adding.
+
 | User wants to... | Read first |
 |---|---|
 | Add or change attribute types (text, number, textarea, boolean) | [references/attributes.md](references/attributes.md) |
@@ -134,7 +136,7 @@ add_action('enqueue_block_editor_assets', 'enqueue_block_name_block_editor_asset
     registerBlockType('theme/block-name', {
         title: 'Block Name',
         icon: 'admin-post',
-        category: 'common',
+        category: 'text',
         attributes: {
             blockTitle: {
                 type: 'string',
@@ -250,7 +252,7 @@ el('div', { style: { marginTop: '15px', padding: '10px', backgroundColor: '#f0f0
 - [ ] Render callback function created
 - [ ] All attributes defined with types and defaults
 - [ ] All output escaped at the echo site (`esc_html()`, `esc_url()`, `esc_attr()`)
-- [ ] Editor assets enqueued with dependencies (including `wp-block-editor` if using `MediaUpload`)
+- [ ] Editor assets enqueued with dependencies (`wp-blocks`, `wp-element`, `wp-block-editor`, `wp-components` — include `wp-block-editor` always; it's required for `MediaUpload` and harmless otherwise)
 - [ ] Block added to functions.php includes
 - [ ] Icon and category specified
 - [ ] `save` function returns `null` (using PHP render)
