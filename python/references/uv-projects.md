@@ -77,13 +77,14 @@ Important caveats:
 
 | Command | Use |
 |---|---|
-| `uv init <name>` | Scaffold a new project with `pyproject.toml`, `src/`, `.python-version` |
+| `uv init --package <name>` | Scaffold a new project with `pyproject.toml`, `src/<name>/`, `.python-version` (src layout). Drop `--package` for a flat app layout with `hello.py` instead. |
 | `uv add <pkg>` | Add a runtime dependency; updates `pyproject.toml` and `uv.lock` |
 | `uv add --dev <pkg>` | Add a development dependency (goes to `[dependency-groups].dev`) |
 | `uv remove <pkg>` | Remove a dependency from both pyproject.toml and lockfile |
 | `uv run <cmd>` | Run a command in the project's venv (creates/syncs the venv if needed) |
 | `uv sync` | Install everything in `uv.lock` into the venv |
-| `uv sync --frozen` | Like `sync` but fail if `uv.lock` is out of date (use in CI) |
+| `uv sync --frozen` | Install from lockfile as-is; skip staleness check (use in production/containers) |
+| `uv sync --locked` | Error if lockfile is out of date with pyproject.toml (use in CI) |
 | `uv lock` | Regenerate the lockfile from `pyproject.toml` constraints |
 | `uv lock --upgrade` | Bump all dependencies to latest allowed versions |
 | `uv lock --upgrade-package <pkg>` | Bump a single package |
@@ -122,8 +123,8 @@ Keep `[project.optional-dependencies]` only for actual installable extras (e.g.,
 | `pip-compile requirements.in` | `uv lock` |
 | `poetry add <pkg>` | `uv add <pkg>` |
 | `poetry install` | `uv sync` |
-| `poetry shell` | `uv run <cmd>` (no shell activation needed) |
+| `poetry shell` | `uv run <cmd>` for one-shot commands; `uv shell` (uv 0.5+) if you specifically want an activated shell prompt |
 | `pipenv install <pkg>` | `uv add <pkg>` |
 | `pipenv install --dev <pkg>` | `uv add --dev <pkg>` |
 
-For a one-shot migration from a `requirements.txt` codebase: `uv init`, then `uv add $(cat requirements.txt | grep -v '^#')`.
+For a one-shot migration from a simple `requirements.txt` (no `-r` includes, no flags, no blank lines), run `uv init` then `uv add $(grep -v '^\s*\(#\|$\)' requirements.txt)`. For anything more complex, use `uv add` per package or `uv pip install -r requirements.txt` as a transition step before locking.
