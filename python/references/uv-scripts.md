@@ -117,6 +117,8 @@ def main(input_file: str, output: str, verbose: bool):
     ...
 ```
 
+If the project is already using FastAPI or Pydantic, prefer `typer` over `click` — same author as FastAPI, Pydantic-based, and shares the same idioms. For non-Pydantic projects, `click` remains the better choice.
+
 ## Common One-Off Script Patterns
 
 ### File processor
@@ -190,16 +192,16 @@ if __name__ == "__main__":
 
 ## Supply Chain Security
 
-For one-off uv scripts there's no `pyproject.toml` to configure. The machine-wide setting in `~/.config/uv/uv.toml` covers them:
+One-off scripts can't carry a `pyproject.toml`, so rely on the machine-wide setting:
 
 ```toml
 # ~/.config/uv/uv.toml
 exclude-newer = "30 days"
 ```
 
-This tells uv to ignore any PyPI package version published within the last 30 days — a rolling window that catches supply chain attacks before they reach your environment. The March 2026 litellm attack (malicious versions live for ~2 hours before yanked) is exactly what this prevents.
+This makes uv ignore any PyPI package version published within the last 30 days — a rolling window that blocks fresh supply-chain attacks (e.g., the March 2026 litellm incident, where malicious versions were live for ~2 hours before being yanked).
 
-Note: this setting only applies to registry (PyPI) packages, not git or local path dependencies.
+For full-project setup (per-project `exclude-newer`, caveats, the `exclude-newer-package` opt-out), see `uv-projects.md`.
 
 ## Key Rules
 
