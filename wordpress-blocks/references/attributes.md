@@ -99,6 +99,7 @@ $show_header = filter_var(
     $attributes['showHeader'] ?? false,
     FILTER_VALIDATE_BOOLEAN
 );
+$title = $attributes['title'] ?? '';
 
 if ($show_header) {
     echo '<h2>' . esc_html($title) . '</h2>';
