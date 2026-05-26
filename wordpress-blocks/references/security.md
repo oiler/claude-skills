@@ -46,11 +46,10 @@ wp_enqueue_script(
     'block-name',
     get_template_directory_uri() . '/inc/blocks/js/block-name.js',
     array(
-        'wp-blocks',      // Core block functionality
-        'wp-element',     // React elements
-        'wp-editor',      // Editor components
-        'wp-components',  // UI components
-        'wp-block-editor' // For MediaUpload
+        'wp-blocks',           // Core block functionality
+        'wp-element',          // React elements
+        'wp-block-editor',     // Block editor components (required for MediaUpload)
+        'wp-components',       // UI components
     ),
     filemtime(get_template_directory() . '/inc/blocks/js/block-name.js'),
     false // Load in header for editor
