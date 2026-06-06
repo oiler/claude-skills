@@ -72,6 +72,8 @@ def locate_transcript():
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
     if not session_id:
         sys.exit("error: CLAUDE_CODE_SESSION_ID is not set; cannot locate the session transcript")
+    # Claude Code encodes cwd as /path/to/dir -> -path-to-dir (each '/' -> '-').
+    # Lossy for paths containing '-', but matches Claude Code's actual directory naming.
     encoded = os.getcwd().replace("/", "-")
     path = Path.home() / ".claude" / "projects" / encoded / f"{session_id}.jsonl"
     if not path.is_file():
@@ -102,7 +104,10 @@ def build_prompts_markdown(prompts):
 
 def main():
     session_id, path = locate_transcript()
-    records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    try:
+        records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    except json.JSONDecodeError as e:
+        sys.exit(f"error: malformed JSONL in transcript: {e}")
     prompts = extract_prompts(records)
     meta = build_metadata(records)
     meta.update({
