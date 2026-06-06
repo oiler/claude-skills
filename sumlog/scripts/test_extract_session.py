@@ -7,6 +7,8 @@ from extract_session import (
     assemble_document,
     resolve_output_path,
     tilde,
+    extract_agents,
+    build_agents_markdown,
 )
 
 
@@ -171,6 +173,70 @@ def test_build_metadata_tildes_home_paths():
     ]
     meta = build_metadata(records)
     assert meta["files_touched"] == ["~/proj/x.py", "/tmp/out.md"]
+
+
+def test_extract_agents_joins_dispatch_and_result():
+    records = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "tu1", "name": "Agent",
+             "input": {"description": "Do X", "subagent_type": "general-purpose",
+                       "model": "haiku", "prompt": "..."}},
+            {"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "ls"}}]}},
+        # the structured result rides on a user record whose tool_result links via tool_use_id
+        {"type": "user", "toolUseResult": {
+            "status": "completed", "agentId": "aid1", "agentType": "general-purpose",
+            "totalTokens": 14647, "totalToolUseCount": 4, "totalDurationMs": 10806},
+         "message": {"content": [{"type": "tool_result", "tool_use_id": "tu1", "content": "done"}]}},
+    ]
+    agents = extract_agents(records)
+    assert len(agents) == 1  # the Bash tool_use is not an agent
+    a = agents[0]
+    assert a["label"] == "Do X"
+    assert a["agent_type"] == "general-purpose"
+    assert a["model"] == "haiku"
+    assert a["status"] == "completed"
+    assert a["tokens"] == 14647
+    assert a["tool_uses"] == 4
+    assert a["duration_ms"] == 10806
+
+
+def test_extract_agents_dispatch_without_result():
+    records = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "tu9", "name": "Agent",
+             "input": {"description": "Pending", "subagent_type": "general-purpose"}}]}},
+    ]
+    agents = extract_agents(records)
+    assert len(agents) == 1
+    assert agents[0]["status"] == "(no result)"
+    assert agents[0]["model"] == "inherit"  # no model in input -> inherited
+    assert agents[0]["tokens"] == 0
+
+
+def test_build_agents_markdown_empty_is_blank():
+    assert build_agents_markdown([]) == ""
+
+
+def test_build_agents_markdown_table_and_totals():
+    agents = [
+        {"label": "Do X", "agent_type": "general-purpose", "model": "haiku",
+         "status": "completed", "tokens": 14647, "tool_uses": 4, "duration_ms": 10806},
+        {"label": "Do Y", "agent_type": "general-purpose", "model": "sonnet",
+         "status": "completed", "tokens": 2000, "tool_uses": 1, "duration_ms": 500},
+    ]
+    md = build_agents_markdown(agents)
+    assert md.startswith("## Agents Dispatched\n")
+    assert "| 1 | Do X | general-purpose | haiku | completed | 14,647 | 4 | 10.8s |" in md
+    assert "| 2 | Do Y | general-purpose | sonnet | completed | 2,000 | 1 | 0.5s |" in md
+    assert "2 agents" in md
+    assert "16,647" in md  # total subagent tokens
+
+
+def test_build_agents_markdown_escapes_pipe_in_label():
+    agents = [{"label": "a | b", "agent_type": "x", "model": "haiku",
+               "status": "completed", "tokens": 1, "tool_uses": 0, "duration_ms": 0}]
+    md = build_agents_markdown(agents)
+    assert "a \\| b" in md  # pipe escaped so it doesn't break the table
 
 
 def test_resolve_output_path_collision_suffix(tmp_path):

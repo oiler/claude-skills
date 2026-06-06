@@ -67,6 +67,65 @@ def build_metadata(records):
     return {"tools_used": dict(tools), "files_touched": files}
 
 
+def _agent_result_map(records):
+    """Map each tool_use id to its structured toolUseResult (rides on the tool_result record)."""
+    results = {}
+    for r in records:
+        result = r.get("toolUseResult")
+        if not isinstance(result, dict):
+            continue
+        for b in r.get("message", {}).get("content", []) if isinstance(r.get("message"), dict) else []:
+            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id"):
+                results[b["tool_use_id"]] = result
+    return results
+
+
+def extract_agents(records):
+    """Each Agent dispatch, joined with its result: label, type, model, status, and rollup stats."""
+    results = _agent_result_map(records)
+    agents = []
+    for r in records:
+        if r.get("type") != "assistant":
+            continue
+        for b in r.get("message", {}).get("content", []):
+            if not isinstance(b, dict) or b.get("type") != "tool_use" or b.get("name") != "Agent":
+                continue
+            inp = b.get("input", {})
+            res = results.get(b.get("id"), {})
+            agents.append({
+                "label": inp.get("description", "(no label)"),
+                "agent_type": res.get("agentType") or inp.get("subagent_type", "?"),
+                "model": inp.get("model") or "inherit",
+                "status": res.get("status", "(no result)"),
+                "tokens": res.get("totalTokens", 0),
+                "tool_uses": res.get("totalToolUseCount", 0),
+                "duration_ms": res.get("totalDurationMs", 0),
+            })
+    return agents
+
+
+def build_agents_markdown(agents):
+    """Render dispatched subagents as a table with a totals line, or '' if there were none."""
+    if not agents:
+        return ""
+    lines = [
+        "## Agents Dispatched",
+        "",
+        "| # | Label | Type | Model | Status | Tokens | Tools | Duration |",
+        "|---|-------|------|-------|--------|--------|-------|----------|",
+    ]
+    total_tokens = 0
+    for i, a in enumerate(agents, 1):
+        label = str(a["label"]).replace("|", "\\|")
+        total_tokens += a["tokens"]
+        lines.append(
+            f"| {i} | {label} | {a['agent_type']} | {a['model']} | {a['status']} | "
+            f"{a['tokens']:,} | {a['tool_uses']} | {a['duration_ms'] / 1000:.1f}s |"
+        )
+    lines += ["", f"_{len(agents)} agents, {total_tokens:,} subagent tokens total._"]
+    return "\n".join(lines)
+
+
 def extract_prompts(records):
     """Genuine human-typed prompts, in order, verbatim (system-reminders stripped)."""
     prompts = []
@@ -139,15 +198,29 @@ def render_metadata_yaml(meta):
     return "\n".join(lines)
 
 
-def assemble_document(slug, summary, prompts_markdown, meta, handoff_text):
+def assemble_document(slug, summary, prompts_markdown, meta, handoff_text, agents_markdown=""):
     """Build the complete session-log markdown. prompts_markdown is spliced byte-exact."""
-    return (
-        f"# Session Log — {meta['date']} — {slug}\n\n"
-        f"## Summary\n\n{summary.strip()}\n\n"
-        f"{prompts_markdown.rstrip(chr(10))}\n\n"
-        f"## Handoff State\n\n"
-        f"```yaml\n{render_metadata_yaml(meta)}\n{handoff_text.strip()}\n```\n"
-    )
+    parts = [
+        f"# Session Log — {meta['date']} — {slug}",
+        "",
+        "## Summary",
+        "",
+        summary.strip(),
+        "",
+        prompts_markdown.rstrip("\n"),
+        "",
+    ]
+    if agents_markdown.strip():
+        parts += [agents_markdown.rstrip("\n"), ""]
+    parts += [
+        "## Handoff State",
+        "",
+        "```yaml",
+        render_metadata_yaml(meta),
+        handoff_text.strip(),
+        "```",
+    ]
+    return "\n".join(parts) + "\n"
 
 
 def resolve_output_path(slug, date, base_dir=Path("docs/session-logs")):
@@ -169,6 +242,7 @@ def load_session():
     except json.JSONDecodeError as e:
         sys.exit(f"error: malformed JSONL in transcript: {e}")
     prompts = extract_prompts(records)
+    agents = extract_agents(records)
     meta = build_metadata(records)
     meta.update({
         "session_id": session_id,
@@ -177,7 +251,7 @@ def load_session():
         "git_branch": _git_branch(),
         "prompt_count": len(prompts),
     })
-    return build_prompts_markdown(prompts), meta
+    return build_prompts_markdown(prompts), build_agents_markdown(agents), meta
 
 
 def main(argv=None):
@@ -192,10 +266,14 @@ def main(argv=None):
     parser.add_argument("--out", help="Explicit output path (overrides docs/session-logs/<date>-<slug>.md).")
     args = parser.parse_args(argv)
 
-    prompts_markdown, meta = load_session()
+    prompts_markdown, agents_markdown, meta = load_session()
 
     if not args.assemble:
-        print(json.dumps({"prompts_markdown": prompts_markdown, "metadata": meta}, indent=2))
+        print(json.dumps({
+            "prompts_markdown": prompts_markdown,
+            "agents_markdown": agents_markdown,
+            "metadata": meta,
+        }, indent=2))
         return
 
     missing = [flag for flag, value in (
@@ -208,7 +286,7 @@ def main(argv=None):
 
     summary = Path(args.summary_file).read_text()
     handoff_text = Path(args.handoff_file).read_text()
-    doc = assemble_document(args.slug, summary, prompts_markdown, meta, handoff_text)
+    doc = assemble_document(args.slug, summary, prompts_markdown, meta, handoff_text, agents_markdown)
     out = Path(args.out) if args.out else resolve_output_path(args.slug, meta["date"])
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(doc)
