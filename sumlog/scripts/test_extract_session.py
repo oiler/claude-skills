@@ -1,9 +1,12 @@
+from pathlib import Path
+
 from extract_session import (
     extract_prompts,
     build_metadata,
     render_metadata_yaml,
     assemble_document,
     resolve_output_path,
+    tilde,
 )
 
 
@@ -146,6 +149,28 @@ def test_assemble_document_structure_and_verbatim_prompts():
     assert "session_id: abc\n" in doc
     assert "goal: ship it" in doc
     assert doc.endswith("```\n")
+
+
+def test_tilde_shorthands_home_paths():
+    home = str(Path.home())
+    assert tilde(home + "/files/x.py") == "~/files/x.py"
+    assert tilde(home) == "~"
+    # paths outside $HOME are left absolute (cannot be shorthanded)
+    assert tilde("/tmp/x") == "/tmp/x"
+    assert tilde("/var/data") == "/var/data"
+    # a sibling dir that merely shares the home prefix string must not be rewritten
+    assert tilde(home + "-backup/x") == home + "-backup/x"
+
+
+def test_build_metadata_tildes_home_paths():
+    home = str(Path.home())
+    records = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Read", "input": {"file_path": home + "/proj/x.py"}},
+            {"type": "tool_use", "name": "Write", "input": {"file_path": "/tmp/out.md"}}]}},
+    ]
+    meta = build_metadata(records)
+    assert meta["files_touched"] == ["~/proj/x.py", "/tmp/out.md"]
 
 
 def test_resolve_output_path_collision_suffix(tmp_path):
