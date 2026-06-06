@@ -36,6 +36,16 @@ def _prompt_text(content):
 FILE_TOOLS = {"Read", "Write", "Edit", "NotebookEdit"}
 
 
+def tilde(path):
+    """Replace a leading $HOME with ~ for portability/privacy; leave non-home paths absolute."""
+    home = str(Path.home())
+    if path == home:
+        return "~"
+    if path.startswith(home + "/"):
+        return "~" + path[len(home):]
+    return path
+
+
 def build_metadata(records):
     """Tool-use counts and de-duplicated file paths touched, from assistant tool_use blocks."""
     tools = Counter()
@@ -50,8 +60,10 @@ def build_metadata(records):
             tools[name] += 1
             if name in FILE_TOOLS:
                 fp = b.get("input", {}).get("file_path")
-                if fp and fp not in files:
-                    files.append(fp)
+                if fp:
+                    fp = tilde(fp)
+                    if fp not in files:
+                        files.append(fp)
     return {"tools_used": dict(tools), "files_touched": files}
 
 
@@ -161,7 +173,7 @@ def load_session():
     meta.update({
         "session_id": session_id,
         "date": datetime.now().strftime("%Y-%m-%d"),
-        "cwd": os.getcwd(),
+        "cwd": tilde(os.getcwd()),
         "git_branch": _git_branch(),
         "prompt_count": len(prompts),
     })
