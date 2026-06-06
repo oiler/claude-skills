@@ -9,6 +9,8 @@ from extract_session import (
     tilde,
     extract_agents,
     build_agents_markdown,
+    extract_tasks,
+    build_tasks_markdown,
 )
 
 
@@ -237,6 +239,77 @@ def test_build_agents_markdown_escapes_pipe_in_label():
                "status": "completed", "tokens": 1, "tool_uses": 0, "duration_ms": 0}]
     md = build_agents_markdown(agents)
     assert "a \\| b" in md  # pipe escaped so it doesn't break the table
+
+
+def _create(call_id, task_id, subject, description=""):
+    return [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": call_id, "name": "TaskCreate",
+             "input": {"subject": subject, "description": description}}]}},
+        {"type": "user", "toolUseResult": {"task": {"id": task_id, "subject": subject}},
+         "message": {"content": [{"type": "tool_result", "tool_use_id": call_id, "content": "created"}]}},
+    ]
+
+
+def _update(call_id, task_id, to, success=True, frm="pending"):
+    res = ({"success": True, "taskId": task_id, "statusChange": {"from": frm, "to": to}}
+           if success else {"success": False, "taskId": task_id, "error": "Task not found"})
+    return [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": call_id, "name": "TaskUpdate",
+             "input": {"taskId": task_id, "status": to}}]}},
+        {"type": "user", "toolUseResult": res,
+         "message": {"content": [{"type": "tool_result", "tool_use_id": call_id, "content": "ok"}]}},
+    ]
+
+
+def test_extract_tasks_replays_create_and_update():
+    records = (
+        _create("c1", "1", "Build it", "desc")
+        + _update("u1", "1", "in_progress", frm="pending")
+        + _update("u2", "1", "completed", frm="in_progress")
+    )
+    assert extract_tasks(records) == [{"id": "1", "subject": "Build it", "status": "completed"}]
+
+
+def test_extract_tasks_preserves_creation_order():
+    records = _create("c1", "1", "First") + _create("c2", "2", "Second")
+    assert [t["id"] for t in extract_tasks(records)] == ["1", "2"]
+
+
+def test_extract_tasks_ignores_failed_update():
+    records = _create("c1", "1", "X") + _update("u1", "1", "completed", success=False)
+    # a failed TaskUpdate ("Task not found") must not change status
+    assert extract_tasks(records) == [{"id": "1", "subject": "X", "status": "pending"}]
+
+
+def test_extract_tasks_todowrite_fallback():
+    records = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "TodoWrite", "input": {"todos": [
+                {"content": "A", "status": "completed", "activeForm": "Aing"},
+                {"content": "B", "status": "in_progress", "activeForm": "Bing"}]}}]}},
+    ]
+    assert extract_tasks(records) == [
+        {"id": "1", "subject": "A", "status": "completed"},
+        {"id": "2", "subject": "B", "status": "in_progress"},
+    ]
+
+
+def test_build_tasks_markdown_empty_is_blank():
+    assert build_tasks_markdown([]) == ""
+
+
+def test_build_tasks_markdown_table_and_totals():
+    tasks = [
+        {"id": "1", "subject": "Build it", "status": "completed"},
+        {"id": "2", "subject": "Test it", "status": "in_progress"},
+    ]
+    md = build_tasks_markdown(tasks)
+    assert md.startswith("## Task List\n")
+    assert "| 1 | Build it | completed |" in md
+    assert "| 2 | Test it | in_progress |" in md
+    assert "2 tasks, 1 completed" in md
 
 
 def test_resolve_output_path_collision_suffix(tmp_path):
