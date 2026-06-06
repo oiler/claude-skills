@@ -1,4 +1,4 @@
-from extract_session import extract_prompts
+from extract_session import extract_prompts, build_metadata
 
 
 def test_extract_prompts_keeps_genuine_prompts():
@@ -40,3 +40,18 @@ def test_extract_prompts_joins_multiple_text_blocks():
         ]}},
     ]
     assert extract_prompts(records) == ["first line\nsecond line"]
+
+
+def test_build_metadata_counts_tools_and_dedupes_files():
+    records = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Read", "input": {"file_path": "/a/b.py"}},
+            {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}]}},
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Read", "input": {"file_path": "/a/b.py"}},
+            {"type": "tool_use", "name": "Write", "input": {"file_path": "/a/c.py"}}]}},
+        {"type": "user", "message": {"content": "not counted"}},
+    ]
+    meta = build_metadata(records)
+    assert meta["tools_used"] == {"Read": 2, "Bash": 1, "Write": 1}
+    assert meta["files_touched"] == ["/a/b.py", "/a/c.py"]  # deduped, order preserved

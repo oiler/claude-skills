@@ -5,6 +5,7 @@
 """Extract verbatim typed prompts and metadata from the current Claude Code session transcript."""
 
 import re
+from collections import Counter
 
 SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
 
@@ -23,6 +24,28 @@ def _prompt_text(content):
         return None
     text = SYSTEM_REMINDER_RE.sub("", text).strip()
     return text or None
+
+
+FILE_TOOLS = {"Read", "Write", "Edit", "NotebookEdit"}
+
+
+def build_metadata(records):
+    """Tool-use counts and de-duplicated file paths touched, from assistant tool_use blocks."""
+    tools = Counter()
+    files = []
+    for r in records:
+        if r.get("type") != "assistant":
+            continue
+        for b in r.get("message", {}).get("content", []):
+            if not isinstance(b, dict) or b.get("type") != "tool_use":
+                continue
+            name = b.get("name", "")
+            tools[name] += 1
+            if name in FILE_TOOLS:
+                fp = b.get("input", {}).get("file_path")
+                if fp and fp not in files:
+                    files.append(fp)
+    return {"tools_used": dict(tools), "files_touched": files}
 
 
 def extract_prompts(records):
