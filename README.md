@@ -6,6 +6,7 @@ A public mirror of the Claude Code skills I use day-to-day. Each folder is a sel
 
 | Skill | What it does |
 |---|---|
+| [front-end-engineer](front-end-engineer/) | Authority on HTML markup — semantically correct (MDN) HTML in a consistent personal style, with write + audit modes and routing to sibling front-end skills. |
 | [git-tagging](git-tagging/) | Semantic versioning, annotated git tags, GitHub Releases, and CHANGELOG maintenance. |
 | [guardian-claude-code](guardian-claude-code/) | Audits Claude Code's third-party trust surface (MCP servers, plugins, hooks) for supply-chain risk. |
 | [plotly-dash](plotly-dash/) | Expert guidance for self-hosted, open-source Plotly Dash apps — callbacks, DataTable, deployment. |
