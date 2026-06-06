@@ -30,7 +30,7 @@
 - Tab container gets `role="tablist"` and `aria-label` (sample: bp L477, L516).
 - Each tab element (`<h6>`) gets `role="tab"`, `aria-selected="true/false"`, and `aria-controls` pointing to its panel ID (sample: bp L478–L481).
 - Inactive tabs get `tabindex="-1"` to remove them from natural tab order; active tab has no `tabindex` attribute (sample: bp L478–L481).
-- Each tab panel gets `role="tabpanel"`, `aria-labelledby` pointing to its tab's ID, and `tabindex="0"` (sample: bp L484, L491, L521).
+- Tab panels: `role="tabpanel"` + `tabindex="0"`. Note: in the sample, `aria-labelledby` points to generic ordinal IDs (`tab1`, `tab2`) that do NOT match the actual tab element IDs (`tab_features`, …) — an apparent bug, not a pattern to copy; the base layer (semantic-html.md) requires `aria-labelledby` to reference the real tab `id`. (sample: bp L484, L478)
 - `<main>` carries explicit `role="main"` in addition to the implicit role (sample: foxlaboratory L108).
 
 ## Comments
