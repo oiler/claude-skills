@@ -1,4 +1,10 @@
-from extract_session import extract_prompts, build_metadata
+from extract_session import (
+    extract_prompts,
+    build_metadata,
+    render_metadata_yaml,
+    assemble_document,
+    resolve_output_path,
+)
 
 
 def test_extract_prompts_keeps_genuine_prompts():
@@ -77,3 +83,77 @@ def test_build_metadata_collects_notebookedit_path():
     meta = build_metadata(records)
     assert meta["tools_used"] == {"NotebookEdit": 1}
     assert meta["files_touched"] == ["/nb/x.ipynb"]
+
+
+def test_render_metadata_yaml_orders_and_nests():
+    meta = {
+        "session_id": "abc",
+        "date": "2026-06-06",
+        "cwd": "/x",
+        "git_branch": "master",
+        "prompt_count": 2,
+        "tools_used": {"Read": 2, "Bash": 1},
+        "files_touched": ["/x/a.py", "/x/b.py"],
+    }
+    assert render_metadata_yaml(meta) == (
+        "session_id: abc\n"
+        "date: 2026-06-06\n"
+        "cwd: /x\n"
+        "git_branch: master\n"
+        "prompt_count: 2\n"
+        "tools_used:\n"
+        "  Read: 2\n"
+        "  Bash: 1\n"
+        "files_touched:\n"
+        "  - /x/a.py\n"
+        "  - /x/b.py"
+    )
+
+
+def test_render_metadata_yaml_empty_collections():
+    meta = {
+        "session_id": "abc",
+        "date": "2026-06-06",
+        "cwd": "/x",
+        "git_branch": None,
+        "prompt_count": 0,
+        "tools_used": {},
+        "files_touched": [],
+    }
+    out = render_metadata_yaml(meta)
+    assert "git_branch: null\n" in out
+    assert "tools_used: {}\n" in out
+    assert out.endswith("files_touched: []")
+
+
+def test_assemble_document_structure_and_verbatim_prompts():
+    meta = {
+        "session_id": "abc",
+        "date": "2026-06-06",
+        "cwd": "/x",
+        "git_branch": "master",
+        "prompt_count": 1,
+        "tools_used": {"Read": 1},
+        "files_touched": [],
+    }
+    prompts_md = "## Prompts (chronological)\n\n### Prompt 1\n\nhello world\n"
+    doc = assemble_document("my-slug", "A short summary.", prompts_md, meta, "goal: ship it\n")
+    assert doc.startswith("# Session Log — 2026-06-06 — my-slug\n")
+    assert "## Summary\n\nA short summary.\n" in doc
+    # prompts spliced byte-exact (no reformatting/truncation)
+    assert prompts_md.rstrip("\n") in doc
+    assert "## Handoff State\n\n```yaml\n" in doc
+    assert "session_id: abc\n" in doc
+    assert "goal: ship it" in doc
+    assert doc.endswith("```\n")
+
+
+def test_resolve_output_path_collision_suffix(tmp_path):
+    p1 = resolve_output_path("topic", "2026-06-06", tmp_path)
+    assert p1.name == "2026-06-06-topic.md"
+    p1.write_text("x")
+    p2 = resolve_output_path("topic", "2026-06-06", tmp_path)
+    assert p2.name == "2026-06-06-topic-2.md"
+    p2.write_text("x")
+    p3 = resolve_output_path("topic", "2026-06-06", tmp_path)
+    assert p3.name == "2026-06-06-topic-3.md"

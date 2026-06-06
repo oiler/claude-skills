@@ -9,28 +9,37 @@ allowed-tools: Bash, Read, Write
 
 Writes a deterministic three-part session log to `docs/session-logs/YYYY-MM-DD-<slug>.md` in the current project. Run the extractor, assemble the document, write it, report the path.
 
+The script owns every prompt byte and the final file write. You author only the summary and the handoff judgment fields — you never copy prompts yourself, so the log is byte-exact by construction.
+
 ## Steps
 
-1. **Extract the session data.** Run:
+1. **Read the session context.** Run:
 
    ```bash
    uv run "${CLAUDE_SKILL_DIR}/scripts/extract_session.py"
    ```
 
    It prints one JSON object: `{ "prompts_markdown": "...", "metadata": {...} }`.
-   If it exits non-zero (no session id, or transcript missing), **STOP** and report the error. Do not write a partial log.
+   If it exits non-zero (no session id, or transcript missing), **STOP** and report the error.
+   Read this to understand the session. Do **not** copy `prompts_markdown` — the script splices it verbatim in step 3.
 
-2. **Assemble the document.** Title: `# Session Log — <date> — <slug>`. Then exactly three sections:
+2. **Write your two authored pieces to temp files.** From the prompts and metadata:
 
-   - `## Summary` — write 3-4 sentences: what this session was about and where it stands. Human-readable.
-   - Splice `prompts_markdown` in **byte-exact**. Do not reformat, renumber, truncate, or paraphrase it.
-   - `## Handoff State` — a single ```yaml code block. First copy the deterministic fields from `metadata` verbatim: `session_id`, `date`, `cwd`, `git_branch`, `prompt_count`, `tools_used`, `files_touched`. Then add your judgment fields: `goal`, `work_completed`, `decisions`, `open_threads`, `next_steps`, `key_facts`.
+   - A **summary** — 3-4 sentences on what the session was about and where it stands. Write it to a temp file (e.g. `summary=$(mktemp)`).
+   - The **handoff judgment fields** as YAML — write to a second temp file (e.g. `handoff=$(mktemp)`). Include only: `goal`, `work_completed`, `decisions`, `open_threads`, `next_steps`, `key_facts`. Do **not** include the deterministic fields (`session_id`, `date`, `cwd`, `git_branch`, `prompt_count`, `tools_used`, `files_touched`) — the script adds those.
 
-3. **Choose the path.** `<slug>` is a short kebab-case summary of the session topic (derive it from the goal / first prompt). Path: `docs/session-logs/<date>-<slug>.md` using the `date` from `metadata`. If that file already exists, append `-2`, `-3`, etc.
+   Also choose a short kebab-case `<slug>` describing the session topic.
 
-4. **Write the file** with the Write tool. Create `docs/session-logs/` if needed.
+3. **Assemble the log.** Run:
 
-5. **Report only the written path.** Do not dump the log contents into the chat.
+   ```bash
+   uv run "${CLAUDE_SKILL_DIR}/scripts/extract_session.py" --assemble \
+     --slug <slug> --summary-file "$summary" --handoff-file "$handoff"
+   ```
+
+   The script splices your verbatim prompts and deterministic metadata, injects your summary and handoff fields, writes `docs/session-logs/<date>-<slug>.md` (numeric suffix on same-day collision), and prints the path.
+
+4. **Report only the printed path.** Do not dump the log contents into the chat.
 
 ## Notes
 
