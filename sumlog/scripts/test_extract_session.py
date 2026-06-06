@@ -55,3 +55,25 @@ def test_build_metadata_counts_tools_and_dedupes_files():
     meta = build_metadata(records)
     assert meta["tools_used"] == {"Read": 2, "Bash": 1, "Write": 1}
     assert meta["files_touched"] == ["/a/b.py", "/a/c.py"]  # deduped, order preserved
+
+
+def test_build_metadata_handles_file_tool_without_path():
+    # A file-tool (Edit) with missing file_path should be counted but not crash or add to files
+    records = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Edit", "input": {}}]}},
+    ]
+    meta = build_metadata(records)
+    assert meta["tools_used"] == {"Edit": 1}
+    assert meta["files_touched"] == []
+
+
+def test_build_metadata_collects_notebookedit_path():
+    # NotebookEdit is a file-tool; file paths should be collected
+    records = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "NotebookEdit", "input": {"file_path": "/nb/x.ipynb"}}]}},
+    ]
+    meta = build_metadata(records)
+    assert meta["tools_used"] == {"NotebookEdit": 1}
+    assert meta["files_touched"] == ["/nb/x.ipynb"]
