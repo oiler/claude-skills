@@ -67,7 +67,7 @@ def build_metadata(records):
     return {"tools_used": dict(tools), "files_touched": files}
 
 
-def _agent_result_map(records):
+def _tool_result_map(records):
     """Map each tool_use id to its structured toolUseResult (rides on the tool_result record)."""
     results = {}
     for r in records:
@@ -82,7 +82,7 @@ def _agent_result_map(records):
 
 def extract_agents(records):
     """Each Agent dispatch, joined with its result: label, type, model, status, and rollup stats."""
-    results = _agent_result_map(records)
+    results = _tool_result_map(records)
     agents = []
     for r in records:
         if r.get("type") != "assistant":
@@ -123,6 +123,69 @@ def build_agents_markdown(agents):
             f"{a['tokens']:,} | {a['tool_uses']} | {a['duration_ms'] / 1000:.1f}s |"
         )
     lines += ["", f"_{len(agents)} agents, {total_tokens:,} subagent tokens total._"]
+    return "\n".join(lines)
+
+
+def extract_tasks(records):
+    """Reconstruct the session task list. Replays TaskCreate/TaskUpdate events in order;
+    falls back to the last TodoWrite snapshot if the incremental task tools weren't used."""
+    results = _tool_result_map(records)
+    tasks = {}        # id -> {"id", "subject", "status"}
+    order = []
+    used_task_tools = False
+    last_todos = None
+    for r in records:
+        if r.get("type") != "assistant":
+            continue
+        for b in r.get("message", {}).get("content", []):
+            if not isinstance(b, dict) or b.get("type") != "tool_use":
+                continue
+            name = b.get("name")
+            inp = b.get("input", {})
+            res = results.get(b.get("id"), {})
+            if name == "TaskCreate":
+                used_task_tools = True
+                task = res.get("task") if isinstance(res, dict) else None
+                tid = (task or {}).get("id") or str(len(order) + 1)
+                subject = (task or {}).get("subject") or inp.get("subject", "(untitled)")
+                if tid not in tasks:
+                    tasks[tid] = {"id": tid, "subject": subject, "status": "pending"}
+                    order.append(tid)
+            elif name == "TaskUpdate":
+                used_task_tools = True
+                if isinstance(res, dict) and res.get("success"):
+                    tid = res.get("taskId")
+                    to = (res.get("statusChange") or {}).get("to") or inp.get("status")
+                    if tid in tasks and to:
+                        tasks[tid]["status"] = to
+            elif name == "TodoWrite":
+                todos = inp.get("todos")
+                if isinstance(todos, list):
+                    last_todos = todos
+    if used_task_tools:
+        return [tasks[t] for t in order]
+    if last_todos is not None:
+        # Best-effort: TodoWrite snapshots carry the whole list each call, with no stable ids.
+        return [
+            {"id": str(i), "subject": t.get("content") or t.get("subject") or "(untitled)",
+             "status": t.get("status", "pending")}
+            for i, t in enumerate(last_todos, 1) if isinstance(t, dict)
+        ]
+    return []
+
+
+def build_tasks_markdown(tasks):
+    """Render the session task list as a table with a totals line, or '' if there were none."""
+    if not tasks:
+        return ""
+    lines = ["## Task List", "", "| ID | Task | Status |", "|----|------|--------|"]
+    completed = 0
+    for t in tasks:
+        subject = str(t["subject"]).replace("|", "\\|")
+        if t["status"] == "completed":
+            completed += 1
+        lines.append(f"| {t['id']} | {subject} | {t['status']} |")
+    lines += ["", f"_{len(tasks)} tasks, {completed} completed._"]
     return "\n".join(lines)
 
 
@@ -198,7 +261,8 @@ def render_metadata_yaml(meta):
     return "\n".join(lines)
 
 
-def assemble_document(slug, summary, prompts_markdown, meta, handoff_text, agents_markdown=""):
+def assemble_document(slug, summary, prompts_markdown, meta, handoff_text,
+                      agents_markdown="", tasks_markdown=""):
     """Build the complete session-log markdown. prompts_markdown is spliced byte-exact."""
     parts = [
         f"# Session Log — {meta['date']} — {slug}",
@@ -210,6 +274,8 @@ def assemble_document(slug, summary, prompts_markdown, meta, handoff_text, agent
         prompts_markdown.rstrip("\n"),
         "",
     ]
+    if tasks_markdown.strip():
+        parts += [tasks_markdown.rstrip("\n"), ""]
     if agents_markdown.strip():
         parts += [agents_markdown.rstrip("\n"), ""]
     parts += [
@@ -243,6 +309,7 @@ def load_session():
         sys.exit(f"error: malformed JSONL in transcript: {e}")
     prompts = extract_prompts(records)
     agents = extract_agents(records)
+    tasks = extract_tasks(records)
     meta = build_metadata(records)
     meta.update({
         "session_id": session_id,
@@ -251,7 +318,8 @@ def load_session():
         "git_branch": _git_branch(),
         "prompt_count": len(prompts),
     })
-    return build_prompts_markdown(prompts), build_agents_markdown(agents), meta
+    return (build_prompts_markdown(prompts), build_agents_markdown(agents),
+            build_tasks_markdown(tasks), meta)
 
 
 def main(argv=None):
@@ -266,12 +334,13 @@ def main(argv=None):
     parser.add_argument("--out", help="Explicit output path (overrides docs/session-logs/<date>-<slug>.md).")
     args = parser.parse_args(argv)
 
-    prompts_markdown, agents_markdown, meta = load_session()
+    prompts_markdown, agents_markdown, tasks_markdown, meta = load_session()
 
     if not args.assemble:
         print(json.dumps({
             "prompts_markdown": prompts_markdown,
             "agents_markdown": agents_markdown,
+            "tasks_markdown": tasks_markdown,
             "metadata": meta,
         }, indent=2))
         return
@@ -286,7 +355,8 @@ def main(argv=None):
 
     summary = Path(args.summary_file).read_text()
     handoff_text = Path(args.handoff_file).read_text()
-    doc = assemble_document(args.slug, summary, prompts_markdown, meta, handoff_text, agents_markdown)
+    doc = assemble_document(args.slug, summary, prompts_markdown, meta, handoff_text,
+                            agents_markdown, tasks_markdown)
     out = Path(args.out) if args.out else resolve_output_path(args.slug, meta["date"])
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(doc)
