@@ -13,6 +13,7 @@
 ## Sectioning & landmarks
 - One `<main>` per page; do not nest it in `article`/`aside`/`header`/`footer`/`nav`. (MDN: Element/main)
 - `<section>` needs a heading and a thematic grouping; default to `<div>` for non-semantic grouping. (MDN: Element/section)
+- A wrapper whose only job is grouping repeated `<article>`s is non-semantic — use `<div>`, or, if a landmark is wanted, give the `<section>` its own accessible name via `aria-label`/`aria-labelledby` (a `<section>`'s name comes from its own heading, not its children's). (MDN: Element/section)
 - `<article>` for independently distributable content; `<section>` for a thematic chunk of one document. (MDN: Element/article)
 - `<nav>` for major navigation blocks, not every group of links. (MDN: Element/nav)
 - `<header>`/`<footer>` are scoped to their nearest sectioning ancestor. (MDN: Element/header)
@@ -43,6 +44,7 @@
 ## Media
 - Content `<img>` requires meaningful `alt`; decorative images use `alt=""`. (MDN: Element/img)
 - Set explicit `width`/`height` (or CSS aspect-ratio) to prevent layout shift; use `loading="lazy"` for below-the-fold images and `srcset`/`sizes` for responsive images. (MDN: Element/img, Web/Performance/Lazy_loading)
+- Do NOT `loading="lazy"` an above-the-fold / LCP image — it delays the largest contentful paint; use `loading="eager"` or omit `loading`, and reserve lazy for below-the-fold images. (MDN: Web/Performance/Lazy_loading)
 - Provide captions/subtitles for `<video>`/`<audio>` via `<track>` where applicable. (MDN: Element/track)
 
 ## Document

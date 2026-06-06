@@ -29,6 +29,7 @@
 - Inactive triggers get `tabindex="-1"`; the active trigger omits `tabindex`. (sample: bp L478–L481)
 - Tab panels: `role="tabpanel"` + `tabindex="0"`, with `aria-labelledby` → the real trigger `id`. (Note: the sample's `aria-labelledby` uses generic ordinals `tab1`/`tab2` that don't match the actual IDs — an apparent bug; the base layer requires the real `id`.) (sample: bp L484, L478)
 - Do NOT add a `role` that merely duplicates a native element's implicit role (e.g. no `role="main"` on `<main>`) — defer to the base layer.
+- Use a native `<button>` (focusable, keyboard-operable) as a tab or other interactive trigger — NOT an `<h6>` or other heading, even though one sample did so. (sample: bp L478–L481)
 
 ## Comments
 - Commented-out markup preserved in place as toggle markers rather than deleted. (sample: foxlaboratory L109, L112, L144)
@@ -54,5 +55,4 @@
 - No clear convention observed in authored regions (`<html lang>` and `<head>` are framework-generated and were excluded).
 
 ## Tentative (seen once — confirm before promoting)
-- `<h6>` used as a tab trigger element (not a heading-hierarchy choice) — seen once. (sample: bp L478–L481)
 - Trailing whitespace before `>` on classless nav links: `<a href="/about" >about</a>` — likely an artifact, not a convention. (sample: foxlaboratory L92–L95)
