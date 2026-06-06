@@ -29,6 +29,7 @@ def extract_prompts(records):
     """Genuine human-typed prompts, in order, verbatim (system-reminders stripped)."""
     prompts = []
     for r in records:
+        # isMeta is True or absent in practice; any falsy value (absent/False) is treated as not-meta
         if r.get("type") != "user" or r.get("isMeta"):
             continue
         text = _prompt_text(r.get("message", {}).get("content"))
