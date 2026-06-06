@@ -4,6 +4,7 @@
 # ///
 """Extract verbatim typed prompts and metadata from the current Claude Code session transcript."""
 
+import argparse
 import json
 import os
 import re
@@ -102,7 +103,54 @@ def build_prompts_markdown(prompts):
     return "\n".join(lines)
 
 
-def main():
+def render_metadata_yaml(meta):
+    """Render the deterministic metadata fields as a YAML block, fixed key order."""
+    lines = [
+        f"session_id: {meta['session_id']}",
+        f"date: {meta['date']}",
+        f"cwd: {meta['cwd']}",
+        f"git_branch: {meta['git_branch'] if meta['git_branch'] is not None else 'null'}",
+        f"prompt_count: {meta['prompt_count']}",
+    ]
+    tools = meta["tools_used"]
+    if tools:
+        lines.append("tools_used:")
+        lines += [f"  {name}: {count}" for name, count in tools.items()]
+    else:
+        lines.append("tools_used: {}")
+    files = meta["files_touched"]
+    if files:
+        lines.append("files_touched:")
+        lines += [f"  - {f}" for f in files]
+    else:
+        lines.append("files_touched: []")
+    return "\n".join(lines)
+
+
+def assemble_document(slug, summary, prompts_markdown, meta, handoff_text):
+    """Build the complete session-log markdown. prompts_markdown is spliced byte-exact."""
+    return (
+        f"# Session Log — {meta['date']} — {slug}\n\n"
+        f"## Summary\n\n{summary.strip()}\n\n"
+        f"{prompts_markdown.rstrip(chr(10))}\n\n"
+        f"## Handoff State\n\n"
+        f"```yaml\n{render_metadata_yaml(meta)}\n{handoff_text.strip()}\n```\n"
+    )
+
+
+def resolve_output_path(slug, date, base_dir=Path("docs/session-logs")):
+    """Dated path under base_dir, with a numeric suffix on same-day-same-slug collision."""
+    base = Path(base_dir)
+    candidate = base / f"{date}-{slug}.md"
+    n = 2
+    while candidate.exists():
+        candidate = base / f"{date}-{slug}-{n}.md"
+        n += 1
+    return candidate
+
+
+def load_session():
+    """Locate the current transcript and return (prompts_markdown, metadata)."""
     session_id, path = locate_transcript()
     try:
         records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
@@ -117,10 +165,42 @@ def main():
         "git_branch": _git_branch(),
         "prompt_count": len(prompts),
     })
-    print(json.dumps(
-        {"prompts_markdown": build_prompts_markdown(prompts), "metadata": meta},
-        indent=2,
-    ))
+    return build_prompts_markdown(prompts), meta
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Extract session prompts/metadata as JSON, or assemble the full log file."
+    )
+    parser.add_argument("--assemble", action="store_true",
+                        help="Write the full session-log file instead of emitting JSON.")
+    parser.add_argument("--slug", help="kebab-case slug for the filename and title (with --assemble).")
+    parser.add_argument("--summary-file", help="File holding the model-written summary prose.")
+    parser.add_argument("--handoff-file", help="File holding the model-written handoff YAML fields.")
+    parser.add_argument("--out", help="Explicit output path (overrides docs/session-logs/<date>-<slug>.md).")
+    args = parser.parse_args(argv)
+
+    prompts_markdown, meta = load_session()
+
+    if not args.assemble:
+        print(json.dumps({"prompts_markdown": prompts_markdown, "metadata": meta}, indent=2))
+        return
+
+    missing = [flag for flag, value in (
+        ("--slug", args.slug),
+        ("--summary-file", args.summary_file),
+        ("--handoff-file", args.handoff_file),
+    ) if not value]
+    if missing:
+        sys.exit(f"error: --assemble requires {', '.join(missing)}")
+
+    summary = Path(args.summary_file).read_text()
+    handoff_text = Path(args.handoff_file).read_text()
+    doc = assemble_document(args.slug, summary, prompts_markdown, meta, handoff_text)
+    out = Path(args.out) if args.out else resolve_output_path(args.slug, meta["date"])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(doc)
+    print(out)
 
 
 if __name__ == "__main__":
