@@ -4,8 +4,14 @@
 # ///
 """Extract verbatim typed prompts and metadata from the current Claude Code session transcript."""
 
+import json
+import os
 import re
+import subprocess
+import sys
 from collections import Counter
+from datetime import datetime
+from pathlib import Path
 
 SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
 
@@ -59,3 +65,58 @@ def extract_prompts(records):
         if text is not None:
             prompts.append(text)
     return prompts
+
+
+def locate_transcript():
+    """Resolve (session_id, transcript_path) for the current session, or exit with a clear error."""
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not session_id:
+        sys.exit("error: CLAUDE_CODE_SESSION_ID is not set; cannot locate the session transcript")
+    encoded = os.getcwd().replace("/", "-")
+    path = Path.home() / ".claude" / "projects" / encoded / f"{session_id}.jsonl"
+    if not path.is_file():
+        sys.exit(f"error: transcript not found at {path}")
+    return session_id, path
+
+
+def _git_branch():
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, check=True,
+        )
+        return out.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def build_prompts_markdown(prompts):
+    """Render the verbatim prompts section. Prompt text is emitted untruncated and unmodified."""
+    if not prompts:
+        return "## Prompts (chronological)\n\n_No typed prompts found in this session._\n"
+    lines = ["## Prompts (chronological)", ""]
+    for i, p in enumerate(prompts, 1):
+        lines += [f"### Prompt {i}", "", p, ""]
+    return "\n".join(lines)
+
+
+def main():
+    session_id, path = locate_transcript()
+    records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    prompts = extract_prompts(records)
+    meta = build_metadata(records)
+    meta.update({
+        "session_id": session_id,
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "cwd": os.getcwd(),
+        "git_branch": _git_branch(),
+        "prompt_count": len(prompts),
+    })
+    print(json.dumps(
+        {"prompts_markdown": build_prompts_markdown(prompts), "metadata": meta},
+        indent=2,
+    ))
+
+
+if __name__ == "__main__":
+    main()
