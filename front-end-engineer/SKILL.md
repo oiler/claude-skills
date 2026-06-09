@@ -7,12 +7,13 @@ description: oiler's authority for writing and reviewing HTML markup. Use whenev
 
 The authority on HTML markup, and the entry point for front-end work. Produces semantically correct HTML in oiler's style, audits existing markup against the same standard, and routes adjacent concerns to complementary skills.
 
-## How this skill works: two layers
+## How this skill works: layers
 
 | Layer | Source | When it applies |
 |---|---|---|
 | **Base — correctness** | MDN / HTML Living Standard → `references/semantic-html.md` | Always. Every mode, every authority level. |
 | **Style — preferences** | oiler's authored markup → `references/markup-style.md` | Flexes with authority mode (below). |
+| **Design — visual direction** *(optional)* | a `DESIGN.md` design system → delegated to the `front-end-design` skill | Only when switched on (see *Design layer*). Governs visual styling only; never markup correctness. |
 
 **Precedence:** correctness always wins. The style layer only chooses among options the base layer considers valid. If oiler explicitly asks for something semantically off, build it but flag the divergence and why. Never silently emit incorrect markup.
 
@@ -34,6 +35,16 @@ FEE adjusts how hard it imposes the **style layer** based on a per-project signa
 
 **The correctness floor holds in every mode** — only the style layer flexes; the base layer never yields.
 
+## Design layer (optional)
+
+When a front-end task involves visual direction, FEE invokes the `front-end-design` companion (if installed) to apply a `DESIGN.md` design system. It activates when any of these hold:
+
+1. A `DESIGN.md` exists in the project root (auto-on).
+2. The project CLAUDE.md contains `front-end-engineer-design: on`.
+3. oiler explicitly asks for an aesthetic ("build like Stripe") or to author a `DESIGN.md`.
+
+If none hold — or the companion is not installed — FEE proceeds markup-only as usual. The companion owns visual direction (color, type, spacing, elevation); FEE still owns markup, and CSS authoring still routes to `sass`. Correctness always wins over the design layer.
+
 ## Routing — collaborate with complementary skills
 
 FEE owns markup. When a task crosses into an adjacent domain, **invoke** the matching skill (directive, not advisory). Load nothing the task doesn't need.
@@ -44,6 +55,7 @@ FEE owns markup. When a task crosses into an adjacent domain, **invoke** the mat
 | Classic WordPress theme context | `wordpress-themes` |
 | Gutenberg blocks | `wordpress-blocks` |
 | Output escaping / untrusted data | `web-security` |
+| Visual design direction / applying a `DESIGN.md` / "build like <brand>" | `front-end-design` (if installed) |
 <!-- Extend this table as new front-end skills are added (e.g. vanilla-js). -->
 
 ## Scope
