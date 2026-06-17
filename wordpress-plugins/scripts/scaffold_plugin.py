@@ -138,8 +138,8 @@ def _phpcs_xml_dist(name: str, namespace: str, text_domain: str, slug: str) -> s
     <!-- WordPress text domain and function prefix for i18n / naming checks. -->
     <config name="text_domain" value="{text_domain}"/>
 
-    <rule ref="WordPress-VIP-Go"/>
     <rule ref="WordPressVIPMinimum"/>
+    <rule ref="WordPress-VIP-Go"/>
     <rule ref="WordPress-Docs"/>
 
     <!-- Set the expected text domain for i18n rules. -->
