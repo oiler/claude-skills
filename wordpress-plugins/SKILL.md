@@ -1,0 +1,78 @@
+---
+name: wordpress-plugins
+description: >
+  Use for all WordPress plugin work: build a WordPress plugin, create a plugin,
+  plugin development, WordPress VIP plugin, VIP coding standards, VIPCS, make
+  this plugin VIP compliant, audit my plugin, plugin boilerplate, scaffold a
+  plugin, composer autoload WordPress, PSR-4 plugin, scale a WordPress plugin,
+  plugin performance, object cache, transients, plugin security, nonces, escape
+  output, prepared statements, readme.txt, plugin headers, plugin release,
+  WordPress plugin architecture, add a shortcode, add a REST endpoint, register
+  post type, register taxonomy, enqueue scripts, enqueue styles, admin settings
+  page, options API, Settings API, activation hook, deactivation hook, uninstall
+  hook, cron jobs, wp_schedule_event, multisite plugin, network-activated plugin,
+  WordPress coding standards, phpcs WordPress, write unit tests for a plugin,
+  WP_Mock, plugin changelog, plugin versioning.
+  NOT for: Gutenberg blocks or block editor components (use wordpress-blocks);
+  generic OWASP/security fundamentals unrelated to WordPress (use web-security);
+  block themes or FSE (not covered by this skill).
+allowed-tools: Bash, Read, Write, Edit
+---
+
+## WordPress Plugins skill
+
+Baseline: **WordPress 6.x**, **PHP 8.1+**, **VIP Coding Standards (2025) / VIPCS 3.0+**. All guidance enforces VIP-Platform constraints by default. Rules that apply only on VIP Platform (e.g., no direct DB writes outside designated APIs) are labelled **[VIP only]** so self-hosted developers are not misled.
+
+Before proceeding, read the reference file that matches your mode (table below). The references contain the authoritative detail; this file routes you to the right one.
+
+---
+
+## Mode routing
+
+| Mode | What you're doing | Read first |
+|---|---|---|
+| **Build** | New plugin from scratch | `references/structure-and-scaffolding.md` |
+| **Audit** | Review an existing plugin for quality/compliance | `references/audit-checklist.md` |
+| **Add feature** | Add a new capability to an existing plugin | `references/structure-and-scaffolding.md` + the relevant deep reference below |
+| **Release** | Publish or version a plugin | `references/documentation.md` (readme.txt); delegate semver/tag/CHANGELOG mechanics to `git-tagging` |
+| **Tooling** | Set up VIPCS, phpcs.xml.dist, CI | `references/vip-standards.md` + `references/structure-and-scaffolding.md` |
+| **Performance / scale** | Caching, query bounds, remote calls | `references/vip-performance.md` |
+| **Security** | Nonces, caps, escaping, prepared statements, REST auth | `references/security.md` |
+
+### Scaffolder (Build mode)
+
+To generate a plugin skeleton, run:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/scaffold_plugin.py --name "My Plugin Name" --dir <target-directory>
+```
+
+The scaffolder produces the main plugin file, PSR-4 `src/` layout, `composer.json`, and stub test. See `references/structure-and-scaffolding.md` for what it generates and how to extend it.
+
+---
+
+## Cross-skill routing
+
+| Need | Skill |
+|---|---|
+| OWASP fundamentals, threat modelling, HTTP security headers | `web-security` |
+| Gutenberg blocks, block editor, block.json, `@wordpress/blocks` | `wordpress-blocks` |
+| Semver, git tags, GitHub Releases, CHANGELOG.md | `git-tagging` |
+| Admin CSS, Sass architecture, BEM, design tokens | `sass` |
+
+**Boundary vs `wordpress-themes`:** if the code lives in a theme (functions.php, theme template files, theme-only hooks) use `wordpress-themes`. If the code is standalone, distributable, or meant to be reusable across themes/sites — it's a plugin; use this skill.
+
+---
+
+## Critical rules
+
+These apply to every task; no exceptions without an explicit label:
+
+- **VIP constraints by default.** Flag platform-only rules with **[VIP only]** rather than silently omitting them.
+- **Cache every remote call.** Wrap `wp_remote_*` calls in transients or object-cache; never hit an external API on every page load.
+- **Bound every query.** All `WP_Query` / `get_posts` calls must set `posts_per_page` or equivalent. No unbounded loops over `get_posts()`.
+- **Escape at echo, not before.** Use `esc_html()`, `esc_attr()`, `esc_url()`, `wp_kses_post()` at the point of output.
+- **Verify nonces.** Every form submission and AJAX handler must call `check_admin_referer()` or `check_ajax_referer()` before acting.
+- **Check capabilities.** Gate all privileged actions with `current_user_can()` using the minimum required capability.
+- **Never `flush_rewrite_rules()` on every page load.** Call it only on activation/deactivation hooks.
+- **Commit `vendor/`.** [VIP only] VIP Go sites do not run `composer install` at deploy time; `vendor/` must be committed.
