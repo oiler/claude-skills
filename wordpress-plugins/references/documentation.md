@@ -69,7 +69,9 @@ public function get_option( string $key, mixed $default = null ): mixed {
 
 Tag order: summary → blank line → `@since` → `@param` lines → `@return`.
 
-`@param` format: `@param  type $name Description.` — period at the end, type before name, two spaces of alignment within the block (optional but conventional).
+`@param` format: `@param  type $name Description.` — period at the end, type before name, two spaces of alignment within the block (conventional; align for readability — VIP examples align).
+
+Hooks (actions) and functions with no return value use `@return void`.
 
 ### `@since` discipline
 
@@ -190,6 +192,8 @@ My Plugin is a WordPress plugin built to VIP coding standards.
 * Initial release.
 ```
 
+The three header levels are: `===` for the plugin title, `==` for top-level sections (Description, Installation, Changelog, etc.), and `=` for subsection headings within a section (changelog versions, FAQ questions).
+
 Prefix bullets with `Add:`, `Fix:`, `Change:`, or `Remove:` for readability. Entries map 1:1 to commits or PRs — the CHANGELOG.md maintained by `git-tagging` is the source of truth; copy relevant entries here.
 
 ---
@@ -244,7 +248,7 @@ Semver rules, git tag creation, GitHub Releases, and CHANGELOG.md maintenance ar
 
 1. Bump `Version` in the main plugin file header.
 2. Bump `Stable tag` in `readme.txt` to match.
-3. Add a `== X.Y.Z ==` entry to `readme.txt` Changelog (copy from CHANGELOG.md).
+3. Add a `= X.Y.Z =` entry to `readme.txt` Changelog (copy from CHANGELOG.md).
 4. Commit, then let `git-tagging` handle the tag and GitHub Release.
 
 Do not duplicate semver or tagging guidance here.
