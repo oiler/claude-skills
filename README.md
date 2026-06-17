@@ -15,6 +15,7 @@ A public mirror of the Claude Code skills I use day-to-day. Each folder is a sel
 | [sass](sass/) | Modern CSS (2020–2025) and advanced animations for developers with strong fundamentals. |
 | [web-security](web-security/) | Application-level security for WordPress, Laravel, Django, FastAPI, and Dash. OWASP Top 10 (2021). |
 | [wordpress-blocks](wordpress-blocks/) | Custom Gutenberg blocks with server-side PHP rendering and clean editor/developer separation. |
+| [wordpress-plugins](wordpress-plugins/) | Build, audit, extend, and release custom WordPress plugins to VIP standards — performant at scale, with a bundled scaffolder, security/performance/docs references, and a graded audit mode. |
 | [wordpress-themes](wordpress-themes/) | VIP-standard custom theme development with modular structure and modern tooling. |
 
 ## Installing a skill
