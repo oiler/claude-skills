@@ -31,7 +31,7 @@ Invoke orko for a coordinated, multi-expert engagement where role-specialized sp
 
 | If the task is… | Use instead |
 |---|---|
-| Independent parallel tasks with no shared synthesis | `dispatching-parallel-agents` |
+| Independent parallel tasks where you just want each done, not a combined report | `dispatching-parallel-agents` |
 | Executing a written implementation plan | `subagent-driven-development` |
 | Routing within one thread to a domain skill (markup, CSS, WP…) | the relevant domain skill (e.g. `front-end-engineer`, `web-security`, `python`) |
 | A single question you can answer directly | just answer — do not convene a panel |
