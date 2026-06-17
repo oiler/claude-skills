@@ -34,7 +34,7 @@ Use **transients** (`get_transient` / `set_transient`) for expensive computed va
 
 Use the **object cache directly** for hot per-request lookups where a persistent layer is guaranteed (VIP) or where a per-request cache is sufficient.
 
-> **VIP-Platform:** Transients are backed by the object cache. `set_transient` maps to `wp_cache_set`; the 30-second autoloading threshold and the `_transient_` option row are bypassed. On self-hosted sites without a persistent cache, transients fall back to the `wp_options` table — a database write per set.
+> **VIP-Platform:** Transients are backed by the persistent object cache; `set_transient` maps to `wp_cache_set` and the `wp_options` `_transient_*` row is bypassed entirely. On self-hosted sites without a persistent cache drop-in, transients fall back to `wp_options` — a database write per set.
 
 ```php
 // Transient — suitable for expensive computed values or external data with a meaningful TTL.
@@ -67,8 +67,8 @@ function my_plugin_fetch_api_data( string $endpoint ): array|false {
     $cache_key   = 'api_' . md5( $endpoint );
     $cache_group = 'my_plugin_remote';
 
-    $cached = wp_cache_get( $cache_key, $cache_group );
-    if ( false !== $cached ) {
+    $cached = wp_cache_get( $cache_key, $cache_group, false, $found );
+    if ( $found ) {
         return $cached;
     }
 
@@ -112,6 +112,8 @@ $args = [
 $query = new WP_Query( $args );
 // Process $query->posts, increment $page, repeat until posts is empty.
 ```
+
+> **Offset vs. keyset:** The cron batch example below uses `offset`-based pagination, which is simple but degrades on large offsets — the database still scans all skipped rows. For large batch jobs, prefer `paged`-based iteration (as above) or process by ascending ID range (`'post__in'` / `WHERE ID > $last_id`) to let the index seek directly to the next chunk.
 
 ---
 
@@ -162,7 +164,7 @@ $posts   = array_slice( $posts, 0, 50 );
 
 ## Taxonomy Queries
 
-Set `'include_children' => false` in every `tax_query` entry unless you explicitly need descendant-term matching. The default has been `true` since WordPress 4.4, which causes an expensive recursive query to expand all child terms before the main query runs. On a deep term hierarchy this adds a substantial latency multiplier.
+Set `'include_children' => false` in every `tax_query` entry unless you explicitly need descendant-term matching. `include_children` defaults to `true`, which causes an expensive recursive query to expand all child terms before the main query runs. On a deep term hierarchy this adds a substantial latency multiplier.
 
 ```php
 $query = new WP_Query(
@@ -224,33 +226,32 @@ register_activation_hook( __FILE__, static function (): void {
         wp_schedule_single_event( time(), 'my_plugin_process_batch', [ 0 ] );
     }
 } );
-
 add_action( 'my_plugin_process_batch', static function ( int $offset ): void {
     $chunk_size = 100; // Why: bounded chunk keeps memory and query time predictable.
 
-    $posts = get_posts(
+    $query = new WP_Query(
         [
             'post_type'              => 'event',
             'post_status'            => 'publish',
             'posts_per_page'         => $chunk_size,
             'offset'                 => $offset,
+            'no_found_rows'          => true,  // Why: batch loop; no pagination UI needed.
             'update_post_meta_cache' => false,
             'update_post_term_cache' => false,
         ]
     );
 
-    if ( empty( $posts ) ) {
+    if ( empty( $query->posts ) ) {
         return; // All chunks processed.
     }
 
-    foreach ( $posts as $post ) {
+    foreach ( $query->posts as $post ) {
         process_single_event( $post );
     }
 
     // Re-schedule next chunk; 30 s gap avoids back-to-back DB saturation.
     wp_schedule_single_event( time() + 30, 'my_plugin_process_batch', [ $offset + $chunk_size ] );
 } );
-
 // ── Recurring task ───────────────────────────────────────────────────────────
 add_filter( 'cron_schedules', static function ( array $schedules ): array {
     $schedules['every_15_minutes'] = [
