@@ -54,8 +54,8 @@ composer fix    # phpcbf — auto-fix what it can
     <!-- WordPress text domain and function prefix for i18n / naming checks. -->
     <config name="text_domain" value="my-plugin"/>
 
-    <rule ref="WordPress-VIP-Go"/>
     <rule ref="WordPressVIPMinimum"/>
+    <rule ref="WordPress-VIP-Go"/>
     <rule ref="WordPress-Docs"/>
 
     <!-- Set the expected text domain for i18n rules. -->
@@ -98,7 +98,7 @@ $fh = fopen( '/tmp/data.txt', 'w' );
 fwrite( $fh, $content );
 unlink( '/tmp/data.txt' );
 
-// Right — use WP Filesystem API
+// Right — use WP Filesystem API; call WP_Filesystem() on an admin page/credentials form and check its return value — on failure $wp_filesystem is unset.
 global $wp_filesystem;
 WP_Filesystem();
 $wp_filesystem->put_contents( $upload_dir['path'] . '/data.txt', $content, FS_CHMOD_FILE );
@@ -142,7 +142,7 @@ $wpdb->get_results(
 );
 
 // Better — use WP_Query instead of raw SQL for posts
-$query = new WP_Query( [ 'post_title' => $title, 'post_type' => 'post' ] );
+$query = new WP_Query( [ 'title' => $title, 'post_type' => 'post' ] ); // 'title' exact-match arg (WP 4.4+)
 ```
 
 For input/output escaping and nonce/caps checks, see [`security.md`](security.md).
@@ -233,7 +233,7 @@ foreach ( $posts as $post ) {
 
 ### Read-only Filesystem
 
-The VIP Platform filesystem is read-only except for `wp-content/uploads`. Use the WP Filesystem API (`WP_Filesystem`) for any writes; use `wp_upload_dir()` to resolve the writable uploads path dynamically. Do not hardcode `/tmp` or relative paths. See the [Direct Filesystem Writes](#direct-filesystem-writes) section for the correct pattern.
+The VIP Platform filesystem is read-only except for `wp-content/uploads`. Use the WP Filesystem API (`WP_Filesystem`) for any writes; use `wp_upload_dir()` to resolve the writable uploads path dynamically. On VIP Platform, `/tmp` is ephemeral and per-process — it is not a reliable shared writable location; use `wp_upload_dir()` or the Filesystem API instead. Do not hardcode `/tmp` or relative paths. See the [Direct Filesystem Writes](#direct-filesystem-writes) section for the correct pattern.
 
 ### Must-Use Plugins (`mu-plugins`)
 
