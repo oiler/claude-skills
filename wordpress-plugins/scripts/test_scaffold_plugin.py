@@ -47,5 +47,23 @@ def test_uninstall_has_guard():
     files = build_files("My Plugin", "My_Plugin", "my-plugin")
     assert "WP_UNINSTALL_PLUGIN" in files["my-plugin/uninstall.php"]
 
+def test_main_file_namespace_order():
+    """namespace must appear before the ABSPATH guard; declare must precede namespace."""
+    files = build_files("My Plugin", "My_Plugin", "my-plugin")
+    main = files["my-plugin/my-plugin.php"]
+    declare_pos = main.index("declare(strict_types=1);")
+    namespace_pos = main.index("namespace My_Plugin;")
+    abspath_pos = main.index("if ( ! defined( 'ABSPATH' ) )")
+    assert declare_pos < namespace_pos, "declare(strict_types=1) must come before namespace"
+    assert namespace_pos < abspath_pos, "namespace must come before ABSPATH guard"
+
+def test_src_plugin_php_namespace_order():
+    """src/Plugin.php: declare then namespace, no ABSPATH guard needed but ordering is correct."""
+    files = build_files("My Plugin", "My_Plugin", "my-plugin")
+    plugin = files["my-plugin/src/Plugin.php"]
+    declare_pos = plugin.index("declare(strict_types=1);")
+    namespace_pos = plugin.index("namespace My_Plugin;")
+    assert declare_pos < namespace_pos, "declare(strict_types=1) must come before namespace in src/Plugin.php"
+
 if __name__ == "__main__":
-    sys.exit(subprocess.call(["python", "-m", "pytest", __file__, "-v"]))
+    sys.exit(subprocess.call([sys.executable, "-m", "pytest", __file__, "-v"]))

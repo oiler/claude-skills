@@ -72,11 +72,13 @@ def _main_php(name: str, namespace: str, text_domain: str, slug: str) -> str:
  * @package {namespace}
  */
 
+declare(strict_types=1);
+
+namespace {namespace};
+
 if ( ! defined( 'ABSPATH' ) ) {{
 \texit;
 }}
-
-namespace {namespace};
 
 // Composer autoloader — vendor/ is committed for VIP Go platform compatibility.
 if ( file_exists( __DIR__ . '/vendor/autoload.php' ) ) {{
@@ -264,6 +266,8 @@ def _src_plugin_php(name: str, namespace: str, text_domain: str, slug: str) -> s
  *
  * @package {namespace}
  */
+
+declare(strict_types=1);
 
 namespace {namespace};
 
