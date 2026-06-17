@@ -21,11 +21,11 @@ wp_nonce_field( 'my_plugin_save_settings', 'my_plugin_nonce' );
 ### Admin form submission (POST handler)
 
 ```php
-// check_admin_referer() verifies the nonce AND that the referrer is the admin.
-// It calls wp_die() automatically on failure — no manual die() needed.
+// check_admin_referer() verifies the nonce AND that the HTTP referrer originated from the WP admin area (CSRF defense, not authorization — still requires a current_user_can() check).
+// Calls wp_die() automatically on failure — no manual die() needed.
 add_action( 'admin_post_my_plugin_save', function (): void {
     check_admin_referer( 'my_plugin_save_settings', 'my_plugin_nonce' );
-    current_user_can( 'manage_options' ) || wp_die( 'Unauthorized', 403 );
+    current_user_can( 'manage_options' ) || wp_die( 'Unauthorized', '', [ 'response' => 403 ] );
 
     // Safe to process $_POST here.
 } );
@@ -55,7 +55,7 @@ add_action( 'wp_ajax_my_plugin_action', function (): void {
 
 ```php
 if ( ! wp_verify_nonce( $_POST['nonce'] ?? '', 'my_plugin_action' ) ) {
-    wp_die( 'Nonce check failed.', 403 );
+    wp_die( 'Nonce check failed.', '', [ 'response' => 403 ] );
 }
 ```
 
@@ -66,9 +66,8 @@ if ( ! wp_verify_nonce( $_POST['nonce'] ?? '', 'my_plugin_action' ) ) {
 Check capabilities, not role names. Role names are UI labels that can be renamed or reassigned; capabilities are the stable security contract.
 
 ```php
-// Simple capability gate — guard every state-changing action.
 if ( ! current_user_can( 'manage_options' ) ) {
-    wp_die( 'You do not have permission to do this.', 403 );
+    wp_die( 'You do not have permission to do this.', '', [ 'response' => 403 ] );
 }
 ```
 
@@ -78,7 +77,7 @@ Pass the object ID as the third argument; `map_meta_cap()` resolves ownership, p
 
 ```php
 if ( ! current_user_can( 'edit_post', $post_id ) ) {
-    wp_die( 'You cannot edit this post.', 403 );
+    wp_die( 'You cannot edit this post.', '', [ 'response' => 403 ] );
 }
 ```
 
@@ -188,7 +187,6 @@ $results = $wpdb->get_results(
 Dynamic table or column names must use `%i`; do not use `%s` for identifiers.
 
 ```php
-// WP 6.2+: use %i for table/column names.
 $rows = $wpdb->get_results(
     $wpdb->prepare(
         "SELECT * FROM %i WHERE status = %s",
@@ -198,11 +196,7 @@ $rows = $wpdb->get_results(
 );
 ```
 
-### Prefer WP API over raw SQL
-
-Core API functions (`WP_Query`, `get_post_meta`, `update_post_meta`, etc.) handle escaping internally and are less fragile across WP versions. Use `$wpdb` only when no core API covers the query.
-
-For VIPCS rules around `$wpdb` and restricted direct-DB patterns, see [`vip-standards.md`](vip-standards.md).
+Prefer core API functions (`WP_Query`, `get_post_meta`, `update_post_meta`, etc.) over raw SQL — they handle escaping internally. Use `$wpdb` only when no core API covers the query. For VIPCS rules around `$wpdb` and restricted direct-DB patterns, see [`vip-standards.md`](vip-standards.md).
 
 ---
 
@@ -250,7 +244,9 @@ add_action( 'wp_ajax_my_plugin_upload', function (): void {
     }
 
     // Verify real MIME type and extension — $_FILES['type'] is user-controlled.
-    $check = wp_check_filetype_and_ext( $file['file'], $file['url'], wp_get_mime_types() );
+    // $filename arg must be a filename (for extension extraction), not a URL.
+    $check = wp_check_filetype_and_ext( $file['file'], basename( $file['file'] ) );
+    // $mimes defaults to wp_get_mime_types() when omitted.
     if ( ! $check['type'] ) {
         wp_delete_file( $file['file'] );
         wp_send_json_error( 'File type not permitted.' );
