@@ -65,5 +65,34 @@ def test_src_plugin_php_namespace_order():
     namespace_pos = plugin.index("namespace My_Plugin;")
     assert declare_pos < namespace_pos, "declare(strict_types=1) must come before namespace in src/Plugin.php"
 
+def test_refuse_to_overwrite_existing_directory(tmp_path):
+    """Scaffolder must exit non-zero and refuse to overwrite an existing target directory."""
+    script = str(
+        (
+            __import__("pathlib").Path(__file__).parent / "scaffold_plugin.py"
+        ).resolve()
+    )
+    args_base = [sys.executable, script, "--name", "Test Plugin", "--dir", str(tmp_path)]
+
+    # First run: must succeed.
+    result_first = subprocess.run(args_base, capture_output=True, text=True)
+    assert result_first.returncode == 0, f"First run failed: {result_first.stderr}"
+
+    # Count files from first run so we can verify nothing new is written.
+    target = tmp_path / "test-plugin"
+    files_before = set(target.rglob("*"))
+
+    # Second run with identical args: must fail.
+    result_second = subprocess.run(args_base, capture_output=True, text=True)
+    assert result_second.returncode != 0, "Expected non-zero exit when target dir already exists"
+    assert "Error" in result_second.stderr or "error" in result_second.stderr, (
+        f"Expected error message on stderr, got: {result_second.stderr!r}"
+    )
+
+    # Directory contents must be unchanged.
+    files_after = set(target.rglob("*"))
+    assert files_before == files_after, "Scaffolder wrote files on second (refused) run"
+
+
 if __name__ == "__main__":
     sys.exit(subprocess.call([sys.executable, "-m", "pytest", __file__, "-v"]))

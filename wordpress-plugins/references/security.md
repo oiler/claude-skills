@@ -90,7 +90,7 @@ Common capabilities: `manage_options` (settings), `edit_posts` (post editing), `
 Escape **at the echo site**, not on input or storage. The correct escape function depends on the output context (HTML body, attribute, URL, JS), which is only known at render time.
 
 ```php
-echo esc_html( $user_input );                              // HTML body — strips tags
+echo esc_html( $user_input );                              // HTML body text — entity-encodes < > & " ' (does NOT strip tags)
 echo '<input value="' . esc_attr( $user_input ) . '">';   // attribute value
 echo '<a href="' . esc_url( $url ) . '">';                 // href/src — safe schemes only
 echo '<script>var x = "' . esc_js( $v ) . '";</script>';  // JS string literal

@@ -295,7 +295,7 @@ class Plugin {{
 \t}}
 
 \t/** Wire up WordPress action/filter hooks. */
-\tprivate function register_hooks(): void {{
+\tprotected function register_hooks(): void {{
 \t\t// TODO: add add_action() / add_filter() calls here.
 \t}}
 

@@ -44,7 +44,7 @@ Before proceeding, read the reference file that matches your mode (table below).
 To generate a plugin skeleton, run:
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/scaffold_plugin.py --name "My Plugin Name" --dir <target-directory>
+uv run ${CLAUDE_SKILL_DIR}/scripts/scaffold_plugin.py --name "My Plugin Name" --dir wp-content/plugins
 ```
 
 The scaffolder produces the main plugin file, PSR-4 `src/` layout, `composer.json`, and stub test. See `references/structure-and-scaffolding.md` for what it generates and how to extend it.

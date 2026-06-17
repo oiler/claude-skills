@@ -13,7 +13,7 @@ VIPCS layers two rulesets on top of WordPress Coding Standards (WPCS, `wp-coding
 | Ruleset | Enforces |
 |---------|---------|
 | `WordPressVIPMinimum` | VIP-required rules — restricted functions, performance, security patterns |
-| `WordPress-VIP-Go` | Extends `WordPressVIPMinimum`; includes the full WordPress core standards |
+| `WordPress-VIP-Go` | Builds on `WordPressVIPMinimum` and adds a curated subset of WordPress Coding Standards sniffs plus VIP-Go-specific sniffs (not the full WPCS) |
 
 The scaffolder emits `phpcs.xml.dist` and `composer.json` pre-wired with both rulesets.
 
@@ -78,7 +78,7 @@ Key directives:
 
 - `<file>.</file>` + `exclude-pattern` — scans from project root, strips `vendor/` and `node_modules/`.
 - `testVersion` — tells PHPCompatibility sniffs which PHP floor to enforce (8.1+).
-- `WordPress-VIP-Go` extends `WordPressVIPMinimum`; listing both is explicit and valid.
+- `WordPress-VIP-Go` builds on `WordPressVIPMinimum` (curated WPCS subset, not the full standards); listing both is explicit and valid.
 - `WordPress-Docs` — enforces PHPDoc on classes and methods.
 
 ---

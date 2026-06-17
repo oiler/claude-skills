@@ -31,7 +31,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/scaffold_plugin.py \
 ```
 
 **Derivation rules**: slug/text-domain = kebab-case (`"My Plugin"` → `my-plugin`);
-namespace = title-cased words joined by `_` (`"My Plugin"` → `My_Plugin`).
+namespace = first letter of each word uppercased (remainder preserved), joined by `_` (`"My Plugin"` → `My_Plugin`).
 
 **Refuse-to-overwrite**: if `<dir>/<slug>` already exists the script prints an error to
 stderr and exits with code 1. No partial writes.
@@ -95,7 +95,7 @@ declare(strict_types=1);
 namespace My_Plugin;
 ```
 
-`declare(strict_types=1)` must appear immediately after the opening `<?php` tag (post-header).
+`declare(strict_types=1)` must appear immediately after the plugin-header docblock (and before `namespace`).
 The `namespace` declaration must follow it. VIPCS enforces strict types on VIP.
 
 ### `ABSPATH` guard
