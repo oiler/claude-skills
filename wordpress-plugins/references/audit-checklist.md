@@ -51,9 +51,9 @@ A plugin with any open Error cannot ship to WordPress VIP Go.
 
 ### E3 — Direct Filesystem Write
 
-**Grep:** `grep -rn "file_put_contents\|fopen\|fwrite\|unlink\|file_get_contents\|mkdir\|rmdir" --include="*.php" .`
+**Grep:** `grep -rn "file_put_contents\|fopen\|fwrite\|unlink\|mkdir\|rmdir" --include="*.php" .`
 
-**What to look for:** Direct PHP filesystem functions used for writing or deleting files. Read-only `file_get_contents` calls on bundled plugin assets are generally fine; flag writes and deletes.
+**What to look for:** Direct PHP filesystem functions used for writing or deleting files.
 
 **Why it's blocking:** VIP Platform filesystem is read-only outside `wp-content/uploads`; direct writes fail at runtime. Bypassing the WP Filesystem API also breaks FTP/SSH transport environments on self-hosted sites.
 
@@ -183,9 +183,7 @@ Advisories are quality and style issues — not platform-blocking on VIP, but ex
 
 ### A3 — Missing `@since` Tag
 
-**Grep:** `grep -rn "@param\|@return" --include="*.php" . | grep -v "@since"`
-
-**What to look for:** Methods/functions that have `@param` or `@return` but no `@since`. Required by `WordPress-Docs`.
+**What to look for:** For each docblock that contains `@param` or `@return`, confirm a sibling `@since` line is present in the same docblock. A single `grep` cannot detect a missing tag across docblock lines — rely on `composer lint` with the `WordPress-Docs` standard, which flags this automatically. Review lint output rather than grep output for this item.
 
 **Deep reference:** [`documentation.md`](documentation.md) → "`@since` discipline"
 
@@ -248,7 +246,7 @@ Overall: PASS / FAIL (Errors = 0 required to PASS)
 ### [E1] Unbounded Query — `src/Import/Batch.php:47`
 
 **Severity:** Error  
-**Rule:** Bounded Queries ([`vip-performance.md`](references/vip-performance.md))  
+**Rule:** Bounded Queries ([`vip-performance.md`](vip-performance.md))  
 **Finding:** `'posts_per_page' => -1` in `WP_Query` args — will load all posts into memory.  
 **Fix:** Replace with `'posts_per_page' => 100` and paginate across cron ticks.
 
@@ -261,7 +259,7 @@ Overall: PASS / FAIL (Errors = 0 required to PASS)
 ### [A1] Missing PHPDoc — `src/Settings.php:23`
 
 **Severity:** Advisory  
-**Rule:** PHPDoc ([`documentation.md`](references/documentation.md))  
+**Rule:** PHPDoc ([`documentation.md`](documentation.md))  
 **Finding:** `register_settings_page()` has no docblock.  
 **Fix:** Add a summary docblock with `@since` and `@return void`.
 
