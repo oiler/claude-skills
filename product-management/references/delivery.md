@@ -131,6 +131,8 @@ Internal RevOps analysts cannot produce weekly pipeline reports without manually
 
 ### How to Fill
 
+This milestones plan serves most "roadmap" requests. If the ask is a theme-based now/next/later view (horizon roadmap rather than dated milestones), adapt the strategic pillars from `references/strategy.md` into now/next/later horizons instead.
+
 **Milestone:** Name the outcome, not the activity. "Design Complete" names a verifiable state; "work on design" names a process. Each milestone should be answerable with a yes/no: either the outcome is reached or it is not.
 
 **Description:** One sentence clarifying exactly what "done" means for this milestone. If a milestone requires a demo, a sign-off, or a measurement threshold to be considered complete, say so here.
@@ -217,7 +219,7 @@ Keep rows to real decisions and critical tasks. A RACI that lists every sub-task
 
 ### Filled Example
 
-The skeleton rows below demonstrate the single-A rule: each row has exactly one person in the Accountable column.
+The example rows below demonstrate the single-A rule: each row has exactly one person in the Accountable column.
 
 ```markdown
 # Roles & Responsibilities (RACI Matrix) — Unified Data Workspace
