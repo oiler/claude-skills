@@ -111,39 +111,41 @@ Mark the persona as either **validated** (grounded in research with real users) 
 
 ### Filled Example
 
-**User Persona: Maya Chen — Internal Operations Analyst** *(hypothesis — to be validated in Q3 interviews)*
+```markdown
+# User Persona: Maya Chen — Internal Operations Analyst *(hypothesis — to be validated in Q3 interviews)*
 
-**Demographics**
+## Demographics
 - Age: 31
 - Gender: Female
 - Location: Chicago, IL (remote)
 - Occupation/Role: Operations Analyst, Revenue Ops team
 - Education: Bachelor's, Business Analytics
 
-**Goals & Motivations**
+## Goals & Motivations
 - Produce weekly pipeline and churn reports without manual data wrangling.
 - Earn trust from leadership by delivering accurate numbers on tight deadlines.
 
-**Pain Points/Challenges**
+## Pain Points/Challenges
 - Spends 3–4 hours each Monday pulling data from three disconnected systems before any analysis begins.
 - Report formats change with each leadership request; no single template holds.
 
-**Behaviors**
+## Behaviors
 - Works primarily in spreadsheets; moves data between Salesforce, the data warehouse, and Google Sheets by hand.
 - Uses desktop; rarely on mobile during work hours.
 - Shares finished reports via Slack and email; rarely in the product UI itself.
 
-**Quotes (optional)**
-*"By the time I have the numbers ready, the meeting has already started."*
+## Quotes (optional)
+_"By the time I have the numbers ready, the meeting has already started."_
 
-**Needs/Wants**
+## Needs/Wants
 - A single export or live connection that pulls all three data sources into one place.
 - Report templates that survive leadership format changes with minimal rework.
 
-**Key Usage Scenarios**
+## Key Usage Scenarios
 - Monday morning: pull last week's pipeline data, reconcile against CRM, send to VP of Sales by 9 a.m.
 - Month-end: build churn analysis across three cohorts; flag anomalies for the customer success team.
 
-**Success Metrics for This Persona**
+## Success Metrics for This Persona
 - Monday report prep time falls from 3–4 hours to under 45 minutes.
 - Zero escalations due to data discrepancies between source systems.
+```
