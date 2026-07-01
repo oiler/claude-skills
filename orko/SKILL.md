@@ -47,22 +47,24 @@ Three things define the role. You own the thread and never disappear into the wo
 ## The engagement protocol
 
 1. **Open** — restate the request. If it is genuinely underspecified, ask 1–2 scoping questions; otherwise proceed.
-2. **Propose (the gate)** — write `brief.md`, then present its seat list (each as *role / model tier / what it investigates*) and dispatch plan for approval; **wait for the user's go** before any expert runs.
+2. **Propose (the gate)** — write `brief.md`, then present its seat list (each as *role / model tier / what it investigates*) and dispatch plan for approval; **wait for the user's go** before any expert runs. State the cost shape plainly: verification roughly doubles the dispatch (one verifier per seat), so present it as a cost choice the user opts into — not a silent default.
 3. **Dispatch** — issue one `Task` call per seat **in a single message** (parallel), with `model` set per tier. Each seat is one-shot: pack everything it needs into the prompt (seats inherit no conversation history). Use the dispatch template in [references/seats.md](references/seats.md).
 4. **Verify** (default on) — dispatch one fresh-context verifier per seat (parallel); each writes `findings/<seat>.verdict.md`. The user may downgrade — "skip verification" → the conductor self-reviews each finding against the source while synthesizing (no separate verifier seat); "no verification" → trust the seats and synthesize directly. Use the verifier template in [references/seats.md](references/seats.md).
-5. **Synthesize** — read findings + verdicts; write `synthesis.md` with cross-cutting conclusions, conflicts, and a recommended order of action, kept clearly separate from the verbatim per-seat relay.
+5. **Synthesize** — read findings + verdicts; write `synthesis.md` with cross-cutting conclusions, conflicts, and a recommended order of action, kept clearly separate from the verbatim per-seat relay. Where seats disagree, surface the conflict as a first-class finding — disagreement marks where the genuine uncertainty lives; do not smooth it into a false consensus.
 6. **Re-ground** — report back: outcome first, attributed by seat, with links into the trail.
 7. **Close** — note where the trail lives; offer to promote `synthesis.md` if the engagement is worth keeping.
 
 ## Model tiering
 
-The conductor assigns a tier per seat by task difficulty and states it at the gate so the user can override.
+The conductor assigns a tier per seat by task difficulty and states it at the gate so the user can override. Default the tier *down*: the cheapest model that clears the bar is the resting state, and Opus is the exception you justify per seat — not where seats start.
 
 | Seat | Model |
 |---|---|
-| Conductor + judgment-heavy seats (security analysis, architecture critique, synthesis, verifier) | Opus 4.8 |
-| Moderate (focused review, targeted research) | Sonnet 4.6 |
+| Conductor + synthesis — where the final judgment lives | Opus 4.8 |
+| Analyst seats (security analysis, architecture critique, focused review, targeted research) **and verifiers** | Sonnet 4.6 — the default; escalate a single seat to Opus only when its question genuinely needs frontier judgment, and say why at the gate |
 | Mechanical (file survey, grep-and-report, test runs, inventory) | Haiku 4.5 |
+
+Verification is the easiest place to overspend: it adds one verifier per seat, so an all-Opus verifier round is the most expensive, most duplicated step in the engagement. A fresh-context prose re-check against cited evidence is Sonnet work — keep Opus for the conductor and synthesis, where the quality actually lives.
 
 A committee of cheap seats synthesized by Opus can underperform one Opus pass on a hard, non-parallel problem — orko wins on breadth, isolation, and cost, so skip the fan-out when it does not earn its keep.
 

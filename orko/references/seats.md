@@ -45,6 +45,7 @@ Rules:
 - Substantiate every claim against a tool result (cite file:line or command output). State explicitly what you did NOT check.
 - Do not change anything. Report findings only.
 - Stay within your seat's scope; flag adjacent issues in one line, don't chase them.
+- Be concise: findings are evidence, not prose. No preamble, no restating the task, no narrating your steps — output tokens cost several times more than input, and the conductor only needs the substance.
 
 When done:
 1. Write your full findings to docs/sessions/<slug>/findings/<seat>.md using the FINDINGS schema exactly.

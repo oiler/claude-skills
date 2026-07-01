@@ -30,4 +30,6 @@ Two constraints pin this as an upgrade, not the everyday baseline. The Workflow 
 
 orko v1 is an analysis instrument — review, audit, research. To extend it to build engagements, the conductor sequences a plan → execute → verify → finish lifecycle and hands the implementer seats to `subagent-driven-development` rather than inventing its own execution machinery. Analyst seats (the v1 cast) and implementer seats then coexist in one engagement: analysts investigate and report, implementers build against an approved plan, and the conductor runs both under the same gate-and-trail protocol.
 
+**The judge is tuned per task.** v1's verifier is a *prose* judge — it re-reads findings and labels them against cited evidence, which is the right referee for analysis, review, and research. Code is different: synthesizing a tidy summary of three competing patches tells you nothing about whether the code runs. So when build seats produce competing implementations, the judge must not synthesize prose — it runs the test suite and keeps the candidate whose patch passes. Same panel-plus-judge shape, objective referee swapped in. The rule for v2: prose work gets a synthesizing judge, code work gets a judge that runs the tests.
+
 This is deferred. It is NOT built in v1 — recorded here as the intended shape of a future version, not a capability orko currently has.
