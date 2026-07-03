@@ -11,6 +11,8 @@ from extract_session import (
     build_agents_markdown,
     extract_tasks,
     build_tasks_markdown,
+    extract_model_usage,
+    build_model_usage_markdown,
 )
 
 
@@ -310,6 +312,128 @@ def test_build_tasks_markdown_table_and_totals():
     assert "| 1 | Build it | completed |" in md
     assert "| 2 | Test it | in_progress |" in md
     assert "2 tasks, 1 completed" in md
+
+
+def _main_call(model, inp, out, cache_read=0, cache_write=0):
+    return {"type": "assistant", "message": {
+        "model": model,
+        "usage": {"input_tokens": inp, "output_tokens": out,
+                  "cache_read_input_tokens": cache_read,
+                  "cache_creation_input_tokens": cache_write},
+        "content": [{"type": "text", "text": "..."}]}}
+
+
+def _agent_dispatch(call_id, agent_type, resolved_model, usage=None, total_tokens=0):
+    result = {"status": "completed", "agentType": agent_type,
+              "resolvedModel": resolved_model, "totalTokens": total_tokens}
+    if usage is not None:
+        result["usage"] = usage
+    return [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": call_id, "name": "Agent",
+             "input": {"description": "Do X", "subagent_type": agent_type}}]}},
+        {"type": "user", "toolUseResult": result,
+         "message": {"content": [{"type": "tool_result", "tool_use_id": call_id, "content": "done"}]}},
+    ]
+
+
+def test_extract_model_usage_aggregates_main_by_model():
+    records = [
+        _main_call("claude-opus-4-8", 10, 100, cache_read=1000, cache_write=200),
+        _main_call("claude-opus-4-8", 5, 50, cache_read=500),
+        _main_call("claude-haiku-4-5", 1, 2),
+    ]
+    rows = extract_model_usage(records)
+    assert rows == [
+        {"where": "main", "model": "claude-opus-4-8", "calls": 2,
+         "input": 15, "output": 150, "cache_read": 1500, "cache_write": 200,
+         "total": 1865},
+        {"where": "main", "model": "claude-haiku-4-5", "calls": 1,
+         "input": 1, "output": 2, "cache_read": 0, "cache_write": 0, "total": 3},
+    ]
+
+
+def test_extract_model_usage_skips_synthetic_and_missing_usage():
+    records = [
+        # synthetic records (error placeholders) carry no real spend
+        {"type": "assistant", "message": {"model": "<synthetic>", "content": []}},
+        # assistant record without usage -> nothing to count
+        {"type": "assistant", "message": {"model": "claude-opus-4-8", "content": []}},
+        {"type": "user", "message": {"content": "not counted"}},
+    ]
+    assert extract_model_usage(records) == []
+
+
+def test_extract_model_usage_groups_agents_by_type_and_model():
+    records = (
+        [_main_call("claude-opus-4-8", 10, 100)]
+        + _agent_dispatch("a1", "general-purpose", "claude-haiku-4-5",
+                          usage={"input_tokens": 3, "output_tokens": 7,
+                                 "cache_read_input_tokens": 90,
+                                 "cache_creation_input_tokens": 0})
+        + _agent_dispatch("a2", "general-purpose", "claude-haiku-4-5",
+                          usage={"input_tokens": 1, "output_tokens": 9,
+                                 "cache_read_input_tokens": 10,
+                                 "cache_creation_input_tokens": 80})
+        + _agent_dispatch("a3", "Explore", "claude-opus-4-8",
+                          usage={"input_tokens": 2, "output_tokens": 8,
+                                 "cache_read_input_tokens": 0,
+                                 "cache_creation_input_tokens": 0})
+    )
+    rows = extract_model_usage(records)
+    assert rows[0]["where"] == "main"
+    assert rows[1] == {"where": "agent: general-purpose", "model": "claude-haiku-4-5",
+                       "calls": 2, "input": 4, "output": 16, "cache_read": 100,
+                       "cache_write": 80, "total": 200}
+    assert rows[2] == {"where": "agent: Explore", "model": "claude-opus-4-8",
+                       "calls": 1, "input": 2, "output": 8, "cache_read": 0,
+                       "cache_write": 0, "total": 10}
+
+
+def test_extract_model_usage_agent_totaltokens_fallback():
+    # older results carry only totalTokens, no usage breakdown -> count it in total
+    records = _agent_dispatch("a1", "general-purpose", "claude-haiku-4-5",
+                              total_tokens=5000)
+    rows = extract_model_usage(records)
+    assert rows == [{"where": "agent: general-purpose", "model": "claude-haiku-4-5",
+                     "calls": 1, "input": 0, "output": 0, "cache_read": 0,
+                     "cache_write": 0, "total": 5000}]
+
+
+def test_build_model_usage_markdown_empty_is_blank():
+    assert build_model_usage_markdown([]) == ""
+
+
+def test_build_model_usage_markdown_table_and_totals():
+    rows = [
+        {"where": "main", "model": "claude-opus-4-8", "calls": 2,
+         "input": 15, "output": 150, "cache_read": 1500, "cache_write": 200, "total": 1865},
+        {"where": "agent: general-purpose", "model": "claude-haiku-4-5", "calls": 2,
+         "input": 4, "output": 16, "cache_read": 100, "cache_write": 80, "total": 200},
+    ]
+    md = build_model_usage_markdown(rows)
+    assert md.startswith("## Model Usage\n")
+    assert "| main | claude-opus-4-8 | 2 | 15 | 150 | 1,500 | 200 | 1,865 |" in md
+    assert "| agent: general-purpose | claude-haiku-4-5 | 2 | 4 | 16 | 100 | 80 | 200 |" in md
+    assert "2,065 tokens total" in md
+    assert "main 1,865" in md
+    assert "subagents 200" in md
+
+
+def test_assemble_document_includes_model_usage_section():
+    meta = {
+        "session_id": "abc",
+        "date": "2026-06-06",
+        "cwd": "/x",
+        "git_branch": "master",
+        "prompt_count": 1,
+        "tools_used": {},
+        "files_touched": [],
+    }
+    usage_md = "## Model Usage\n\n| Where | ... |"
+    doc = assemble_document("s", "Sum.", "## Prompts (chronological)\n", meta,
+                            "goal: x\n", model_usage_markdown=usage_md)
+    assert "## Model Usage" in doc
 
 
 def test_resolve_output_path_collision_suffix(tmp_path):

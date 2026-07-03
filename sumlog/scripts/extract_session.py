@@ -126,6 +126,91 @@ def build_agents_markdown(agents):
     return "\n".join(lines)
 
 
+def _usage_row(usage):
+    """Token components from an API usage dict, missing fields as 0."""
+    inp = usage.get("input_tokens", 0)
+    out = usage.get("output_tokens", 0)
+    cr = usage.get("cache_read_input_tokens", 0)
+    cw = usage.get("cache_creation_input_tokens", 0)
+    return {"input": inp, "output": out, "cache_read": cr, "cache_write": cw,
+            "total": inp + out + cr + cw}
+
+
+def extract_model_usage(records):
+    """Token spend grouped by where it happened: one row per model for the main
+    conversation, one row per (agent type, resolved model) for subagent dispatches.
+    Total = input + output + cache read + cache write, matching Claude Code's own
+    totalTokens rollup."""
+    groups = {}   # (where, model) -> row
+    order = []
+
+    def add(where, model, usage_row, calls=1):
+        key = (where, model)
+        if key not in groups:
+            groups[key] = {"where": where, "model": model, "calls": 0,
+                           "input": 0, "output": 0, "cache_read": 0,
+                           "cache_write": 0, "total": 0}
+            order.append(key)
+        row = groups[key]
+        row["calls"] += calls
+        for k in ("input", "output", "cache_read", "cache_write", "total"):
+            row[k] += usage_row[k]
+
+    results = _tool_result_map(records)
+    for r in records:
+        if r.get("type") != "assistant":
+            continue
+        msg = r.get("message", {})
+        model = msg.get("model")
+        usage = msg.get("usage")
+        # synthetic records are error placeholders, not API calls
+        if model and model != "<synthetic>" and isinstance(usage, dict):
+            add("main", model, _usage_row(usage))
+        for b in msg.get("content", []):
+            if not isinstance(b, dict) or b.get("type") != "tool_use" or b.get("name") != "Agent":
+                continue
+            res = results.get(b.get("id"), {})
+            agent_type = res.get("agentType") or b.get("input", {}).get("subagent_type", "?")
+            model = res.get("resolvedModel") or b.get("input", {}).get("model") or "inherit"
+            usage = res.get("usage")
+            if isinstance(usage, dict):
+                row = _usage_row(usage)
+            elif res.get("totalTokens"):
+                # older results carry only the rollup, no component breakdown
+                row = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0,
+                       "total": res["totalTokens"]}
+            else:
+                continue
+            add(f"agent: {agent_type}", model, row)
+
+    return [groups[k] for k in order]
+
+
+def build_model_usage_markdown(rows):
+    """Render token spend by agent/model as a table with a totals line, or '' if empty."""
+    if not rows:
+        return ""
+    lines = [
+        "## Model Usage",
+        "",
+        "| Where | Model | Calls | Input | Output | Cache Read | Cache Write | Total |",
+        "|-------|-------|-------|-------|--------|------------|-------------|-------|",
+    ]
+    main_total = agent_total = 0
+    for r in rows:
+        if r["where"] == "main":
+            main_total += r["total"]
+        else:
+            agent_total += r["total"]
+        lines.append(
+            f"| {r['where']} | {r['model']} | {r['calls']} | {r['input']:,} | "
+            f"{r['output']:,} | {r['cache_read']:,} | {r['cache_write']:,} | {r['total']:,} |"
+        )
+    lines += ["", f"_{main_total + agent_total:,} tokens total — "
+                  f"main {main_total:,}, subagents {agent_total:,}._"]
+    return "\n".join(lines)
+
+
 def extract_tasks(records):
     """Reconstruct the session task list. Replays TaskCreate/TaskUpdate events in order;
     falls back to the last TodoWrite snapshot if the incremental task tools weren't used."""
@@ -262,7 +347,7 @@ def render_metadata_yaml(meta):
 
 
 def assemble_document(slug, summary, prompts_markdown, meta, handoff_text,
-                      agents_markdown="", tasks_markdown=""):
+                      agents_markdown="", tasks_markdown="", model_usage_markdown=""):
     """Build the complete session-log markdown. prompts_markdown is spliced byte-exact."""
     parts = [
         f"# Session Log — {meta['date']} — {slug}",
@@ -276,6 +361,8 @@ def assemble_document(slug, summary, prompts_markdown, meta, handoff_text,
     ]
     if tasks_markdown.strip():
         parts += [tasks_markdown.rstrip("\n"), ""]
+    if model_usage_markdown.strip():
+        parts += [model_usage_markdown.rstrip("\n"), ""]
     if agents_markdown.strip():
         parts += [agents_markdown.rstrip("\n"), ""]
     parts += [
@@ -310,6 +397,7 @@ def load_session():
     prompts = extract_prompts(records)
     agents = extract_agents(records)
     tasks = extract_tasks(records)
+    model_usage = extract_model_usage(records)
     meta = build_metadata(records)
     meta.update({
         "session_id": session_id,
@@ -319,7 +407,7 @@ def load_session():
         "prompt_count": len(prompts),
     })
     return (build_prompts_markdown(prompts), build_agents_markdown(agents),
-            build_tasks_markdown(tasks), meta)
+            build_tasks_markdown(tasks), build_model_usage_markdown(model_usage), meta)
 
 
 def main(argv=None):
@@ -334,13 +422,14 @@ def main(argv=None):
     parser.add_argument("--out", help="Explicit output path (overrides docs/session-logs/<date>-<slug>.md).")
     args = parser.parse_args(argv)
 
-    prompts_markdown, agents_markdown, tasks_markdown, meta = load_session()
+    prompts_markdown, agents_markdown, tasks_markdown, model_usage_markdown, meta = load_session()
 
     if not args.assemble:
         print(json.dumps({
             "prompts_markdown": prompts_markdown,
             "agents_markdown": agents_markdown,
             "tasks_markdown": tasks_markdown,
+            "model_usage_markdown": model_usage_markdown,
             "metadata": meta,
         }, indent=2))
         return
@@ -356,7 +445,7 @@ def main(argv=None):
     summary = Path(args.summary_file).read_text()
     handoff_text = Path(args.handoff_file).read_text()
     doc = assemble_document(args.slug, summary, prompts_markdown, meta, handoff_text,
-                            agents_markdown, tasks_markdown)
+                            agents_markdown, tasks_markdown, model_usage_markdown)
     out = Path(args.out) if args.out else resolve_output_path(args.slug, meta["date"])
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(doc)
