@@ -22,7 +22,7 @@ Recommended examples as of 2026-07-06 (VOLATILE — verify at /docs/models): GPT
 Model IDs use the format `provider/model-id`. Examples:
 
 - `anthropic/claude-sonnet-4-5`
-- `openai/gpt-5`
+- `openai/gpt-5.1-codex`
 - `opencode/gpt-5.1-codex` (via OpenCode Zen)
 
 OpenCode reaches 75+ providers via the AI SDK + models.dev. Use `/connect` to add credentials, `/models` to switch interactively, and `opencode models` to list what's available.
@@ -31,9 +31,9 @@ Ways to set the model, from broadest to narrowest scope:
 
 - **Global default** — the `model` key in `opencode.json`.
 - **Per-agent override** — the `model` field, set either in a JSON `agent{}` block or in a markdown-agent's frontmatter (`~/.config/opencode/agents/*.md` or `.opencode/agents/*.md`).
-- **Subagent inheritance** — subagents inherit the invoking primary agent's model unless they set their own `model`.
+- **Subagent inheritance** — subagents inherit the invoking primary agent's model unless they set their own `model`. (verify: /docs/agents)
 
-Provider-specific options pass through the config. OpenAI reasoning models take `reasoningEffort` and `textVerbosity`; Anthropic takes `thinking.budgetTokens`. Variants exist per option (e.g. `high` / `max` / `low`).
+Provider-specific options (`reasoningEffort`, `textVerbosity`, `thinking.budgetTokens`) go in two places depending on scope: at the AGENT level they are DIRECT fields on the agent alongside `model` (as with `reasoningEffort` in the JSON below), while at the PROVIDER-WIDE level they nest under the model's `options` block (`provider.<id>.models.<id>.options`). OpenAI reasoning models take `reasoningEffort` and `textVerbosity`; Anthropic takes `thinking.budgetTokens`; variants exist per option (e.g. `high` / `max` / `low`).
 
 Concrete example — two subagents pinned to DIFFERENT providers, each scoped to read-appropriate work, ready for parallel dispatch:
 

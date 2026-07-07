@@ -65,7 +65,7 @@ OpenCode moves fast; several answers are version-sensitive. Treat the following 
 When a question is version-sensitive:
 
 1. Fetch the page mapped in `references/live-docs.md` before answering — do not answer from memory.
-2. If `webfetch` is permission-denied in OpenCode, either ask the user to approve it or dispatch the read-only `scout` subagent to read the page.
+2. If `webfetch` is permission-denied in OpenCode, dispatch the read-only `scout` subagent to read the page, or if that is unavailable ask the user to approve webfetch.
 3. If neither is available, answer from the digest in the reference files and explicitly flag the answer as possibly stale, citing the verify URL so the user can confirm.
 
 ## References
