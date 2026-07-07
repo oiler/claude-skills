@@ -52,7 +52,7 @@ Concrete example — two subagents pinned to DIFFERENT providers, each scoped to
       "description": "Tool-calling + code generation",
       "mode": "subagent",
       "model": "openai/gpt-5.1-codex",
-      "options": { "reasoningEffort": "high" }
+      "reasoningEffort": "high"
     }
   }
 }
