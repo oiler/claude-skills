@@ -40,3 +40,29 @@ While in the stance, honor inline overrides in plain language: model/effort ("us
 | Writing the focused Codex task spec | Test fixing |
 | Inspecting Codex's diff / output | Refactors, mechanical edits |
 | Final review + accept / reject / re-scope | — |
+
+## Codex defaults
+
+Dispatch every Codex task with these defaults, stated explicitly (`/codex:rescue` leaves model/effort unset otherwise):
+
+```
+/codex:rescue --model gpt-5.5 --effort xhigh --write <focused task>
+```
+
+- **Foreground** by default. Add `--background` for long runs, then check back.
+- **Model slugs** (all support effort `low|medium|high|xhigh`; verified against the local Codex model cache — do not invent others):
+
+  | `--model` | When |
+  |---|---|
+  | `gpt-5.5` | **Default** — frontier coding/research. |
+  | `gpt-5.4` | Prior frontier tier. |
+  | `gpt-5.4-mini` | Cheap/fast mechanical tasks. |
+  | `spark` | Speed (plugin maps it to `gpt-5.3-codex-spark`). |
+
+- **Effort:** `xhigh` by default. Drop to `high`/`medium` for cheap mechanical work.
+- **Write posture:** `--write` (Codex edits files) by default, matching real implementation. For diagnosis/review only, omit `--write` and say "read-only".
+- **Thread continuity:** `--resume` to continue the current Codex thread, `--fresh` to start clean.
+
+### Dependency
+
+This skill requires the **openai-codex** plugin, installed and authenticated. If a dispatch reports Codex missing or unauthenticated, stop and tell the user to run **`/codex:setup`** — do not improvise a workaround.
