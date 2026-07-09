@@ -66,3 +66,26 @@ Dispatch every Codex task with these defaults, stated explicitly (`/codex:rescue
 ### Dependency
 
 This skill requires the **openai-codex** plugin, installed and authenticated. If a dispatch reports Codex missing or unauthenticated, stop and tell the user to run **`/codex:setup`** — do not improvise a workaround.
+
+## The cycle (run this every task)
+
+1. **Scope** — one clear objective, self-contained. Give Codex the files, the goal, and the acceptance check. See the task template below.
+2. **Dispatch** — `/codex:rescue` with the current defaults/overrides.
+3. **Inspect** — read the actual diff/output yourself. **Non-negotiable: do not blindly trust Codex output.**
+4. **Verify** — run tests / typecheck / lint where relevant before declaring done.
+5. **Accept or re-scope** — if Codex went sideways, tighten the task and re-delegate (`--resume`) rather than silently hand-patching.
+
+## How to write a good Codex task
+
+Keep it focused and specific. Include:
+- **Objective** — one outcome, stated plainly.
+- **Context** — the exact files/functions in play and any constraint (style, framework, version).
+- **Acceptance** — how Codex (and you) will know it's done: the test that must pass, the behavior to see.
+
+Prefer several tight tasks over one sprawling one. A task Codex can hold in context is a task Codex gets right.
+
+## When NOT to use this skill
+
+- **A plain one-off "just send this to Codex"** → call `/codex:rescue` directly. You don't need the stance for a single dispatch.
+- **Parallel fan-out across independent tasks** → use `superpowers:dispatching-parallel-agents`. This skill is the *serial* brain-hands stance, not a parallel dispatcher.
+- **Analysis / PM orchestration** → that's the `orko` skill, a different domain.
