@@ -16,6 +16,46 @@ import json
 import re
 import sys
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+NAMESPACE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+
+class InvalidInput(ValueError):
+    """Raised when a caller-supplied value would corrupt the generated plugin."""
+
+
+def validate_inputs(name: str, namespace: str, text_domain: str, slug: str) -> None:
+    """Reject inputs that would escape their intended context.
+
+    Every value here is interpolated into generated PHP, XML, or a filesystem path,
+    so the boundary is the only place to stop a value that breaks out of one. An
+    empty slug is the dangerous case: it makes every output path absolute, and
+    `Path(dir) / "/x"` silently discards `dir` and writes to the filesystem root.
+    """
+    if any(ord(ch) < 0x20 for ch in name):
+        raise InvalidInput("--name must not contain control characters (newlines, tabs).")
+    if not SLUG_RE.match(slug):
+        raise InvalidInput(
+            f"--name {name!r} yields the slug {slug!r}, which is not a usable "
+            "directory name. Use a name containing at least one letter or digit."
+        )
+    if not NAMESPACE_RE.match(namespace):
+        raise InvalidInput(
+            f"--namespace {namespace!r} is not a valid PHP namespace segment "
+            "(letters, digits, and underscores; must not start with a digit)."
+        )
+    if not SLUG_RE.match(text_domain):
+        raise InvalidInput(
+            f"--text-domain {text_domain!r} is not kebab-case "
+            "(lowercase letters, digits, and hyphens)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +160,9 @@ def _composer_json(name: str, namespace: str, text_domain: str, slug: str) -> st
 
 
 def _phpcs_xml_dist(name: str, namespace: str, text_domain: str, slug: str) -> str:
+    # validate_inputs() already constrains namespace/text_domain to XML-safe charsets;
+    # name is free-form prose, so escape it for the attribute and text contexts below.
+    name = xml_escape(name, {'"': "&quot;", "'": "&apos;"})
     return f"""\
 <?xml version="1.0"?>
 <ruleset name="{name}">
@@ -327,6 +370,7 @@ class Plugin {{
 def build_files(name: str, namespace: str, text_domain: str) -> dict[str, str]:
     """Return a mapping of relative-path -> file-content for the full plugin skeleton."""
     slug = slugify(name)
+    validate_inputs(name, namespace, text_domain, slug)
 
     builders = {
         f"{slug}/{slug}.php": _main_php,
@@ -377,6 +421,13 @@ def main() -> None:
     namespace = args.namespace or namespacify(args.name)
     text_domain = args.text_domain or slugify(args.name)
     slug = slugify(args.name)
+
+    try:
+        validate_inputs(args.name, namespace, text_domain, slug)
+    except InvalidInput as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
     target = Path(args.dir) / slug
 
     if target.exists():
@@ -389,7 +440,8 @@ def main() -> None:
     files = build_files(args.name, namespace, text_domain)
 
     for rel_path, content in files.items():
-        abs_path = Path(args.dir) / rel_path
+        # Join component-by-component: Path(a) / b discards a when b is absolute.
+        abs_path = Path(args.dir).joinpath(*Path(rel_path).parts)
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(content, encoding="utf-8")
         print(f"  created  {abs_path}")

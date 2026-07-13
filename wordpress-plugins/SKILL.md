@@ -1,22 +1,22 @@
 ---
 name: wordpress-plugins
 description: >
-  Use for all WordPress plugin work: build a WordPress plugin, create a plugin,
-  plugin development, WordPress VIP plugin, VIP coding standards, VIPCS, make
-  this plugin VIP compliant, audit my plugin, plugin boilerplate, scaffold a
-  plugin, composer autoload WordPress, PSR-4 plugin, scale a WordPress plugin,
-  plugin performance, object cache, transients, plugin security, nonces, escape
-  output, prepared statements, readme.txt, plugin headers, plugin release,
-  WordPress plugin architecture, add a shortcode, add a REST endpoint, register
-  post type, register taxonomy, enqueue scripts, enqueue styles, admin settings
-  page, options API, Settings API, activation hook, deactivation hook, uninstall
-  hook, cron jobs, wp_schedule_event, multisite plugin, network-activated plugin,
-  WordPress coding standards, phpcs WordPress, write unit tests for a plugin,
-  WP_Mock, plugin changelog, plugin versioning.
+  Build, audit, secure, and scale WordPress plugins to VIP Coding Standards,
+  with a deterministic scaffolder. Use for all WordPress plugin work: build a
+  plugin, plugin development, WordPress VIP plugin, VIP coding standards, VIPCS,
+  VIP compliant, audit my plugin, scaffold a plugin, composer autoload, PSR-4,
+  plugin performance, object cache, transients, plugin security, nonces,
+  escape output, prepared statements, readme.txt, plugin release, shortcodes,
+  REST endpoints, register post type or taxonomy, enqueue scripts/styles,
+  admin settings page, Options/Settings API,
+  activation/deactivation/uninstall hooks, cron jobs, wp_schedule_event,
+  multisite or network-activated plugin, phpcs, plugin unit tests, WP_Mock,
+  plugin changelog, plugin versioning.
   NOT for: Gutenberg blocks or block editor components (use wordpress-blocks);
-  generic OWASP/security fundamentals unrelated to WordPress (use web-security);
-  block themes or FSE (not covered by this skill).
-allowed-tools: Bash, Read, Write, Edit
+  theme code in functions.php or theme templates (use wordpress-themes);
+  generic OWASP fundamentals unrelated to WordPress (use web-security); block
+  themes or FSE (not covered).
+allowed-tools: Bash(uv run *) Bash(composer *) Bash(grep *) Read Write Edit
 ---
 
 ## WordPress Plugins skill

@@ -4,7 +4,8 @@
 # dependencies = ["pytest"]
 # ///
 import sys, subprocess
-from scaffold_plugin import slugify, namespacify, build_files
+import pytest
+from scaffold_plugin import slugify, namespacify, build_files, validate_inputs, InvalidInput
 
 def test_slugify_spaces_and_case():
     assert slugify("My Cool Plugin") == "my-cool-plugin"
@@ -92,6 +93,52 @@ def test_refuse_to_overwrite_existing_directory(tmp_path):
     # Directory contents must be unchanged.
     files_after = set(target.rglob("*"))
     assert files_before == files_after, "Scaffolder wrote files on second (refused) run"
+
+
+@pytest.mark.parametrize("degenerate", ["!!!", "   ", "---", "'''", "!@#$%"])
+def test_degenerate_name_rejected(degenerate):
+    """A name that slugifies to "" made every output path absolute, and
+    Path(dir) / "/composer.json" discards dir — writing to the filesystem root."""
+    assert slugify(degenerate) == ""
+    with pytest.raises(InvalidInput):
+        build_files(degenerate, "X", "x")
+
+
+def test_explicit_namespace_with_php_payload_rejected():
+    """--namespace bypassed namespacify() when passed explicitly, splicing raw into `namespace {ns};`."""
+    with pytest.raises(InvalidInput):
+        validate_inputs(
+            "Test Plugin",
+            'Foo; } function evil(){ system($_GET["c"]); } namespace Foo',
+            "test-plugin",
+            "test-plugin",
+        )
+
+
+def test_explicit_text_domain_with_payload_rejected():
+    with pytest.raises(InvalidInput):
+        validate_inputs("Test Plugin", "Test_Plugin", 'x"/><evil', "test-plugin")
+
+
+def test_name_with_newline_rejected():
+    """A newline in --name injected an extra line into the generated .gitignore."""
+    with pytest.raises(InvalidInput):
+        build_files("Evil Plugin\nvendor/secrets.php", "Evil_Plugin", "evil-plugin")
+
+
+def test_xml_metachars_in_name_are_escaped():
+    """name is free-form prose, so it is escaped rather than rejected."""
+    files = build_files('Quote" & <Angle> Plugin', "Quote_Angle_Plugin", "quote-angle-plugin")
+    phpcs = files["quote-angle-plugin/phpcs.xml.dist"]
+    assert "&quot;" in phpcs and "&amp;" in phpcs and "&lt;Angle&gt;" in phpcs
+    assert '<Angle>' not in phpcs
+
+    import xml.dom.minidom
+    xml.dom.minidom.parseString(phpcs)  # raises if the payload broke the document
+
+
+def test_valid_inputs_still_pass():
+    validate_inputs("My Cool Plugin", "My_Cool_Plugin", "my-cool-plugin", "my-cool-plugin")
 
 
 if __name__ == "__main__":

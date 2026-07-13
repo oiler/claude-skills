@@ -123,7 +123,7 @@ Keep `[project.optional-dependencies]` only for actual installable extras (e.g.,
 | `pip-compile requirements.in` | `uv lock` |
 | `poetry add <pkg>` | `uv add <pkg>` |
 | `poetry install` | `uv sync` |
-| `poetry shell` | `uv run <cmd>` for one-shot commands; `uv shell` (uv 0.5+) if you specifically want an activated shell prompt |
+| `poetry shell` | `uv run <cmd>` for one-shot commands. There is no `uv shell` (long-requested, not implemented); for a persistent activated prompt, `source .venv/bin/activate` |
 | `pipenv install <pkg>` | `uv add <pkg>` |
 | `pipenv install --dev <pkg>` | `uv add --dev <pkg>` |
 

@@ -1,8 +1,8 @@
 ---
 name: web-security
-description: Application-level security for web development. Use when writing, reviewing, or auditing code for security in WordPress, Laravel, Django, FastAPI, or Plotly Dash. Covers OWASP Top 10 2021, XSS prevention, SQL injection, command injection, path traversal, CSRF, security headers (CSP, HSTS, CORS), session and cookie security, JWT handling, authentication, password policy, file uploads, API security, PII protection, and secure configuration. Trigger on "security review", "secure this", "harden", "vulnerability", "XSS", "injection", "CSRF", "CORS", "CSP", "security headers", "session security", "JWT", "password", "auth", "path traversal", "command injection", "shell exec", or "OWASP".
+description: Application-level security for web development. Use when writing, reviewing, or auditing code for security in WordPress, Laravel, Django, Flask, FastAPI, or Plotly Dash. Covers OWASP Top 10 2025, XSS prevention, SQL injection, command injection, path traversal, CSRF, security headers (CSP, HSTS, CORS), session and cookie security, JWT handling, authentication, password policy, file uploads, API security, PII protection, and secure configuration. Trigger on "security review", "secure this", "harden", "vulnerability", "XSS", "injection", "CSRF", "CORS", "CSP", "security headers", "session security", "JWT", "password", "auth", "path traversal", "command injection", "shell exec", or "OWASP".
 metadata:
-  version: 1.1.0
+  version: 1.2.0
   category: security
   tags: [security, owasp, web, wordpress, laravel, django, fastapi, dash]
 ---
@@ -19,20 +19,20 @@ Application-level security guidance for WordPress (PHP), Laravel (PHP), Django (
 - **Fail securely — errors must not expose system details.** Stack traces, file paths, and SQL error messages give attackers a map of your system.
 - **Keep dependencies updated and audited.** Known CVEs get exploited within hours of disclosure; pin lock files and run audit tools in CI.
 
-## OWASP Top 10 (2021)
+## OWASP Top 10 (2025)
 
 The current OWASP Top 10 categories that this skill addresses:
 
-1. **A01 Broken Access Control** — See references/authentication-csrf.md, references/path-traversal.md
-2. **A02 Cryptographic Failures** — See references/secure-data-handling.md
-3. **A03 Injection** — See references/sql-injection.md, references/xss-prevention.md, references/command-injection.md
-4. **A04 Insecure Design** — Apply defense in depth throughout
-5. **A05 Security Misconfiguration** — See references/security-headers.md, references/environment-config.md
-6. **A06 Vulnerable Components** — See references/security-testing.md (dependency auditing)
+1. **A01 Broken Access Control** (SSRF is consolidated here in 2025) — See references/authentication-csrf.md, references/path-traversal.md, references/api-security.md (SSRF)
+2. **A02 Security Misconfiguration** — See references/security-headers.md, references/environment-config.md
+3. **A03 Software Supply Chain Failures** (2025 expansion of Vulnerable Components) — See references/security-testing.md (dependency auditing)
+4. **A04 Cryptographic Failures** — See references/secure-data-handling.md
+5. **A05 Injection** — See references/sql-injection.md, references/xss-prevention.md, references/command-injection.md
+6. **A06 Insecure Design** — Apply defense in depth throughout
 7. **A07 Authentication Failures** — See references/authentication-csrf.md, references/session-cookie-jwt.md, references/password-policy.md
-8. **A08 Data Integrity Failures** — See references/secure-data-handling.md
-9. **A09 Logging Failures** — See references/environment-config.md
-10. **A10 SSRF** — See references/api-security.md
+8. **A08 Software or Data Integrity Failures** — See references/secure-data-handling.md
+9. **A09 Security Logging & Alerting Failures** — See references/environment-config.md
+10. **A10 Mishandling of Exceptional Conditions** (new in 2025: error handling, failing open) — See references/environment-config.md; "fail securely" core principle above
 
 ## When to Consult Each Reference
 

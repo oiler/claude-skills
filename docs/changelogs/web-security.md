@@ -1,10 +1,31 @@
-# web-security CHANGELOG
+# web-security — Changelog
+
+## v1.2.0 — 2026-07-12
+
+### Content
+
+- Updated OWASP Top 10 from 2021 to 2025 (final edition, released January 2026) in the SKILL.md category map and description. Category changes verified against owasp.org: SSRF consolidated into A01 Broken Access Control; A06 Vulnerable Components expanded into the new A03 Software Supply Chain Failures (→ `security-testing.md`); new A10 Mishandling of Exceptional Conditions (→ `environment-config.md` + the "fail securely" core principle). Reference files were unaffected — they never cited the 2021 taxonomy directly.
+- Added Flask to the description's framework list. Flask coverage already existed in the references (Flask-Login, Flask CSP patterns via Dash); the description just never said so.
+
+### Structural
+
+- Actually moved this changelog out of the skill folder — the v1.1.0 entry below claimed the move, but the file had remained inside `web-security/`. It landed as a repo-root sibling, then moved again to `docs/changelogs/web-security.md` (see below), which is now the convention.
+
+### Correction (same day)
+
+- The repo-root sibling was the wrong destination. Root-level siblings don't scale — 15 skills would mean 15 `<skill>-CHANGELOG.md` files crowding out the folders they describe. Changelogs now live at `docs/changelogs/<skill>.md`. The skill-folder rule is unchanged and still the point: a changelog inside the distributable folder is a hazard, since a model can Read a historical entry (e.g. the "OWASP Top 10 (2021)" note in v1.0.0 below) and mistake it for current fact.
+
+### Eval
+
+- First trigger eval recorded: 20 queries × 3 runs in a clean-room harness. Eval set and results live in the workshop repo at `evals/web-security/`.
+
+---
 
 ## v1.1.0 — 2026-05-24
 
 ### Structural
 
-- Moved this changelog out of the skill folder (was `web-security/NOTES.md`, now a sibling at `web-security-CHANGELOG.md`) — keeps the skill folder limited to `SKILL.md`, `references/`, `scripts/`, `assets/` per the workshop convention
+- Moved this changelog out of the skill folder (was `web-security/NOTES.md`) — keeps the skill folder limited to `SKILL.md`, `references/`, `scripts/`, `assets/` per the workshop convention. (Destination later corrected to `docs/changelogs/`; see v1.2.0 above.)
 - Added `metadata.version`, `metadata.category`, `metadata.tags` to frontmatter
 - Rewrote SKILL.md "Important" section as "Core principles" with WHY-framed one-liners — every rule now explains the reasoning behind it instead of asserting it as a flat MUST
 - Deduplicated the Common Anti-Patterns section (removed items already covered by Core principles)

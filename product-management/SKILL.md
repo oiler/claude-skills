@@ -1,5 +1,6 @@
 ---
 name: product-management
+argument-hint: [artifact + context]
 description: Generate clear, people-first product management artifacts and apply oiler's product operating principles. Use when writing or refining a PRD or product requirements document, problem statement, hypothesis, OKRs or objectives and key results, product strategy one-pager, roadmap, milestones or project plan, RACI or roles and responsibilities matrix, user persona, or retrospective/postmortem. Triggers on "write a PRD", "product requirements", "define the problem", "frame a hypothesis", "draft OKRs", "product strategy", "roadmap", "milestones", "RACI", "roles and responsibilities", "user persona", "retro", "postmortem", "product brief", "product spec", "as a PM", "product management". Produces a tailored draft immediately, then refines. Output is human-facing and concise; external prose (announcements, emails) routes to the writing-style skill instead.
 ---
 
@@ -38,8 +39,9 @@ Never run a menu or step-by-step wizard. Draft first, refine second.
 |---|---|---|
 | Problem statement, hypothesis, user persona | Discover | `references/discovery.md` |
 | Product strategy one-pager, OKRs | Direct | `references/strategy.md` |
-| PRD, milestones/roadmap, RACI | Deliver | `references/delivery.md` |
+| PRD (product brief/spec), milestones/roadmap, RACI | Deliver | `references/delivery.md` |
 | Retrospective, postmortem | Learn | `references/learning.md` |
+| Operating principles, PM philosophy, rigor for agent-executed work | Lens | `references/principles.md` |
 
 Each reference gives the artifact: a fill-in skeleton, how to fill it, a quality bar, pitfalls, and a worked example. Load only the reference you need.
 

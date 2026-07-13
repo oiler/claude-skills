@@ -1,6 +1,7 @@
 ---
 name: python
-description: Expert guidance for Python programming. Use when user asks to write Python code, create scripts with uv, build web apps with Django/Flask/FastAPI, debug Python errors, set up type checking (mypy/pyright), configure ruff, manage packaging or dependencies, write tests with pytest, or asks about Python best practices, async patterns, or modern 3.12+ idioms. Covers uv-based scripting, uv project workflow, Django, Flask, FastAPI, type checking, testing, and supply-chain security.
+description: Expert guidance for Python programming. Use when user asks to write Python code, create scripts with uv, build web apps with Django/Flask/FastAPI, debug Python errors, set up type checking (mypy/pyright), configure ruff, manage packaging or dependencies, write tests with pytest, or asks about Python best practices, async patterns, or modern 3.12+ idioms. Covers uv-based scripting, uv project workflow, Django, Flask, FastAPI, type checking, testing, and supply-chain security. NOT for: Plotly Dash apps (use plotly-dash) or security reviews (use web-security).
+allowed-tools: Bash(uv *) Bash(ruff *) Bash(pytest *) Bash(mypy *) Bash(pyright *)
 ---
 
 # Python Expert
