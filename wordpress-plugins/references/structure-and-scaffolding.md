@@ -194,7 +194,7 @@ and `WordPress-Docs` rulesets.
 
 The scaffolder emits a zero-dependency unit-test harness: `phpunit/phpunit ^10` (pinned because PHPUnit 10 is the last major supporting the PHP 8.1 baseline — 11 requires 8.2+), a bootstrap, and a smoke test. `composer test` runs it.
 
-**How the bootstrap works.** `tests/bootstrap.php` loads the composer autoloader, then defines recording stubs for the WordPress functions unit tests commonly touch (`add_action`, `add_filter`, `__`, `esc_html__`). Hook stubs record each call into `$GLOBALS['wp_stub_calls']`; call `\wp_stub_reset()` in `setUp()` so tests stay independent. Every stub is wrapped in `function_exists()` so a heavier bootstrap can define the real functions first without conflict.
+**How the bootstrap works.** `tests/bootstrap.php` loads the composer autoloader, then defines recording stubs for the WordPress functions unit tests commonly touch (`add_action`, `add_filter`, `__`, `esc_html__`). Hook stubs record each call into `$GLOBALS['wp_stub_calls']`. A `\wp_stub_reset()` helper is defined for tests that want to clear the recorder between cases, but the emitted `PluginTest.php` does not call it — see below for why calling it from `setUp()` breaks the singleton-registration assertion. Every stub is wrapped in `function_exists()` so a heavier bootstrap can define the real functions first without conflict.
 
 Asserting hook registration against the recorder:
 
@@ -206,7 +206,7 @@ public function test_registers_init_hook(): void {
 }
 ```
 
-This test assumes `register_hooks()` already has an actual `add_action( 'init', ... )` call in place; against the freshly scaffolded empty stub, the assertion fails because there's nothing to record.
+This test assumes `register_hooks()` already has an actual `add_action( 'init', ... )` call in place — against the freshly scaffolded empty stub, the assertion fails because there's nothing to record. It also depends on the recorder still holding what was captured at boot: `Plugin::instance()` is a singleton, so `register_hooks()` runs exactly once per PHP process, on the first call to `instance()` anywhere in the suite — calling `instance()` again inside this test does not re-register anything. Don't call `wp_stub_reset()` in `PluginTest::setUp()` for this reason; a reset there wipes the one-time recording before this test can read it, and the emitted `PluginTest.php` does not call it. `wp_stub_reset()` stays available in `tests/bootstrap.php` for tests that exercise non-singleton code which registers hooks on each call — those can reset between cases safely.
 
 **`tests/` is excluded from phpcs** (see the emitted `phpcs.xml.dist`): the bootstrap defines global WordPress function names by design, which `PrefixAllGlobals` would reject — an exclusion, not a suppression comment, because the "violation" is the file's entire purpose.
 
@@ -272,7 +272,7 @@ in `uninstall.php`.
 
 Neither method calls `flush_rewrite_rules()`, even though older WordPress tutorials teach it as the standard activation step for a plugin that registers custom post types or rewrite rules — the function rebuilds the entire rewrite-rules array from scratch and writes it into a single `wp_options` row, so calling it is never a cheap operation, regardless of which hook triggers it.
 
-> **VIP-Platform only.** Rewrite rules are not flushed automatically as part of a VIP Go deploy. After a deploy that adds or changes rewrite rules, the new rules will not work until they are flushed manually, by running WP-CLI through VIP-CLI: `vip @<app-name>.<environment> -- wp rewrite flush`. This is why the scaffolder's `phpcs.xml.dist` ships `WordPressVIPMinimum`, which restricts `flush_rewrite_rules()` outright: the call regenerates the entire rewrite-rules array and writes it to a shared `wp_options` row, and on a managed platform that kind of operation is coordinated through platform tooling rather than triggered from inside plugin code. The scaffolder's own `activate()`/`deactivate()` output above satisfies that sniff by not calling the function at all.
+> **VIP-Platform only.** Rewrite rules are not flushed automatically as part of a VIP Go deploy. After a deploy that adds or changes rewrite rules, the new rules will not work until they are flushed manually, by one of two paths: running WP-CLI through VIP-CLI (`vip @<app-name>.<environment> -- wp rewrite flush`), or the lower-friction option, the Rewrite Rules Inspector — enabled by default in the VIP dashboard under Rewrite Rules → Flush Rules. This is why the scaffolder's `phpcs.xml.dist` ships `WordPressVIPMinimum`, which restricts `flush_rewrite_rules()` outright: the call regenerates the entire rewrite-rules array and writes it to a shared `wp_options` row. (Inference, not a documented VIP rationale — VIP has not published why the sniff restricts the call this way; VIPCS issue #701 is an open request asking for exactly that.) The scaffolder's own `activate()`/`deactivate()` output above satisfies that sniff by not calling the function at all.
 
 Reference: https://docs.wpvip.com/wordpress-skeleton/serve-static-content-wp/
 

@@ -479,10 +479,6 @@ use {namespace}\\Plugin;
  */
 final class PluginTest extends TestCase {{
 
-\tprotected function setUp(): void {{
-\t\t\\wp_stub_reset();
-\t}}
-
 \tpublic function test_instance_returns_singleton(): void {{
 \t\t$first  = Plugin::instance();
 \t\t$second = Plugin::instance();
