@@ -45,11 +45,12 @@ The generic hooks are the blanket-registration trap. Core's conditionals are asy
 
 | Generic hook | Fires when |
 |--------------|------------|
-| `manage_posts_columns` / `manage_posts_custom_column` | All **non-hierarchical** post types |
-| `manage_pages_columns` | **Only** `$post_type === 'page'` — not other hierarchical types |
+| `manage_posts_columns` | Every post type **except** `page` — including hierarchical CPTs |
+| `manage_posts_custom_column` | **Non-hierarchical** post types only |
+| `manage_pages_columns` | **Only** `page` — not other hierarchical types |
 | `manage_pages_custom_column` | **All hierarchical** post types |
 
-Note the mismatch in the `pages` pair: the columns *filter* is page-only while the custom-column *action* is all-hierarchical. A plugin that adds a column via `manage_pages_columns` and renders via `manage_pages_custom_column` works on Pages but silently renders nothing (or renders into a column that was never added) on a hierarchical CPT. The fix is always the same: use the interpolated hooks per post type and loop over your supported types.
+The columns *filter* and custom-column *action* are selected by different tests in core — a literal `'page'` string comparison versus a hierarchy check. This is why a hierarchical CPT that is not `page` gets its columns from `manage_posts_columns` but renders through `manage_pages_custom_column`, producing the silent mismatch where columns appear without data. The fix is always the same: use the interpolated hooks per post type and loop over your supported types.
 
 ```php
 foreach ( array( 'book', 'magazine' ) as $post_type ) {
