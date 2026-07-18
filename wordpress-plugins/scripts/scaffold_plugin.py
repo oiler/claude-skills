@@ -248,7 +248,7 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {{
 }}
 
 // TODO: Remove plugin options, custom database tables, and scheduled events here.
-// Example: delete_option( '{text_domain}_settings' );
+// Example: delete_option( '{text_domain}_settings' ).
 """
 
 
@@ -329,7 +329,11 @@ namespace {namespace};
  */
 class Plugin {{
 
-\t/** @var static|null Singleton instance. */
+\t/**
+\t * Singleton instance.
+\t *
+\t * @var static|null
+\t */
 \tprivate static ?self $instance = null;
 
 \t/**
@@ -357,8 +361,13 @@ class Plugin {{
 \t * Called by register_activation_hook() in the main plugin file.
 \t */
 \tpublic static function activate(): void {{
-\t\t// TODO: flush rewrite rules, create tables, set defaults.
-\t\tflush_rewrite_rules();
+\t\t// TODO: create tables, set default options, schedule cron events.
+\t\t//
+\t\t// Do not manually flush rewrite rules here. VIPCS restricts that call: it
+\t\t// regenerates and rewrites the entire rules array into wp_options, and on
+\t\t// VIP Go the platform flushes rewrites at deploy. If you register custom
+\t\t// post types or rewrite rules and are NOT on VIP, see
+\t\t// references/structure-and-scaffolding.md for the self-hosted approach.
 \t}}
 
 \t/**
@@ -366,8 +375,8 @@ class Plugin {{
 \t * Called by register_deactivation_hook() in the main plugin file.
 \t */
 \tpublic static function deactivate(): void {{
-\t\t// TODO: clean up scheduled events, temp data.
-\t\tflush_rewrite_rules();
+\t\t// TODO: unschedule cron events and clear transients. Leave persistent data
+\t\t// in place; permanent cleanup belongs in uninstall.php.
 \t}}
 }}
 """

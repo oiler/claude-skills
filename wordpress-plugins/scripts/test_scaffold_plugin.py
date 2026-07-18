@@ -214,5 +214,36 @@ def test_phpunit_config_paths_exist_in_build_output():
         assert matches, f"testsuite dir '{d.text}' matches no emitted file"
 
 
+def test_emitted_php_has_no_vip_restricted_functions():
+    """VIPCS restricts flush_rewrite_rules(): it rewrites the whole rules array into
+    wp_options, and on VIP Go the platform handles flushing at deploy. The scaffolder
+    ships the VIPCS ruleset, so its own output must satisfy it."""
+    files = build_files("My Plugin", "My_Plugin", "my-plugin")
+    for path, content in files.items():
+        if path.endswith(".php"):
+            assert "flush_rewrite_rules" not in content, f"{path} calls a VIPCS-restricted function"
+
+
+def test_uninstall_inline_comments_are_punctuated():
+    """WordPress-Docs requires inline comments to end in terminal punctuation."""
+    uninstall = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/uninstall.php"]
+    for line in uninstall.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("//") and len(stripped) > 2:
+            assert stripped[-1] in ".!?", f"unpunctuated inline comment: {stripped}"
+
+
+def test_src_plugin_docblocks_have_short_descriptions():
+    """Every docblock opener must be followed by a short description line, not a tag."""
+    plugin = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/src/Plugin.php"]
+    lines = plugin.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == "/**":
+            following = lines[i + 1].strip()
+            assert following.startswith("*") and not following.startswith("* @"), (
+                f"docblock at line {i + 1} opens straight into a tag: {following}"
+            )
+
+
 if __name__ == "__main__":
     sys.exit(subprocess.call([sys.executable, "-m", "pytest", __file__, "-v"]))

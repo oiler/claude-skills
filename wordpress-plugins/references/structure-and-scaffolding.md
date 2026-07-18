@@ -220,28 +220,41 @@ Reference: https://docs.wpvip.com/technical-references/vip-codebase/composer/
 ```php
 // In src/Plugin.php
 public static function activate(): void {
-    // Create custom tables, set default options, schedule cron events.
-    flush_rewrite_rules(); // Only here, on activation — never on every page load.
+    // TODO: create tables, set default options, schedule cron events.
 }
 ```
-
-`flush_rewrite_rules()` is correct on activation (and deactivation) because it rebuilds
-the rules once after the plugin registers its custom post types or rewrite rules. Calling
-it on every page load causes a full database write on every request — a performance
-violation that VIPCS will flag.
 
 ### Deactivation
 
 ```php
 public static function deactivate(): void {
-    // Unschedule cron events, remove transients, flush rewrites.
-    flush_rewrite_rules();
+    // TODO: unschedule cron events and clear transients. Leave persistent data
+    // in place; permanent cleanup belongs in uninstall.php.
 }
 ```
 
 Deactivation leaves data in place. It is the right place to clean up runtime state
 (scheduled events, transients) but not permanent data (options, tables) — that belongs
 in `uninstall.php`.
+
+Neither method calls `flush_rewrite_rules()`, even though older WordPress tutorials teach
+it as the standard activation step for a plugin that registers custom post types or
+rewrite rules. The function rebuilds the entire rewrite-rules array from scratch and
+writes it into a single `wp_options` row, so calling it is never a cheap operation — it's
+a full-array recomputation and a database write, regardless of which hook triggers it.
+
+> **VIP-Platform only.** VIP Go flushes rewrite rules as part of its own deploy process,
+> so a plugin calling `flush_rewrite_rules()` on activation is doing redundant work
+> against a shared options row the platform already manages. This is why the scaffolder's
+> `phpcs.xml.dist` ships `WordPressVIPMinimum`, which restricts the function outright —
+> the scaffolder's own `activate()`/`deactivate()` output above satisfies that sniff.
+
+Self-hosted plugins are not bound by VIP's deploy-time flush, and calling
+`flush_rewrite_rules()` once on activation — after registering custom post types or
+rewrite rules — is standard, correct WordPress practice there. It will still trip the
+VIPCS ruleset this scaffolder ships, though, so a self-hosted project that wants the call
+back should relax that specific sniff in its own `phpcs.xml.dist` rather than leave the
+resulting error standing.
 
 ### Uninstall: `uninstall.php` over the uninstall hook
 
