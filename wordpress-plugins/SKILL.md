@@ -48,7 +48,7 @@ To generate a plugin skeleton, run:
 uv run ${CLAUDE_SKILL_DIR}/scripts/scaffold_plugin.py --name "My Plugin Name" --dir wp-content/plugins
 ```
 
-The scaffolder produces the main plugin file, PSR-4 `src/` layout, `composer.json`, and stub test. See `references/structure-and-scaffolding.md` for what it generates and how to extend it.
+The scaffolder produces the main plugin file, PSR-4 `src/` layout, `composer.json` with `lint`/`fix`/`test` scripts, and a runnable test harness (`tests/bootstrap.php` recording stubs + a stub test — `composer install && composer test` passes on a fresh scaffold). See `references/structure-and-scaffolding.md` for what it generates and how to extend it.
 
 ---
 

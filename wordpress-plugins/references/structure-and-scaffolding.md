@@ -55,11 +55,12 @@ my-plugin/
 ├── vendor/                # Committed on VIP Go (see VIP-Platform note); absent until
 │   └── autoload.php       #   `composer install` runs on non-VIP deploys
 └── tests/
-    └── bootstrap.php      # Add after scaffolding; PHPUnit looks here per phpunit.xml.dist
+    ├── bootstrap.php      # Autoloader + recording WP stubs (emitted by the scaffolder)
+    └── PluginTest.php     # Singleton smoke tests (emitted by the scaffolder)
 ```
 
-> `tests/bootstrap.php` is not emitted by the scaffolder — add it when writing the first
-> test. PHPUnit is configured to look for `*Test.php` files under `tests/`.
+> The test harness is emitted ready to run: `composer install && composer test` passes
+> on a fresh scaffold. See "Tests" below for what the stubs cover and when to upgrade.
 
 ---
 
@@ -189,6 +190,34 @@ and `WordPress-Docs` rulesets.
 
 ---
 
+## Tests
+
+The scaffolder emits a zero-dependency unit-test harness: `phpunit/phpunit ^10` (pinned because PHPUnit 10 is the last major supporting the PHP 8.1 baseline — 11 requires 8.2+), a bootstrap, and a smoke test. `composer test` runs it.
+
+**How the bootstrap works.** `tests/bootstrap.php` loads the composer autoloader, then defines recording stubs for the WordPress functions unit tests commonly touch (`add_action`, `add_filter`, `__`, `esc_html__`). Hook stubs record each call into `$GLOBALS['wp_stub_calls']`; call `\wp_stub_reset()` in `setUp()` so tests stay independent. Every stub is wrapped in `function_exists()` so a heavier bootstrap can define the real functions first without conflict.
+
+Asserting hook registration against the recorder:
+
+```php
+public function test_registers_init_hook(): void {
+	Plugin::instance();
+	$hooks = array_column( $GLOBALS['wp_stub_calls'], 1 );
+	$this->assertContains( 'init', $hooks );
+}
+```
+
+**`tests/` is excluded from phpcs** (see the emitted `phpcs.xml.dist`): the bootstrap defines global WordPress function names by design, which `PrefixAllGlobals` would reject — an exclusion, not a suppression comment, because the "violation" is the file's entire purpose.
+
+**When the stubs stop being enough.** The recording stubs verify *that* hooks were registered, not *how they behave*. Once `register_hooks()` wires real callbacks and you need expectation-style assertions (a filter was applied with specific arguments, a function was called once), upgrade to Brain Monkey:
+
+```bash
+composer require --dev brain/monkey:^2.6
+```
+
+Then have the bootstrap's `function_exists()` guards step aside naturally — Brain Monkey defines the real patchwork functions in `Brain\Monkey\setUp()`, and tests move to `Monkey\Actions\expectAdded( 'init' )` style assertions. For tests that need actual WordPress loaded (database, WP_Query), that is integration-test territory: `wp-phpunit` with a test database, out of scope for the scaffold.
+
+---
+
 ## VIP-Platform: Committed `vendor/`
 
 > **VIP-Platform only.** Self-hosters may skip this section and run `composer install` at
@@ -208,6 +237,8 @@ The scaffolder configures this correctly:
 
 **Consequence:** `composer update` must be followed by a commit of the updated `vendor/`
 before the change reaches production on VIP.
+
+**Dev dependencies stay out of the committed tree.** The committed `vendor/` is a production artifact — build it with `composer install --no-dev`. Dev dependencies (vipwpcs, phpcs, phpunit) exist only in local and CI installs; a plain `composer install` before committing would ship the entire linting and testing toolchain to production. The split matters more now that the dev tree includes PHPUnit: run `composer install` for daily work, and rebuild with `--no-dev` before committing `vendor/` for a VIP deploy.
 
 Reference: https://docs.wpvip.com/technical-references/vip-codebase/composer/
 
