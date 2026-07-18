@@ -3,7 +3,7 @@
 # requires-python = ">=3.12"
 # dependencies = ["pytest"]
 # ///
-import sys, subprocess
+import json, sys, subprocess
 import pytest
 from scaffold_plugin import slugify, namespacify, build_files, validate_inputs, InvalidInput
 
@@ -139,6 +139,39 @@ def test_xml_metachars_in_name_are_escaped():
 
 def test_valid_inputs_still_pass():
     validate_inputs("My Cool Plugin", "My_Cool_Plugin", "my-cool-plugin", "my-cool-plugin")
+
+
+def test_composer_has_test_harness_config():
+    """composer.json must define the test script, the PHPUnit dev-dep pinned to ^10
+    (last major supporting the PHP 8.1 baseline), and allow-plugins for the phpcs
+    installer plugin (Composer >=2.2 blocks unlisted plugins and exits 1)."""
+    files = build_files("My Plugin", "My_Plugin", "my-plugin")
+    composer = json.loads(files["my-plugin/composer.json"])
+    assert composer["scripts"]["test"] == "phpunit"
+    assert composer["require-dev"]["phpunit/phpunit"] == "^10"
+    assert composer["config"]["allow-plugins"]["dealerdirect/phpcodesniffer-composer-installer"] is True
+
+def test_phpcs_excludes_tests_dir():
+    """tests/bootstrap.php defines global WP function names (add_action, __, ...) by
+    design; PrefixAllGlobals cannot be satisfied there, so tests/ must be excluded."""
+    files = build_files("My Plugin", "My_Plugin", "my-plugin")
+    assert "<exclude-pattern>*/tests/*</exclude-pattern>" in files["my-plugin/phpcs.xml.dist"]
+
+def test_phpunit_config_is_phpunit10():
+    """The convert*ToExceptions attributes were removed in PHPUnit 10 (legacy-schema
+    deprecation on 10.5); the emitted config must use the 10.x schema and cache dir."""
+    xml = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/phpunit.xml.dist"]
+    for legacy in ("convertErrorsToExceptions", "convertNoticesToExceptions", "convertWarningsToExceptions"):
+        assert legacy not in xml
+    assert 'cacheDirectory=".phpunit.cache"' in xml
+    assert "https://schema.phpunit.de/10.5/phpunit.xsd" in xml
+
+def test_gitignore_covers_phpunit_caches():
+    """PHPUnit 10 writes .phpunit.cache/ when cacheDirectory is set; keep the pair
+    (.gitignore entry <-> cacheDirectory value) consistent."""
+    gi = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/.gitignore"]
+    assert ".phpunit.result.cache" in gi
+    assert ".phpunit.cache/" in gi
 
 
 if __name__ == "__main__":

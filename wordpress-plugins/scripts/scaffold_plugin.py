@@ -144,7 +144,13 @@ def _composer_json(name: str, namespace: str, text_domain: str, slug: str) -> st
         },
         "require-dev": {
             "automattic/vipwpcs": "*",
-            "dealerdirect/phpcodesniffer-composer-installer": "*"
+            "dealerdirect/phpcodesniffer-composer-installer": "*",
+            "phpunit/phpunit": "^10"
+        },
+        "config": {
+            "allow-plugins": {
+                "dealerdirect/phpcodesniffer-composer-installer": True
+            }
         },
         "autoload": {
             "psr-4": {
@@ -153,7 +159,8 @@ def _composer_json(name: str, namespace: str, text_domain: str, slug: str) -> st
         },
         "scripts": {
             "lint": "phpcs",
-            "fix": "phpcbf"
+            "fix": "phpcbf",
+            "test": "phpunit"
         }
     }
     return json.dumps(data, indent=4) + "\n"
@@ -174,6 +181,9 @@ def _phpcs_xml_dist(name: str, namespace: str, text_domain: str, slug: str) -> s
     <!-- Exclude generated / third-party code. -->
     <exclude-pattern>*/vendor/*</exclude-pattern>
     <exclude-pattern>*/node_modules/*</exclude-pattern>
+    <!-- tests/bootstrap.php defines global WP function stubs (add_action, __, ...);
+         PrefixAllGlobals cannot be satisfied there, so the tests tree is excluded. -->
+    <exclude-pattern>*/tests/*</exclude-pattern>
 
     <!-- Target PHP 8.1+. -->
     <config name="testVersion" value="8.1-"/>
@@ -205,12 +215,11 @@ def _phpcs_xml_dist(name: str, namespace: str, text_domain: str, slug: str) -> s
 def _phpunit_xml_dist(name: str, namespace: str, text_domain: str, slug: str) -> str:
     return """\
 <?xml version="1.0" encoding="UTF-8"?>
-<phpunit
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
     bootstrap="tests/bootstrap.php"
+    cacheDirectory=".phpunit.cache"
     colors="true"
-    convertErrorsToExceptions="true"
-    convertNoticesToExceptions="true"
-    convertWarningsToExceptions="true"
 >
     <testsuites>
         <testsuite name="unit">
@@ -298,6 +307,7 @@ node_modules/
 .DS_Store
 *.log
 .phpunit.result.cache
+.phpunit.cache/
 """
 
 
