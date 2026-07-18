@@ -206,6 +206,8 @@ public function test_registers_init_hook(): void {
 }
 ```
 
+This test assumes `register_hooks()` already has an actual `add_action( 'init', ... )` call in place; against the freshly scaffolded empty stub, the assertion fails because there's nothing to record.
+
 **`tests/` is excluded from phpcs** (see the emitted `phpcs.xml.dist`): the bootstrap defines global WordPress function names by design, which `PrefixAllGlobals` would reject — an exclusion, not a suppression comment, because the "violation" is the file's entire purpose.
 
 **When the stubs stop being enough.** The recording stubs verify *that* hooks were registered, not *how they behave*. Once `register_hooks()` wires real callbacks and you need expectation-style assertions (a filter was applied with specific arguments, a function was called once), upgrade to Brain Monkey:
