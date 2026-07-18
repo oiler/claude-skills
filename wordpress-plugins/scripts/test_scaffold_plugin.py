@@ -215,13 +215,17 @@ def test_phpunit_config_paths_exist_in_build_output():
 
 
 def test_emitted_php_has_no_vip_restricted_functions():
-    """VIPCS restricts flush_rewrite_rules(): it rewrites the whole rules array into
-    wp_options, and on VIP Go the platform handles flushing at deploy. The scaffolder
-    ships the VIPCS ruleset, so its own output must satisfy it."""
+    """VIPCS restricts *calls* to flush_rewrite_rules(): it rewrites the whole rules array
+    into wp_options. This checks for an actual call — `flush_rewrite_rules(` appearing
+    outside of `//` comment text — not for any mention of the function's name. The
+    scaffolder's own guidance comments name the function on purpose, to warn developers
+    off it, and that mention must not trip this test."""
     files = build_files("My Plugin", "My_Plugin", "my-plugin")
     for path, content in files.items():
         if path.endswith(".php"):
-            assert "flush_rewrite_rules" not in content, f"{path} calls a VIPCS-restricted function"
+            for line in content.splitlines():
+                code = line.split("//", 1)[0]
+                assert "flush_rewrite_rules(" not in code, f"{path} calls a VIPCS-restricted function: {line.strip()}"
 
 
 def test_uninstall_inline_comments_are_punctuated():
@@ -234,15 +238,24 @@ def test_uninstall_inline_comments_are_punctuated():
 
 
 def test_src_plugin_docblocks_have_short_descriptions():
-    """Every docblock opener must be followed by a short description line, not a tag."""
+    """Every docblock must open with a short description line, not a tag.
+
+    Covers both multi-line docblocks (an opener line of exactly `/**` followed
+    directly by a `@tag` line) and single-line docblocks that open straight into
+    a tag, e.g. `/** @var static|null Singleton instance. */` — the latter is
+    the actual pre-fix defect this test was written to guard against.
+    """
     plugin = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/src/Plugin.php"]
     lines = plugin.splitlines()
     for i, line in enumerate(lines):
-        if line.strip() == "/**":
+        stripped = line.strip()
+        if stripped == "/**":
             following = lines[i + 1].strip()
             assert following.startswith("*") and not following.startswith("* @"), (
                 f"docblock at line {i + 1} opens straight into a tag: {following}"
             )
+        elif stripped.startswith("/** @"):
+            pytest.fail(f"single-line docblock at line {i + 1} opens straight into a tag: {stripped}")
 
 
 if __name__ == "__main__":

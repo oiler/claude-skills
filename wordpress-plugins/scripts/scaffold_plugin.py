@@ -363,11 +363,14 @@ class Plugin {{
 \tpublic static function activate(): void {{
 \t\t// TODO: create tables, set default options, schedule cron events.
 \t\t//
-\t\t// Do not manually flush rewrite rules here. VIPCS restricts that call: it
-\t\t// regenerates and rewrites the entire rules array into wp_options, and on
-\t\t// VIP Go the platform flushes rewrites at deploy. If you register custom
-\t\t// post types or rewrite rules and are NOT on VIP, see
-\t\t// references/structure-and-scaffolding.md for the self-hosted approach.
+\t\t// Do not call flush_rewrite_rules() here. VIPCS restricts it: the call
+\t\t// regenerates the entire rewrite-rules array and writes it to a shared
+\t\t// wp_options row. On VIP, rewrite rules are not flushed automatically
+\t\t// at deploy — after a deploy that adds or changes them, they must be
+\t\t// flushed manually via VIP-CLI: vip @app.env -- wp rewrite flush. If
+\t\t// you register custom post types or rewrite rules and are NOT on VIP,
+\t\t// see references/structure-and-scaffolding.md for the self-hosted
+\t\t// approach.
 \t}}
 
 \t/**

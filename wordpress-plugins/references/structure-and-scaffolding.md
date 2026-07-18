@@ -237,24 +237,19 @@ Deactivation leaves data in place. It is the right place to clean up runtime sta
 (scheduled events, transients) but not permanent data (options, tables) — that belongs
 in `uninstall.php`.
 
-Neither method calls `flush_rewrite_rules()`, even though older WordPress tutorials teach
-it as the standard activation step for a plugin that registers custom post types or
-rewrite rules. The function rebuilds the entire rewrite-rules array from scratch and
-writes it into a single `wp_options` row, so calling it is never a cheap operation — it's
-a full-array recomputation and a database write, regardless of which hook triggers it.
+Neither method calls `flush_rewrite_rules()`, even though older WordPress tutorials teach it as the standard activation step for a plugin that registers custom post types or rewrite rules — the function rebuilds the entire rewrite-rules array from scratch and writes it into a single `wp_options` row, so calling it is never a cheap operation, regardless of which hook triggers it.
 
-> **VIP-Platform only.** VIP Go flushes rewrite rules as part of its own deploy process,
-> so a plugin calling `flush_rewrite_rules()` on activation is doing redundant work
-> against a shared options row the platform already manages. This is why the scaffolder's
-> `phpcs.xml.dist` ships `WordPressVIPMinimum`, which restricts the function outright —
-> the scaffolder's own `activate()`/`deactivate()` output above satisfies that sniff.
+> **VIP-Platform only.** Rewrite rules are not flushed automatically as part of a VIP Go deploy. After a deploy that adds or changes rewrite rules, the new rules will not work until they are flushed manually, by running WP-CLI through VIP-CLI: `vip @<app-name>.<environment> -- wp rewrite flush`. This is why the scaffolder's `phpcs.xml.dist` ships `WordPressVIPMinimum`, which restricts `flush_rewrite_rules()` outright: the call regenerates the entire rewrite-rules array and writes it to a shared `wp_options` row, and on a managed platform that kind of operation is coordinated through platform tooling rather than triggered from inside plugin code. The scaffolder's own `activate()`/`deactivate()` output above satisfies that sniff by not calling the function at all.
 
-Self-hosted plugins are not bound by VIP's deploy-time flush, and calling
-`flush_rewrite_rules()` once on activation — after registering custom post types or
-rewrite rules — is standard, correct WordPress practice there. It will still trip the
-VIPCS ruleset this scaffolder ships, though, so a self-hosted project that wants the call
-back should relax that specific sniff in its own `phpcs.xml.dist` rather than leave the
-resulting error standing.
+Reference: https://docs.wpvip.com/wordpress-skeleton/serve-static-content-wp/
+
+Self-hosted plugins are not bound by VIP's manual flush step, and calling `flush_rewrite_rules()` once on activation — after registering custom post types or rewrite rules — is standard, correct WordPress practice there. It will still trip the `WordPressVIPMinimum.Functions.RestrictedFunctions` sniff this scaffolder ships, though, so a self-hosted project that wants the call back should relax that specific sniff in its own `phpcs.xml.dist` rather than leave the resulting error standing:
+
+```xml
+<rule ref="WordPressVIPMinimum.Functions.RestrictedFunctions">
+    <exclude name="WordPressVIPMinimum.Functions.RestrictedFunctions.flush_rewrite_rules_flush_rewrite_rules"/>
+</rule>
+```
 
 ### Uninstall: `uninstall.php` over the uninstall hook
 
