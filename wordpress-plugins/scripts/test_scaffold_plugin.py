@@ -4,6 +4,7 @@
 # dependencies = ["pytest"]
 # ///
 import json, sys, subprocess
+import xml.etree.ElementTree as ET
 import pytest
 from scaffold_plugin import slugify, namespacify, build_files, validate_inputs, InvalidInput
 
@@ -172,6 +173,45 @@ def test_gitignore_covers_phpunit_caches():
     gi = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/.gitignore"]
     assert ".phpunit.result.cache" in gi
     assert ".phpunit.cache/" in gi
+
+
+def test_emits_test_files():
+    files = build_files("My Plugin", "My_Plugin", "my-plugin")
+    assert "my-plugin/tests/bootstrap.php" in files
+    assert "my-plugin/tests/PluginTest.php" in files
+    assert len(files) == 11
+
+def test_bootstrap_stubs_are_guarded():
+    """Stubs must be defined only when WP hasn't provided the real function, so a
+    future integration bootstrap (wp-phpunit / Brain Monkey) can coexist."""
+    b = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/tests/bootstrap.php"]
+    for fn in ("add_action", "add_filter", "__", "esc_html__"):
+        assert f"function_exists( '{fn}' )" in b
+    assert "wp_stub_reset" in b
+    assert "vendor/autoload.php" in b
+
+def test_plugin_test_uses_namespace():
+    t = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/tests/PluginTest.php"]
+    assert "namespace My_Plugin\\Tests;" in t
+    assert "use My_Plugin\\Plugin;" in t
+    assert "Plugin::instance()" in t
+
+def test_phpunit_config_paths_exist_in_build_output():
+    """Regression guard for the shipped defect: phpunit.xml.dist referenced paths the
+    scaffolder never wrote. Parse the emitted config and cross-check every referenced
+    path against build_files() keys, so config and file map can never drift again."""
+    files = build_files("My Plugin", "My_Plugin", "my-plugin")
+    root = ET.fromstring(files["my-plugin/phpunit.xml.dist"])
+    bootstrap = root.get("bootstrap")
+    assert bootstrap, "phpunit.xml.dist must declare a bootstrap"
+    assert f"my-plugin/{bootstrap}" in files
+    dirs = list(root.iter("directory"))
+    assert dirs, "phpunit.xml.dist must declare at least one testsuite directory"
+    for d in dirs:
+        prefix = d.text.strip().removeprefix("./").rstrip("/")
+        suffix = d.get("suffix", "")
+        matches = [k for k in files if k.startswith(f"my-plugin/{prefix}/") and k.endswith(suffix)]
+        assert matches, f"testsuite dir '{d.text}' matches no emitted file"
 
 
 if __name__ == "__main__":

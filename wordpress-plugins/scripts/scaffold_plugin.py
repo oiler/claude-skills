@@ -373,6 +373,117 @@ class Plugin {{
 """
 
 
+def _tests_bootstrap_php(name: str, namespace: str, text_domain: str, slug: str) -> str:
+    return f"""\
+<?php
+/**
+ * PHPUnit bootstrap: composer autoloader + recording stubs for WordPress functions.
+ *
+ * The stubs let unit tests run without loading WordPress. Each hook stub records
+ * its call into $GLOBALS['wp_stub_calls'] so tests can assert hook registration.
+ * Every stub is guarded by function_exists() so an integration bootstrap
+ * (wp-phpunit, Brain Monkey) can define the real functions first and coexist.
+ *
+ * @package {namespace}
+ */
+
+declare(strict_types=1);
+
+$autoload = __DIR__ . '/../vendor/autoload.php';
+if ( ! file_exists( $autoload ) ) {{
+\tfwrite( STDERR, "tests/bootstrap.php: vendor/autoload.php not found. Run `composer install` first.\\n" );
+\texit( 1 );
+}}
+require_once $autoload;
+
+$GLOBALS['wp_stub_calls'] = [];
+
+/**
+ * Reset the recorded stub calls. Call from setUp() so tests stay independent.
+ */
+function wp_stub_reset(): void {{
+\t$GLOBALS['wp_stub_calls'] = [];
+}}
+
+if ( ! function_exists( 'add_action' ) ) {{
+\t/**
+\t * Recording stub for add_action().
+\t */
+\tfunction add_action( string $hook_name, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {{
+\t\t$GLOBALS['wp_stub_calls'][] = [ 'add_action', $hook_name, $priority, $accepted_args ];
+\t\treturn true;
+\t}}
+}}
+
+if ( ! function_exists( 'add_filter' ) ) {{
+\t/**
+\t * Recording stub for add_filter().
+\t */
+\tfunction add_filter( string $hook_name, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {{
+\t\t$GLOBALS['wp_stub_calls'][] = [ 'add_filter', $hook_name, $priority, $accepted_args ];
+\t\treturn true;
+\t}}
+}}
+
+if ( ! function_exists( '__' ) ) {{
+\t/**
+\t * Pass-through stub for __() — returns the untranslated string.
+\t */
+\tfunction __( string $text, string $domain = 'default' ): string {{
+\t\treturn $text;
+\t}}
+}}
+
+if ( ! function_exists( 'esc_html__' ) ) {{
+\t/**
+\t * Pass-through stub for esc_html__(). Real escaping is WordPress's job; unit
+\t * tests assert on logic, not on escaping output.
+\t */
+\tfunction esc_html__( string $text, string $domain = 'default' ): string {{
+\t\treturn $text;
+\t}}
+}}
+"""
+
+
+def _tests_plugin_test_php(name: str, namespace: str, text_domain: str, slug: str) -> str:
+    return f"""\
+<?php
+/**
+ * Smoke tests for the plugin singleton.
+ *
+ * @package {namespace}
+ */
+
+declare(strict_types=1);
+
+namespace {namespace}\\Tests;
+
+use PHPUnit\\Framework\\TestCase;
+use {namespace}\\Plugin;
+
+/**
+ * Boots the Plugin class against the recording stubs in tests/bootstrap.php.
+ */
+final class PluginTest extends TestCase {{
+
+\tprotected function setUp(): void {{
+\t\t\\wp_stub_reset();
+\t}}
+
+\tpublic function test_instance_returns_singleton(): void {{
+\t\t$first  = Plugin::instance();
+\t\t$second = Plugin::instance();
+\t\t$this->assertSame( $first, $second );
+\t}}
+
+\tpublic function test_instance_boots_without_error(): void {{
+\t\t$this->assertInstanceOf( Plugin::class, Plugin::instance() );
+\t}}
+}}
+"""
+
+
 # ---------------------------------------------------------------------------
 # Public API consumed by tests
 # ---------------------------------------------------------------------------
@@ -392,6 +503,8 @@ def build_files(name: str, namespace: str, text_domain: str) -> dict[str, str]:
         f"{slug}/.gitattributes": _gitattributes,
         f"{slug}/.gitignore": _gitignore,
         f"{slug}/src/Plugin.php": _src_plugin_php,
+        f"{slug}/tests/bootstrap.php": _tests_bootstrap_php,
+        f"{slug}/tests/PluginTest.php": _tests_plugin_test_php,
     }
 
     return {path: fn(name, namespace, text_domain, slug) for path, fn in builders.items()}
