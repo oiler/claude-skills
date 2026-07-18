@@ -3,7 +3,7 @@
 # requires-python = ">=3.12"
 # dependencies = ["pytest"]
 # ///
-import json, sys, subprocess
+import json, sys, subprocess, re
 import xml.etree.ElementTree as ET
 import pytest
 from scaffold_plugin import slugify, namespacify, build_files, validate_inputs, InvalidInput
@@ -216,16 +216,16 @@ def test_phpunit_config_paths_exist_in_build_output():
 
 def test_emitted_php_has_no_vip_restricted_functions():
     """VIPCS restricts *calls* to flush_rewrite_rules(): it rewrites the whole rules array
-    into wp_options. This checks for an actual call — `flush_rewrite_rules(` appearing
-    outside of `//` comment text — not for any mention of the function's name. The
-    scaffolder's own guidance comments name the function on purpose, to warn developers
-    off it, and that mention must not trip this test."""
+    into wp_options. This checks for an actual call — a whitespace-tolerant, case-insensitive
+    match of `flush_rewrite_rules(` outside of `//` comment text — not for any mention of the
+    function's name. The scaffolder's own guidance comments name the function on purpose, to
+    warn developers off it, and that mention must not trip this test."""
     files = build_files("My Plugin", "My_Plugin", "my-plugin")
     for path, content in files.items():
         if path.endswith(".php"):
             for line in content.splitlines():
                 code = line.split("//", 1)[0]
-                assert "flush_rewrite_rules(" not in code, f"{path} calls a VIPCS-restricted function: {line.strip()}"
+                assert not re.search(r"(?i)flush_rewrite_rules\s*\(", code), f"{path} calls a VIPCS-restricted function: {line.strip()}"
 
 
 def test_uninstall_inline_comments_are_punctuated():
