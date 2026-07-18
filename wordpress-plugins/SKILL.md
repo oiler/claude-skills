@@ -38,6 +38,7 @@ Before proceeding, read the reference file that matches your mode (table below).
 | **Tooling** | Set up VIPCS, phpcs.xml.dist, CI | `references/vip-standards.md` + `references/structure-and-scaffolding.md` |
 | **Performance / scale** | Caching, query bounds, remote calls | `references/vip-performance.md` |
 | **Security** | Nonces, caps, escaping, prepared statements, REST auth | `references/security.md` |
+| **Admin UI** | List-table columns, settings pages, Options/Settings API | `references/admin-ui.md` |
 
 ### Scaffolder (Build mode)
 
