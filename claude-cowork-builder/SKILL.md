@@ -45,7 +45,7 @@ Pick a START option, then walk the checkboxes top to bottom. Every decision has 
 | 1 · Distribution | Install + visibility decisions, each with a default + tradeoff. | Install + visibility locked |
 | 2 · Component plan | Skills (primary) + MCP; agents only if playbook justifies; router if large; Live Artifact if custom UI. | Confirmed components |
 | 3 · Component design | Per component: triggers, references, tool scoping, standalone/supercharged, agent contracts. | Specs |
-| 4 · Scaffold | plugin.json, skills, CONNECTORS.md, .mcp.json, README, optional agents/Live Artifact. | Plugin directory |
+| 4 · Scaffold | .claude-plugin/plugin.json, skills, CONNECTORS.md, .mcp.json, README, optional agents/Live Artifact. | Plugin directory |
 | 5 · Audit + package | Run the audit checklist → package .plugin. | Installable artifact |
 
 Full walkthrough of every phase: `references/build-spine.md`.
@@ -70,7 +70,9 @@ Default lean: Private + Individual install; switch to Public → genericize + ad
 ## Hard rules
 
 - Every skill file is named exactly `SKILL.md` — wrong filename fails silently, no error surfaces.
-- Every skill ships a standalone+supercharged fallback copy — the plugin must degrade gracefully without its full component graph wired up.
-- Cowork output hygiene is nontechnical-facing: no file paths, stack traces, or engineer-speak leak into what the plugin shows Cowork users.
+- The manifest lives at `.claude-plugin/plugin.json` — at the plugin root it isn't found. Components (`skills/`, `agents/`, `.mcp.json`) live at the root, never inside `.claude-plugin/`.
+- Every command skill works with zero connectors — the user can paste, upload, or describe the input instead. The connected `~~category` path is additive, never required.
+- Cowork output hygiene: outputs go to the user's working folder; no relative paths; no `open`/`xdg-open` (the skill runs in a VM); always tell the user the exact path that was written.
+- What the plugin says to Cowork users stays nontechnical — no schema-speak, raw `~~` tokens, or plugin-internal file names in user-facing copy.
 - Reference the plugin root as `${CLAUDE_PLUGIN_ROOT}`, never a hardcoded or relative path — plugins install into locations the author doesn't control.
 - Agents are exceptional, not default: add one only when a playbook justifies it, and scope it as tightly as that playbook allows.

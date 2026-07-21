@@ -10,6 +10,20 @@ starter skills (`skills/read-drive-file/`, `skills/find-in-drive/`) that
 give the plugin a working `~~file storage` command/knowledge pair on day
 one.
 
+**From-scratch builds (menu entry 1):** the merge language below assumes an
+existing plugin. When the recipe rides along on a new scaffold, there's
+nothing to merge — the fragment becomes the initial `.mcp.json`, the row
+becomes the initial `CONNECTORS.md` table content, and steps 1–2 collapse
+to "use as-is."
+
+**Why tokens even though private:** the starter skills ship
+`~~file storage`-tokenized bodies plus `CONNECTORS.md` although private
+plugins may hardcode product names and skip `CONNECTORS.md` entirely
+(`distribution.md` §3). Deliberate — it makes a later flip to Public a
+metadata change instead of a re-tokenizing pass. A private build may still
+swap the tokens for concrete names if oiler prefers; do it in all four
+sync locations at once.
+
 ## Steps
 
 1. **Merge the MCP server into the plugin's `.mcp.json`.**
@@ -47,6 +61,16 @@ one.
      footnote in `CONNECTORS.md`. This is not a broken state — the plugin
      still packages and installs, and both starter skills already have a
      standalone fallback that works with zero connector configured.
+
+## Going public with this recipe
+
+The starter skills name Google Drive in their `description` frontmatter —
+deliberate, and correct for the private default lean, because "Drive" is
+what users actually type. If the host plugin goes Public, genericize those
+descriptions along with everything else: drop "Google Drive"/"Drive"
+phrasing to category language ("connected file storage") in the same pass
+that genericizes skill bodies (`distribution.md` §4, `connectors-and-mcp.md`
+§ `~~` tokens and descriptions).
 
 ## Standalone fallback
 

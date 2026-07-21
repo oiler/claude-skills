@@ -92,10 +92,10 @@ open decisions should surface here; anything unresolved sends you back to
 Phase 2 or 3.
 
 **Order of operations:**
-1. Directory tree.
-2. `plugin.json`.
+1. Directory tree — including `.claude-plugin/` at the plugin root.
+2. `.claude-plugin/plugin.json` — the manifest lives inside `.claude-plugin/`, never at the plugin root; everything else lives at the plugin root, never inside `.claude-plugin/`.
 3. Each component, from its template (`assets/templates/`).
-4. `CONNECTORS.md` + `.mcp.json`.
+4. `CONNECTORS.md` + `.mcp.json` (plugin root).
 5. `README.md`.
 
 **Rules while scaffolding:**

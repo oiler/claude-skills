@@ -1,6 +1,6 @@
 ---
 name: read-drive-file
-description: Explains how to open, read, and interpret a file from ~~file storage (Google Drive) once it has been located — export formats for Docs/Sheets/Slides, how to handle PDFs/images/CSVs/plain text, and how to hand the content off for summarizing or answering questions. Use when a command skill needs to read a specific Drive file, when the user references "that doc", "the spreadsheet", "the file in my Drive", asks to open/read/summarize/extract from a Google Drive file, or when find-in-drive has matched a file and needs it interpreted.
+description: Explains how to open, read, and interpret a file from connected file storage (Google Drive) once it has been located — export formats for Docs/Sheets/Slides, how to handle PDFs/images/CSVs/plain text, and how to hand the content off for summarizing or answering questions. Use when a command skill needs to read a specific Drive file, when the user references "that doc", "the spreadsheet", "the file in my Drive", asks to open/read/summarize/extract from a Google Drive file, or when find-in-drive has matched a file and needs it interpreted.
 user-invocable: false
 ---
 

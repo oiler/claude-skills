@@ -1,6 +1,6 @@
 ---
 name: find-in-drive
-description: Searches ~~file storage (Google Drive) for files matching a name, keyword, or topic and hands matches off for reading. Use when the user says "find that file in Drive", "search my Google Drive for…", "look up the doc about…", "do I have a file called…", or asks to locate, find, or search for a file, document, spreadsheet, or presentation.
+description: Searches the user's connected file storage (Google Drive) for files matching a name, keyword, or topic and hands matches off for reading. Use when the user says "find that file in Drive", "search my Google Drive for…", "look up the doc about…", "do I have a file called…", or asks to locate, find, or search for a file, document, spreadsheet, or presentation.
 argument-hint: [search terms]
 ---
 

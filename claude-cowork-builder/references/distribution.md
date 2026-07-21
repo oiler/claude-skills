@@ -21,7 +21,23 @@ Confirm both decisions together, not independently — they're coupled (below), 
 
 ## 3. Private artifacts
 
-What a private, individually-installed plugin ships. Minimal `plugin.json`:
+What a private, individually-installed plugin ships. The manifest lives at
+`.claude-plugin/plugin.json` — inside a `.claude-plugin/` directory at the
+plugin root, never at the root itself. Only the manifest goes in
+`.claude-plugin/`; component directories (`skills/`, `agents/`) and the
+root-level files (`.mcp.json`, `CONNECTORS.md`, `README.md`) stay at the
+plugin root:
+
+```
+my-plugin/
+├── .claude-plugin/
+│   └── plugin.json      ← manifest, always exactly here
+├── skills/
+├── .mcp.json
+└── README.md
+```
+
+Minimal `plugin.json`:
 
 ```json
 {
@@ -56,26 +72,42 @@ Everything in §3, plus:
 }
 ```
 
-**`marketplace.json` — new file, plugin root:**
+**`marketplace.json` — lives in the marketplace repo, not the plugin.** A
+marketplace is a container repository holding one or more plugins as
+subdirectories; its manifest sits at the *repo's* `.claude-plugin/marketplace.json`
+and lists each plugin by relative `source`. It is never a per-plugin file —
+"going marketplace" means the plugin moves into (or becomes) such a repo:
+
+```
+my-marketplace/                      ← the marketplace repo
+├── .claude-plugin/
+│   └── marketplace.json             ← one manifest for the whole marketplace
+├── my-plugin/                       ← a plugin, with its own .claude-plugin/plugin.json
+└── another-plugin/
+```
+
 ```json
 {
   "name": "my-marketplace",
   "owner": { "name": "oiler" },
-  "metadata": {
-    "pluginRoot": "."
-  },
   "plugins": [
     {
       "name": "my-plugin",
-      "source": "./my-plugin"
+      "displayName": "My Plugin",
+      "source": "./my-plugin",
+      "description": "One sentence: what this plugin does."
     }
   ]
 }
 ```
 
+`displayName` is what the Cowork UI shows; `description` here is the
+marketplace-listing copy and can match the plugin's own. A single-plugin
+marketplace is fine — the repo just holds one plugin subdirectory.
+
 **`CHANGELOG.md` — new file, plugin root.** Standard keep-a-changelog format: `## [0.1.0] - YYYY-MM-DD` sections, `Added`/`Changed`/`Fixed` subheads.
 
-**Genericize.** Every product name a skill body references gets swapped for a `~~category` placeholder, with `CONNECTORS.md` added at the plugin root as the translation table (category → placeholder → included servers → other options). See `connectors-and-mcp.md` for the full `~~category` system and the `CONNECTORS.md` table format — this is the same mechanism, triggered by the visibility flip.
+**Genericize.** Every product name a skill body references gets swapped for a `~~category` placeholder, and every product name in a `description` frontmatter field drops to plain category language (descriptions never carry `~~` tokens — see `connectors-and-mcp.md`), with `CONNECTORS.md` added at the plugin root as the translation table (category → placeholder → included servers → other options). See `connectors-and-mcp.md` for the full `~~category` system and the `CONNECTORS.md` table format — this is the same mechanism, triggered by the visibility flip.
 
 ## 5. Versioning
 
@@ -91,18 +123,21 @@ cd <plugin-dir> && zip -r /tmp/<name>.plugin . -x "*.DS_Store" && cp /tmp/<name>
 
 The `.plugin` filename is the plugin's `name` field from `plugin.json` (kebab-case) — `<name>.plugin`, not the directory name if they've diverged.
 
+Delete any stale `/tmp/<name>.plugin` from a previous run before zipping — `zip` updates an existing archive in place rather than replacing it, so a stale file can carry deleted entries into the "new" package.
+
 ## 7. Validation
 
 If the `claude` CLI is available, run it against the packaged artifact:
 
 ```bash
-claude plugin validate <path-to-plugin.json>
+claude plugin validate <plugin-dir>/.claude-plugin/plugin.json
 ```
 
 If it isn't available, walk the manual structural checklist instead:
 
-- `plugin.json` is valid JSON; `name` is kebab-case.
-- Every component directory referenced by `plugin.json` (skills, agents, MCP config) actually exists in the plugin tree.
+- `.claude-plugin/plugin.json` exists at exactly that path — a `plugin.json` sitting at the plugin root is a fail, not a variant.
+- It parses as valid JSON; `name` is kebab-case.
+- Every component directory referenced by `plugin.json` (skills, agents, MCP config) actually exists in the plugin tree, at the plugin root (not inside `.claude-plugin/`).
 - Every skill directory contains a file named exactly `SKILL.md` — not `skill.md`, not `<name>-SKILL.md`.
 
 Run this before packaging, not after — a bad zip is just a bad plugin directory with an archive extension.

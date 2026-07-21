@@ -21,6 +21,16 @@ Why category and not product:
 - Standalone/supercharged fallback (see `skill-authoring.md`) reads cleanest
   when the "with connector" branch names a category, not a brand.
 
+**`~~` tokens live in skill bodies only — never in `description` frontmatter.**
+The description is the trigger surface, matched against what a user actually
+types, and no user types `~~file storage`. Descriptions use plain language
+for the category ("the user's connected file storage"). While the plugin is
+private, a description may also name the concrete product ("Google Drive",
+"search my Drive for…") for trigger accuracy — private plugins are allowed
+concrete names everywhere (`distribution.md` §3). Going Public genericizes
+descriptions along with bodies: product phrasing drops to category language
+in the same pass (`distribution.md` §4).
+
 **The four places a category placeholder must stay in sync.** Every
 `~~category` token that appears in a skill body has three siblings, and all
 four must agree on spelling and casing:
@@ -137,7 +147,8 @@ point at), ship the stub verbatim:
 Mark every empty-url entry with a `*` in `.mcp.json`'s surrounding
 documentation (a comment isn't valid JSON, so the marker lives in
 `CONNECTORS.md` or `README.md` instead, next to that server's row) and
-define the footnote once:
+define the footnote once in each file that carries a `*` marker — a `*`
+in a file whose footnote lives elsewhere is a dangling reference:
 
 ```markdown
 `*` — Placeholder — MCP URL not yet configured

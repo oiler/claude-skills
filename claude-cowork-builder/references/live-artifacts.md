@@ -30,7 +30,8 @@ plugin's `skills/` directory, as a sibling of the skill subfolders. It is
 
 ```
 my-plugin/
-├── plugin.json
+├── .claude-plugin/
+│   └── plugin.json
 ├── agents/
 ├── skills/
 │   ├── dashboard.html          ← here, not inside a skill subfolder

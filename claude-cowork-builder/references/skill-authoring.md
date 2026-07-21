@@ -30,9 +30,15 @@ Once a plugin's skill count reaches roughly 8 or more, add a router skill: a dis
 
 Below that threshold, skip it — a routing layer over 3-4 skills is overhead the plugin doesn't need; the plugin's own top-level skill descriptions are enough for auto-trigger and slash-menu discovery to work.
 
+## Legacy `commands/` — recognize, don't emit
+
+Older plugins (5 of the 22 surveyed, including `pdf-viewer` and the Slack partner plugin) ship a `commands/` directory of single-file `.md` slash commands. The format still works — Cowork presents commands and skills as one "Skills" concept — but it predates skills and supports no `references/` progressive disclosure. This builder never emits `commands/`; a command is a skill with `argument-hint`.
+
+When menu entries 2–4 point at an existing plugin that has `commands/`, leave it alone — don't migrate, rename, or dedup unless oiler asks. If asked to migrate: each `commands/<name>.md` becomes `skills/<name>/SKILL.md` with the same `description` plus an `argument-hint`, body restructured to the command-skill template below, and the old file removed in the same pass — a half-migrated duplicate is exactly what audit item 11 exists to catch.
+
 ## Frontmatter rules
 
-Cowork skill frontmatter carries exactly four possible fields. Nothing else belongs here — no `allowed-tools`, no `model`; those are Claude Code power-user fields with no equivalent in the Cowork surface.
+This builder's frontmatter contract is four fields. Other fields do exist in the wild — Anthropic's `small-business` Cowork plugin pins `allowed-tools: Read, WebFetch, Bash` on every skill, and a few official skills carry `compatibility:` (a prose sentence declaring an environment requirement, e.g. "Requires Cowork desktop app environment with access to the outputs directory") — but this builder emits only the four below by default. Tool scoping belongs on agents (`agent-playbook.md` §4); add `allowed-tools` to a skill only as a deliberate exception — a skill that must never write or run commands — and say why. Add `compatibility:` only when a skill genuinely cannot run outside Cowork. `model` stays off skills entirely.
 
 | Field | Command skill | Knowledge skill |
 |---|---|---|
