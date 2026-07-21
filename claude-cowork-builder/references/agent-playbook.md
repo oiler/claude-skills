@@ -62,7 +62,7 @@ catches "this is actually just four Steps" before a needless agent ships.
 
 Every Cowork agent's frontmatter carries these fields: `name`, `description`
 (with `<example>` blocks), `model`, `color`, `maxTurns`, and `tools`. This
-list is what Task 9's `agent.md` template fills in — treat the field set as
+list is what the `agent.md` template fills in — treat the field set as
 the contract, not a suggestion.
 
 Frontmatter is a YAML mapping, so field **position** is not semantically
@@ -70,7 +70,7 @@ load-bearing. The real source files order these two different ways:
 `content-generation.md` and `quality-assurance.md` place `tools:` (as a
 pinned list) before `maxTurns`; `discover-brand.md`, `conversation-analysis.md`,
 and `document-analysis.md` place the `# tools not restricted` comment after
-`maxTurns`. Both are correct. Task 9's `agent.md` template may put `tools`
+`maxTurns`. Both are correct. The `agent.md` template may put `tools`
 (or its omission comment) before or after `maxTurns` as long as the
 ordering is internally consistent — don't treat either arrangement shown
 in §4 as the one true sequence.

@@ -59,7 +59,8 @@ Everything in §3, plus:
 **`marketplace.json` — new file, plugin root:**
 ```json
 {
-  "owner": "oiler",
+  "name": "my-marketplace",
+  "owner": { "name": "oiler" },
   "metadata": {
     "pluginRoot": "."
   },

@@ -3,7 +3,7 @@
 Designed for Claude Cowork; also works in Claude Code.
 
 ## Installation
-Install individually via app settings, or `claude plugins add <source>`.
+Install individually from the app's plugin settings (or add it through your team's marketplace).
 
 ## Commands
 | Command | What it does |

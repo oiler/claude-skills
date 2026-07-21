@@ -10,7 +10,7 @@ Run before every package (Phase 5). Every item is pass/fail; fix before zipping.
 
 4. **Progressive disclosure held.** Each `SKILL.md` stays lean — routing/summary content only — with real detail pushed into `references/`. A `SKILL.md` that reads like a full manual instead of a router is a fail.
 
-5. **Standalone + supercharged confirmed.** Every command skill has a working zero-connector path: the `## Inputs` section (or an early step) covers "without connected sources" explicitly, and that path never hard-fails just because a connector isn't wired. The "with `~~category` connected" path is additive, never a substitute. See `skill-authoring.md` § Standalone + Supercharged.
+5. **Standalone + supercharged confirmed.** Every command skill has a working zero-connector path: the `## Without connected sources` section covers the zero-connector path explicitly, and that path never hard-fails just because a connector isn't wired. The "with `~~category` connected" path is additive, never a substitute. See `skill-authoring.md` § Standalone + Supercharged.
 
 6. **`~~category` sync verified.** Every `~~category` placeholder used in a skill body appears, spelled and cased identically, in all of: the skill body itself, `CONNECTORS.md`'s `Placeholder` column (4-column table: Category / Placeholder / Included servers / Other options), the "connectors this plugin uses" section of `README.md`, and a matching server entry in `.mcp.json`. Grep each token across all four locations and confirm no orphans in either direction. Every empty-`url: ""` stub in `.mcp.json` is marked with `*` next to its row in `CONNECTORS.md` or `README.md`, with the footnote `` `*` — Placeholder — MCP URL not yet configured `` defined once. See `connectors-and-mcp.md`.
 

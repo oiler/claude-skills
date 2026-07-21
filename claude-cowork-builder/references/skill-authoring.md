@@ -57,14 +57,19 @@ Every **command** skill body follows this section order. This is the canonical s
 1. ...
 2. ...
 
+## Without connected sources
+
+## With ~~category connected
+
 ## Output Format
 
 ## After
 ```
 
 - **`## Trigger`** — one or two lines: what phrasing or situation this skill responds to. Doubles as a sanity check against the skill's own `description`.
-- **`## Inputs`** — what the skill needs from the user or the conversation to run. This is also where the standalone/supercharged split lives (below).
+- **`## Inputs`** — what the skill needs from the user or the conversation to run.
 - **`## Steps`** — the numbered steps the skill actually executes, in order. This is the only section that's a numbered list; everything else is prose or a table.
+- **`## Without connected sources`** / **`## With ~~category connected`** — the mandatory standalone/supercharged split (see below).
 - **`## Output Format`** — the shape of what gets produced, concretely enough that two runs of the skill produce comparably-shaped output.
 - **`## After`** — a closing menu of next actions the user can take from here (not a sign-off; an actual menu, mirroring the board-menu pattern this builder itself uses).
 
@@ -76,7 +81,7 @@ Knowledge skills are auto-triggered background material, not user-invoked action
 
 ## Standalone + Supercharged — mandatory, not optional
 
-Every command skill must work with **zero connectors**. It degrades gracefully, it never hard-fails because a connector isn't wired up. Structure the `## Inputs` section (or an early step) as two paths:
+Every command skill must work with **zero connectors**. It degrades gracefully, it never hard-fails because a connector isn't wired up. The command body carries two dedicated sections after `## Steps`:
 
 - **Without connected sources** — the user pastes text, uploads a file, or describes the input in the chat. This is the floor every skill must clear.
 - **With `~~category` connected** — if the matching connector category is live, the skill can fetch directly instead of asking the user to hand it over manually. This is a strict improvement on the floor, never a substitute for it — a user without that connector configured must still be able to complete the task.
@@ -86,17 +91,21 @@ Every command skill must work with **zero connectors**. It degrades gracefully, 
 ```markdown
 ## Inputs
 
-Meeting notes to summarize.
+Meeting notes to summarize (`$1` may name or link them).
 
-**Without connected sources:** ask the user to paste the notes into the
-chat, or upload a text/doc file. Work only from what's given — never
-claim to have fetched something that wasn't provided.
+## Without connected sources
 
-**With ~~document store connected:** if a document-store connector is
-active, offer to pull the notes directly (by file name, link, or a
-quick search) instead of asking for a paste. Still accept a pasted or
-uploaded file if the user doesn't have one queued up in the connected
-source — the connected path is additive, not required.
+Ask the user to paste the notes into the chat, or upload a text/doc
+file. Work only from what's given — never claim to have fetched
+something that wasn't provided.
+
+## With ~~document store connected
+
+If a document-store connector is active, offer to pull the notes
+directly (by file name, link, or a quick search) instead of asking for
+a paste. Still accept a pasted or uploaded file if the user doesn't
+have one queued up in the connected source — the connected path is
+additive, not required.
 ```
 
 Every command skill needs this shape somewhere in its body, even if the "with connector" path is currently a stub because the connector isn't wired up yet (see the CONNECTORS banner below).
