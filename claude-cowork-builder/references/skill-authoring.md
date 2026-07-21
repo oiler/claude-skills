@@ -52,7 +52,7 @@ Every skill body — command or knowledge — follows this section order. This i
 
 ## Inputs
 
-## Process
+## Steps
 
 1. ...
 2. ...
@@ -64,7 +64,7 @@ Every skill body — command or knowledge — follows this section order. This i
 
 - **`## Trigger`** — one or two lines: what phrasing or situation this skill responds to. For a command skill this doubles as a sanity check against its own `description`; for a knowledge skill it's the auto-trigger condition spelled out in prose.
 - **`## Inputs`** — what the skill needs from the user or the conversation to run. This is also where the standalone/supercharged split lives (below).
-- **`## Process`** — the numbered steps the skill actually executes, in order. This is the only section that's a numbered list; everything else is prose or a table.
+- **`## Steps`** — the numbered steps the skill actually executes, in order. This is the only section that's a numbered list; everything else is prose or a table.
 - **`## Output Format`** — the shape of what gets produced, concretely enough that two runs of the skill produce comparably-shaped output.
 - **`## After`** — a closing menu of next actions the user can take from here (not a sign-off; an actual menu, mirroring the board-menu pattern this builder itself uses).
 
