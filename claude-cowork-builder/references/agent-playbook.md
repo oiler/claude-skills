@@ -2,8 +2,9 @@
 
 Agents are the most expensive, least-used layer in a Cowork plugin. Across
 22 surveyed Anthropic-shipped Cowork plugins, exactly 1 ships an agent
-(`brand-voice`, three agents: `discover-brand`, `content-generation`,
-`quality-assurance`). Read this before Phase 2/3 add an agent row to the
+(`brand-voice`, five agents: `discover-brand`, `conversation-analysis`,
+`document-analysis`, `content-generation`, `quality-assurance`). Read this
+before Phase 2/3 add an agent row to the
 component table, and before Phase 4 scaffolds `agents/*.md`.
 
 ## 1. Default is no agent
@@ -25,7 +26,7 @@ deviation, not a default checkbox — the build menu marks it
 Add an agent only when the work is a **genuine autonomous multi-step job**
 that shouldn't be inlined into a skill body. The tell is that the job needs
 its own turn budget, its own tool scope, and produces a result the calling
-skill consumes rather than narrates step-by-step. Three shapes qualify:
+skill consumes rather than narrates step-by-step. Four shapes qualify:
 
 - **Heavy search/triage** — searching across many connected platforms,
   scoring and ranking results, deep-fetching a subset. (`discover-brand`:
@@ -37,6 +38,13 @@ skill consumes rather than narrates step-by-step. Three shapes qualify:
 - **A QA sweep** — structured validation against a checklist, run as a
   distinct pass before the parent skill presents output. (`quality-assurance`:
   haiku, 10 max turns, `Read`/`Glob`/`Grep` only.)
+- **Deep pattern analysis over handed-in material** — cross-referencing
+  many transcripts or documents for voice attributes, messaging patterns,
+  and contradictions, with confidence-scored output. Read-only analysis,
+  but the source material still needs MCP fetching, so tools stay
+  unrestricted. (`conversation-analysis`: sonnet, 15 max turns, analyzes
+  Gong/Granola call transcripts. `document-analysis`: sonnet, 15 max turns,
+  analyzes Notion/Confluence/Drive documents.)
 
 **If the job is linear or short — a handful of steps, one tool, no
 branching search — keep it a skill.** Inlining is cheaper to author, cheaper
@@ -45,16 +53,27 @@ job, no invisible sub-agent turn budget running underneath it.
 
 **State the justification out loud before emitting an agent.** Before
 writing `agents/<name>.md`, write the one-line justification into the
-Phase 2 component table (see `build-spine.md`) — which of the three shapes
+Phase 2 component table (see `build-spine.md`) — which of the four shapes
 this is, and why it can't be inlined. An agent with no stated justification
 doesn't get scaffolded. This isn't a formality: writing the sentence is what
 catches "this is actually just four Steps" before a needless agent ships.
 
 ## 3. Agent frontmatter fields
 
-Every Cowork agent's frontmatter carries these fields, in this order. This
-list is what Task 9's `agent.md` template fills in verbatim — treat it as
-the field contract, not a suggestion.
+Every Cowork agent's frontmatter carries these fields: `name`, `description`
+(with `<example>` blocks), `model`, `color`, `maxTurns`, and `tools`. This
+list is what Task 9's `agent.md` template fills in — treat the field set as
+the contract, not a suggestion.
+
+Frontmatter is a YAML mapping, so field **position** is not semantically
+load-bearing. The real source files order these two different ways:
+`content-generation.md` and `quality-assurance.md` place `tools:` (as a
+pinned list) before `maxTurns`; `discover-brand.md`, `conversation-analysis.md`,
+and `document-analysis.md` place the `# tools not restricted` comment after
+`maxTurns`. Both are correct. Task 9's `agent.md` template may put `tools`
+(or its omission comment) before or after `maxTurns` as long as the
+ordering is internally consistent — don't treat either arrangement shown
+in §4 as the one true sequence.
 
 | Field | Required | Shape |
 |---|---|---|
