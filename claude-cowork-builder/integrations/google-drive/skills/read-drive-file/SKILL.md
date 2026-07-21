@@ -55,12 +55,3 @@ for it (a summarizer, a search, a direct answer) without restating the
 whole file back to the user unless they asked to see it. Tell the user,
 in plain language, which file was read (by name, not by ID or path) —
 never surface a raw Drive file ID or internal path in the reply.
-
-## Output Format
-
-N/A — this skill informs other skills with file content, it doesn't
-produce standalone output of its own.
-
-## After
-
-N/A — control returns to whatever skill delegated the read.
