@@ -1,0 +1,6 @@
+{
+  "name": "PLUGIN_NAME",
+  "version": "0.1.0",
+  "description": "One sentence on what this Cowork plugin does.",
+  "author": { "name": "AUTHOR_NAME" }
+}
