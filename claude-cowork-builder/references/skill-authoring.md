@@ -43,9 +43,9 @@ Cowork skill frontmatter carries exactly four possible fields. Nothing else belo
 
 `description` is written in third person about the skill, not as an instruction to the skill (`"Summarizes meeting notes into action items."` not `"Summarize the meeting notes."`), and it's trigger-phrase-rich: pack in the concrete phrasing a user would actually type, closing with a `Use when…` clause. This is the field that decides whether the skill fires at all — undertriggering is the most common failure mode, so err toward more explicit trigger phrases, not fewer.
 
-## The skill body template
+## The command-skill body template
 
-Every skill body — command or knowledge — follows this section order. This is the canonical shape; templates built from this reference reproduce it exactly:
+Every **command** skill body follows this section order. This is the canonical shape; the command-skill template reproduces it exactly:
 
 ```markdown
 ## Trigger
@@ -62,13 +62,17 @@ Every skill body — command or knowledge — follows this section order. This i
 ## After
 ```
 
-- **`## Trigger`** — one or two lines: what phrasing or situation this skill responds to. For a command skill this doubles as a sanity check against its own `description`; for a knowledge skill it's the auto-trigger condition spelled out in prose.
+- **`## Trigger`** — one or two lines: what phrasing or situation this skill responds to. Doubles as a sanity check against the skill's own `description`.
 - **`## Inputs`** — what the skill needs from the user or the conversation to run. This is also where the standalone/supercharged split lives (below).
 - **`## Steps`** — the numbered steps the skill actually executes, in order. This is the only section that's a numbered list; everything else is prose or a table.
 - **`## Output Format`** — the shape of what gets produced, concretely enough that two runs of the skill produce comparably-shaped output.
 - **`## After`** — a closing menu of next actions the user can take from here (not a sign-off; an actual menu, mirroring the board-menu pattern this builder itself uses).
 
-Don't reorder or drop sections. A knowledge skill with nothing worth saying in `## Output Format` still gets the heading — write "N/A — this skill informs other skills, it doesn't produce standalone output" rather than omitting it, since Task 9's templates key off this section order being present and in order.
+Don't reorder or drop these sections in a command skill — the command-skill template keys off them being present and in order.
+
+## The knowledge-skill body
+
+Knowledge skills are auto-triggered background material, not user-invoked actions, so they do **not** take the command body shape. Keep them lighter and free-form: a short `## Scope` (what this knowledge covers and when it applies) followed by `## Rules` (the domain facts, constraints, or procedure Claude should follow) — or whatever headings the knowledge actually needs. No `## Steps`, no `## Output Format`, no `## After`; a knowledge skill informs other skills, it doesn't produce standalone output. Set `user-invocable: false` so it stays out of the slash menu.
 
 ## Standalone + Supercharged — mandatory, not optional
 
