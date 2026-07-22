@@ -1,32 +1,17 @@
-# Live Artifacts — shipping a custom UI
+# Custom UI — static HTML deliverables vs. Live Artifacts
 
-A Live Artifact is the only Cowork-specific custom-UI surface. Everything
-else in a plugin is conversational — skills, agents, connectors all resolve
-to Claude talking with the user in chat. A Live Artifact is the one layer
-that puts a persistent, interactive HTML surface in front of the user
-instead. Reach for it deliberately; the default for a new component is
-still "no Live Artifact" (`build-spine.md`, Phase 2).
+Two genuinely different surfaces get called "custom UI" in Cowork work, and they are easy to conflate (the original plugin-corpus survey did exactly that, under the name "Live Artifacts"). They share nothing operationally:
 
-## 1. What it is
+- A **static HTML deliverable** is a file the plugin ships and copies into the user's working folder. Corpus-verified pattern — observed in official plugins.
+- A **Live Artifact** is a managed Cowork feature: a persistent, connector-refreshed page in the Artifacts view. Facts below are from Anthropic's support article ("Use live artifacts in Claude Cowork", https://support.claude.com/en/articles/14729249, checked 2026-07-22).
 
-A Live Artifact is a static HTML file — no build step, no server, no
-framework runtime — shipped inside the plugin and copied out into the
-user's working folder at run time. There's no live connection back to the
-plugin, no Cowork-specific JS API, no MCP bridge baked into the page: once
-copied, it's a plain file the user's browser opens like any other local
-HTML file. "Live" describes the fact that the user keeps it open and
-interacts with it across a session, not that it has a live channel back
-into Claude.
+The default for a new component is still *neither* (`build-spine.md`, Phase 2). Pick a surface only when chat turns genuinely can't carry the interaction, then pick which surface using §3.
 
-Because it's just HTML, all the constraints below are about *how a single
-static file has to behave* to be trustworthy and portable, not about a
-Cowork-specific API surface to learn.
+## 1. Static HTML deliverable — the ship-and-copy pattern
 
-## 2. Ship + wire
+A single static HTML file — no build step, no server, no framework runtime — shipped inside the plugin and copied out into the user's working folder at run time. Once copied it's a plain local file the user opens in a browser: frozen at copy time, fully offline, no connection back to Claude or to connectors. Useful for a snapshot dashboard, a formatted reference, a portable report shell.
 
-**Placement.** The file — `dashboard.html` — lives directly under the
-plugin's `skills/` directory, as a sibling of the skill subfolders. It is
-**not** nested inside any individual skill's own directory:
+**Placement.** The file — `dashboard.html` — lives directly under the plugin's `skills/` directory, as a sibling of the skill subfolders, **not** nested inside any individual skill's own directory:
 
 ```
 my-plugin/
@@ -42,39 +27,22 @@ my-plugin/
 └── CONNECTORS.md
 ```
 
-It sits at that level because more than one skill may need to hand it out
-or refer to it, and because a skill subfolder is scoped to one skill's own
-frontmatter and body — the artifact isn't owned by any single skill, it's
-a plugin-level asset.
+It sits at that level because more than one skill may need to hand it out, and because a skill subfolder is scoped to one skill's own frontmatter and body — the file is a plugin-level asset, not owned by any single skill.
 
-**Wiring.** A `start`-style command skill is what actually delivers the
-artifact to the user. Its job, at the relevant step, is exactly two things:
-copy the file into the user's working folder, then tell the user where it
-landed. The copy source is always the plugin-root-relative path:
+**Wiring.** A `start`-style command skill delivers it: copy the file into the user's working folder, then tell the user where it landed. The copy source is always the plugin-root-relative path:
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/skills/dashboard.html
 ```
 
-Never a hardcoded or relative path — same rule as everywhere else in this
-builder (`SKILL.md` → Hard rules), and it matters more here because the
-plugin's install location is genuinely unknown at authoring time.
+Never a hardcoded or relative path — same rule as everywhere else in this builder (`SKILL.md` → Hard rules), and it matters more here because the plugin's install location is genuinely unknown at authoring time.
 
-This is the Cowork output-hygiene rule (`skill-authoring.md` → "Cowork
-output hygiene") applied to one specific artifact type, not a separate set
-of rules:
+This is the Cowork output-hygiene rule (`skill-authoring.md` → "Cowork output hygiene") applied to one artifact type, not a separate rule set:
 
-- The copy destination is the user's **working folder** — never the
-  plugin's own install directory, never an arbitrary temp path.
-- The path told back to the user is a **real, resolved path**, not a
-  relative one.
-- The skill **never** calls `open` or `xdg-open` on the file, and never
-  writes or implies language suggesting the file opened itself. The skill
-  runs in a VM with no ability to pop a window on the user's machine.
-- The skill's last move here is to **tell the user the path** — e.g. "I've
-  copied the dashboard to your working folder as `dashboard.html` — open it
-  in your browser to get started." — so the user can find and open it
-  themselves.
+- Copy destination is the user's **working folder** — never the plugin's own install directory, never an arbitrary temp path.
+- The path told back to the user is a **real, resolved path**, not a relative one.
+- The skill **never** calls `open` or `xdg-open`, and never implies the file opened itself — it runs in a VM with no ability to pop a window on the user's machine.
+- The skill's last move is to **tell the user the path** — "I've copied the dashboard to your working folder as `dashboard.html` — open it in your browser to get started."
 
 Worked shape, inside the `start` skill's `## Steps`:
 
@@ -86,54 +54,52 @@ folder. Tell the user the resulting path and that they can open it in a
 browser — never attempt to open it directly.
 ```
 
-If the plugin needs the artifact re-copied later (e.g. a "reset dashboard"
-path, or the user deleted their copy), any skill can perform the same copy
-step — the rule is about the copy mechanics and messaging, not about which
-skill is allowed to do it. `start` is just the conventional first place a
-user encounters it.
+Any skill may re-run the same copy step (a "reset dashboard" path, a deleted copy) — the rule is about the copy mechanics and messaging, not which skill performs it.
 
-## 3. Branding
+**Branding.** Default neutral and brandable:
 
-Default the artifact to neutral and brandable, not to a specific product
-identity:
+- **Inline SVG favicon** — data URI or inline `<svg>`, never a second shipped asset file (one more placement and relative-path failure mode).
+- **Self-contained CSS** — all styling in a `<style>` block; no external stylesheet, CDN font, or icon-font link.
+- **No external fetches of any kind** — no CDN scripts, no remote `fetch()`, no analytics beacons. The file must render and function fully offline, from disk, exactly as shipped.
 
-- **Inline SVG favicon** — embed the favicon as a data URI or inline
-  `<svg>`, not a linked `.ico`/`.png` file. A second shipped asset file is
-  one more thing to place correctly and one more relative-path failure
-  mode; an inline favicon has neither problem.
-- **Self-contained CSS** — all styling lives in a `<style>` block in the
-  same file. No external stylesheet, no CDN font, no icon-font link.
-- **No external fetches of any kind** — no CDN script tags, no remote
-  `fetch()` calls to third-party services, no analytics beacons. The
-  artifact has no server behind it and no reliable network assumptions; it
-  has to render and function fully offline, from disk, exactly as shipped.
+Theming (brand colors, a logo) is an enhancement layered onto a working self-contained file, never a prerequisite for shipping one.
 
-This isn't a permanent restriction — a plugin author who wants a themed
-dashboard (specific brand colors, a logo, custom typography) can absolutely
-build that in. The point of the neutral default is that an unthemed
-plugin still ships something that looks intentional, not a bare unstyled
-HTML page — theming is an enhancement layered onto a working self-contained
-file, never a prerequisite for shipping one.
+## 2. Live Artifacts — the Cowork feature
 
-## 4. When to use
+What the feature actually is, per the support article:
 
-Add a Live Artifact only when the plugin genuinely needs a **persistent,
-interactive surface** that a conversational skill can't provide — a
-dashboard the user keeps open and glances back at, a visualization that
-updates shape as the user interacts with it, a layout too spatial for chat
-turns to represent well. That's a narrow bar.
+- A **persistent, interactive HTML page** Claude creates in Cowork, living in the **Artifacts view** on Claude Desktop — not in the working folder, not opened from disk by the user.
+- It **refreshes with current data from connected apps**: a short cache makes it load fast, it re-queries connectors on its own, and a manual refresh button sits in its header.
+- **Version history**: every iteration with Claude saves the previous version; users can compare and restore.
+- Created by **asking Claude during a Cowork task** ("build me a tracker that pulls from…") or via Artifacts view → New artifact → Create Cowork artifact.
+- **Constraints**: desktop-only (macOS/Windows/Linux beta), paid plans, stored locally per device (doesn't follow the user across devices). Team/Enterprise sharing opens the artifact with the **viewer's** connectors, not the author's.
+- **Security property that matters to plugin authors**: Live Artifacts *use connectors without asking* — no approval prompt, even in session modes that normally require one.
 
-Skip it when the actual need is any of:
+**The plugin's role is prompt-level only.** There is no documented packaging surface for Live Artifacts: no manifest field, no file format, no `${CLAUDE_PLUGIN_ROOT}` mechanism, no way to ship one inside a `.plugin`. Do not invent one. The only path a plugin has is instructional — a skill's `## Steps` can direct Claude to create or update a Live Artifact during the Cowork task:
 
-- A one-off report or summary → a skill just writes the file and tells the
-  user where it is.
-- A form or a few inputs → a skill can ask for them conversationally, turn
-  by turn.
-- "It would look nicer as a UI" without a persistence or interactivity
-  requirement → conversational output is the default surface in Cowork;
-  don't add a UI layer to dress up something chat already handles.
+```markdown
+### 3. Build the tracker
 
-Per `build-spine.md` Phase 2, the default answer to "does this plugin need
-a Live Artifact" is no. Add one only when the persistent-surface need is
-real, and be able to say in one sentence what interaction the dashboard
-supports that chat turns don't.
+Create a live artifact: a tracker for [the thing], pulling current data
+from ~~project tracker and ~~messaging. Keep it to one screen; the user
+will iterate on layout in follow-ups.
+```
+
+Rules when a skill does this:
+
+- **Name data sources by `~~category`**, same as everywhere else (`connectors-and-mcp.md`) — the live artifact will bind to whatever the user actually has connected.
+- **Disclose the auto-refresh behavior in user-facing copy.** Because live artifacts read connectors without approval prompts, a skill that spawns one quietly widens what the plugin touches. The skill's user-facing output says, in plain language, that the artifact keeps itself current from their connected tools. This is an audit item (`audit-checklist.md` item 9).
+- **The standalone floor still applies.** With zero connectors, the skill either builds the artifact from pasted/uploaded data (static content, no refresh) or falls back to a §1 static deliverable — it never hard-fails for want of a connector.
+- **Desktop/plan caveats are the user's reality, not yours to detect.** Don't try to sniff the environment; if artifact creation isn't available, Claude will surface that in-task, and the skill's fallback path covers it.
+
+## 3. Choosing a surface
+
+| Actual need | Use |
+|---|---|
+| One-off report or summary | Neither — a skill writes the file and tells the user where it is |
+| A form or a few inputs | Neither — ask conversationally, turn by turn |
+| Snapshot dashboard: offline, portable, frozen at generation time | §1 static deliverable |
+| Persistent tracker/dashboard the user revisits and that must stay current with connector data | §2 Live Artifact (accepting desktop-only + paid-plan constraints) |
+| "It would look nicer as a UI" with no persistence or interactivity requirement | Neither — chat is the default surface; don't dress up what chat already handles |
+
+Per `build-spine.md` Phase 2, the default answer to "does this plugin need custom UI" is no. Add a surface only when the need is real, and be able to say in one sentence what interaction it supports that chat turns don't.

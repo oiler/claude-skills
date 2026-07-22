@@ -48,7 +48,7 @@ declines and why — not just what it includes.
 - Which skills (command / knowledge / router) this plugin needs, primary layer.
 - Whether MCP connectors are needed, and which categories.
 - Whether an agent is justified — only if the `agent-playbook.md` gate passes. Default is no agent.
-- Whether a Live Artifact is needed — only for a genuinely persistent custom UI.
+- Whether custom UI is needed — a static HTML deliverable (shipped + copied) or a Live Artifact (created by prompt, connector-refreshed); two different surfaces, chosen per `live-artifacts.md` §3. Default is neither.
 - Whether a router skill is needed — default heuristic: only when skill count ≥ 8.
 
 **Output:** A component table, one row per component type considered —
@@ -61,7 +61,7 @@ declines and why — not just what it includes.
 | Router skill | No | Skill count < 8 |
 | Agent | No | No autonomous multi-step job — `agent-playbook.md` gate fails |
 | MCP connector | Yes/No | … |
-| Live Artifact | No | No persistent UI need |
+| Custom UI (deliverable / Live Artifact) | No | No persistent UI need |
 
 Don't skip the "No" rows — the table's value is showing what was considered
 and declined, not just what shipped.
