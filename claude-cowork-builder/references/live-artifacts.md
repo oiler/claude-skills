@@ -41,7 +41,7 @@ This is the Cowork output-hygiene rule (`skill-authoring.md` → "Cowork output 
 
 - Copy destination is the user's **working folder** — never the plugin's own install directory, never an arbitrary temp path.
 - The path told back to the user is a **real, resolved path**, not a relative one.
-- The skill **never** calls `open` or `xdg-open`, and never implies the file opened itself — it runs in a VM with no ability to pop a window on the user's machine.
+- The skill **never** calls `open` or `xdg-open`, and never implies the file opened itself — plugins never assume the ability to pop a window on the user's machine (computer use is a gated research preview a plugin must not depend on — `cowork-runtime.md`).
 - The skill's last move is to **tell the user the path** — "I've copied the dashboard to your working folder as `dashboard.html` — open it in your browser to get started."
 
 Worked shape, inside the `start` skill's `## Steps`:

@@ -127,7 +127,7 @@ Picking a shape:
 |---|---|
 | `http` | Remote MCP server, no auth header needed (rare — most remotes need a token) |
 | `sse` | Remote MCP server that streams over SSE instead of plain HTTP |
-| `command`/`npx` stdio | Server runs as a local process the plugin spawns — no remote URL at all |
+| `command`/`npx` stdio | Server runs as a local process the plugin spawns — no remote URL at all. **Local sessions only:** local MCP servers don't run in remote sessions or scheduled tasks (`cowork-runtime.md`), so a stdio-only connector silently disappears there — pair it with a remote shape or make sure the standalone path carries the skill |
 | `http` + `headers` (bearer) | Remote MCP server gated by a bearer token — the common case for anything requiring auth |
 
 Never hardcode a secret into the `url` or `headers` value. `${SERVICE_TOKEN}`
@@ -190,3 +190,4 @@ the host machine is already bound to that port.
 - **Secrets go through environment variables, never literals.** `${SERVICE_TOKEN}`, `${SLACK_CLIENT_ID}` — every credential in `.mcp.json` is a `${VAR}` substitution. A literal API key or bearer token committed into `.mcp.json` is a Phase 5 audit failure, not a style nit.
 - **HTTPS only for remote servers.** Every `http` and `sse` entry's `url` is `https://` — no plaintext remotes, no exceptions for "internal" or "trusted" endpoints.
 - **Document every required env var in `README.md`.** If `.mcp.json` references `${SERVICE_TOKEN}`, the plugin's `README.md` says what it is, where the plugin owner gets it, and that it must be set before the connector will work. A plugin that ships a `${VAR}` reference with no corresponding README entry leaves the owner guessing what to configure.
+- **Remote sessions may not reach your remote server.** Remote-session egress goes through a mandatory allow-list proxy, and Enterprise defaults to no network (`cowork-runtime.md`). Treat "connector unreachable" as an expected runtime state, not an error — it's another reason the standalone path is mandatory.

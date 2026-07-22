@@ -60,6 +60,7 @@ Full walkthrough of every phase: `references/build-spine.md`.
 | Deciding whether to add an agent | references/agent-playbook.md |
 | Choosing install/visibility & packaging | references/distribution.md |
 | Custom UI (static deliverable / Live Artifacts) | references/live-artifacts.md |
+| Runtime realities (sessions, platforms, scheduled tasks, computer use) | references/cowork-runtime.md |
 | Pre-package check | references/audit-checklist.md |
 | Adding Google Drive | integrations/google-drive/recipe.md |
 
@@ -72,7 +73,7 @@ Default lean: Private + Individual install; switch to Public → genericize + ad
 - Every skill file is named exactly `SKILL.md` — wrong filename fails silently, no error surfaces.
 - The manifest lives at `.claude-plugin/plugin.json` — at the plugin root it isn't found. Components (`skills/`, `agents/`, `.mcp.json`) live at the root, never inside `.claude-plugin/`.
 - Every command skill works with zero connectors — the user can paste, upload, or describe the input instead. The connected `~~category` path is additive, never required.
-- Cowork output hygiene: outputs go to the user's working folder; no relative paths; no `open`/`xdg-open` (the skill runs in a VM); always tell the user the exact path that was written.
+- Cowork output hygiene: outputs go to the user's working folder — or surface as session deliverables when the session has none (remote/scheduled runs); no relative paths; no `open`/`xdg-open`; always tell the user the exact path — or file name — that was written.
 - What the plugin says to Cowork users stays nontechnical — no schema-speak, raw `~~` tokens, or plugin-internal file names in user-facing copy.
 - Reference the plugin root as `${CLAUDE_PLUGIN_ROOT}`, never a hardcoded or relative path — plugins install into locations the author doesn't control.
 - Agents are exceptional, not default: add one only when a playbook justifies it, and scope it as tightly as that playbook allows.

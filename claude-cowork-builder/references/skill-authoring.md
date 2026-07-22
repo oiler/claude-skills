@@ -118,12 +118,14 @@ Every command skill needs this shape somewhere in its body, even if the "with co
 
 ## Cowork output hygiene
 
-The skill runs in a VM / plugin-cache directory, not the user's visible file system — so file handling has hard rules, verbatim:
+The skill runs in a sandboxed environment (a per-session remote sandbox, or a local VM — `cowork-runtime.md`), not the user's visible file system — so file handling has hard rules, verbatim:
 
 - Outputs go to the user's **working folder**. Never write into the plugin's own install directory or an arbitrary temp path.
 - **No relative paths.** Resolve and use a real path rooted in the working folder.
-- **No `open` / `xdg-open`.** The skill cannot pop a file open on the user's machine from inside the VM — don't attempt it, and don't write instructions implying it happened.
+- **No `open` / `xdg-open`.** Don't attempt to pop a file open on the user's machine, and don't write instructions implying it happened. (Computer use exists as a gated research preview that can open apps — never author a skill that depends on it; see `cowork-runtime.md`.)
 - **Tell the user the path.** After writing output, say exactly where it landed so the user can find and open it themselves.
+
+**When there is no working folder.** Remote sessions started from web or mobile, and every scheduled task, may run with no local folder attached (`cowork-runtime.md`). Outputs then surface as **session deliverables** the user previews and downloads in the session. The rules degrade gracefully: produce the file, tell the user its name and contents — never fabricate a filesystem path that doesn't exist. A skill intended to be schedulable must work in this mode.
 
 For any skill where getting this wrong is costly — it writes many files, could overwrite existing work, or the working folder is otherwise load-bearing for the rest of the session — open the skill body with an explicit guard. Shown literally, the block reads:
 
@@ -137,7 +139,7 @@ describe any output until a working folder is confirmed. Every file
 this skill produces goes into that folder.
 ```
 
-This guard is optional per skill, not a required section in every template — add it when the skill's output is sensitive or destructive enough to warrant halting up front; skip it for skills that only read or advise.
+This guard is optional per skill, not a required section in every template — add it when the skill's output is sensitive or destructive enough to warrant halting up front; skip it for skills that only read or advise. And never add it to a skill meant to run as a scheduled task: scheduled runs execute remotely with no working folder and no user present to select one, so the guard dead-ends every run (`cowork-runtime.md` § Scheduled tasks).
 
 ## The CONNECTORS.md banner
 

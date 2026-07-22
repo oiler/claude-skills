@@ -11,6 +11,7 @@ option 1). Other menu entries jump in partway — see **Menu shortcuts** below.
 - The problem this plugin solves, in one sentence.
 - The Cowork audience — who runs this inside Cowork, and how technical they are (default: nontechnical/light-technical).
 - External tools the plugin touches (Drive, Slack, a REST API, none).
+- How it will be invoked — interactive tasks, scheduled tasks, or both. Scheduled use changes the output and guard rules (`cowork-runtime.md` § Scheduled tasks).
 
 Skip questions the request already answers. If oiler's prompt states the
 problem, audience, and tools up front, don't re-ask — restate them back and
