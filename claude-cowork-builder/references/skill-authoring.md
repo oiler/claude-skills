@@ -92,6 +92,8 @@ Every command skill must work with **zero connectors**. It degrades gracefully, 
 - **Without connected sources** — the user pastes text, uploads a file, or describes the input in the chat. This is the floor every skill must clear.
 - **With `~~category` connected** — if the matching connector category is live, the skill can fetch directly instead of asking the user to hand it over manually. This is a strict improvement on the floor, never a substitute for it — a user without that connector configured must still be able to complete the task.
 
+**Never degrade silently.** The standalone floor is for users who *never connected* the category — it is not a runtime fallback for a configured connector that fails. If the user's config lives behind a connector (their sheet, their folder) and the connector can't be reached this session, **stop and tell them plainly** (point at reconnecting); do not quietly switch to the standalone path and write files where they don't expect them. A configured-but-unreachable connector is an error state the user must hear about — silent fallback turns it into data the user discovers in the wrong place later. (Production origin: a Drive-configured plugin quietly wrote reports to the working folder when the connector hiccuped; the user believed they were in Drive.)
+
 **Worked mini-example** — a "summarize meeting notes" command skill:
 
 ```markdown
