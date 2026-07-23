@@ -159,6 +159,17 @@ Consequences to surface in the design, in writing:
 - Continuity depends on folder reuse: a fresh working folder means a fresh baseline. Tell the user once per session that reusing the same folder is what makes the plugin remember.
 - If state genuinely must be **shared or durable** (any-teammate runs, scheduled runs), the create-only-safe pattern is **immutable versioned snapshots** in connected storage — `state-<timestamp>`, read the newest, write a new one on change — accepting that orphaned versions accumulate (native connectors have no delete tool).
 
+## Onboarding — the first-run pattern
+
+A plugin for nontechnical users teaches itself. The pattern that holds up in production:
+
+- **Detect first-timers; never guess a mode.** Look for existing config in every home it could live (connected storage *and* the working folder). Nothing found and nothing given in chat → hand off to a guided-walkthrough reference. Config found → the user already chose; respect it.
+- **Offer the skip door in the first message.** "Say skip and I'll get out of your way" — and honor it. A skipped walkthrough still runs the hard gates when the user actually acts.
+- **Front-load the one restart-class check.** If a capability failure would force a fresh session (no network egress), probe it before any config conversation — and probe the real path the plugin uses (`cowork-runtime.md` § Probe the real path), not a settings inference. Say nothing when it passes.
+- **Frame choices in the user's terms.** "Shared with your team, or just for you?" — never "connected vs. standalone mode." Mode names are authoring vocabulary (Nontechnical voice, below).
+- **Verify capabilities by using them.** "Can you reach the file store?" means *try a read through the connector* — not asking the user whether they're connected.
+- **Returning users skip the walkthrough.** Config exists → straight to work; keep onboarding reachable on request ("set up <plugin>").
+
 ## The CONNECTORS.md banner
 
 Every skill that touches an external tool — reads from a connector, writes through one, or references a `~~category` placeholder — emits this line, verbatim, near the top of its body (after `## Trigger`, before the skill gets into its own process):
