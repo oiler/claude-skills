@@ -1,5 +1,9 @@
 # claude-cowork-builder — Changelog
 
+## v0.3.1 — 2026-07-23
+
+- Corrected stale install framing: the Makefile template header and `distribution.md` §6 said the `.plugin` bundle was "the shape Cowork installs when you upload a plugin package." It isn't — the stable local-install path is `/plugin marketplace add <repo>` from the self-marketplace repo (§4). The `.plugin` is a reproducible `git archive` snapshot for rollback and portable hand-off, not an upload-to-install artifact. Both docs now say so.
+
 ## v0.3.0 — 2026-07-23
 
 Determinism pass (workshop determinism ladder, first application):

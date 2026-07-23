@@ -119,6 +119,8 @@ Semver (`MAJOR.MINOR.PATCH`). New plugins start at `0.1.0`. Bump `version` in `p
 
 ## 6. Packaging
 
+Packaging produces a `.plugin` archive for rollback and portable hand-off — it is not the install path. A plugin installs via `/plugin marketplace add <repo>` from its self-marketplace repo (§4, the stable local-install path); a `.plugin` is a `git archive` snapshot you keep for versioned rollback or hand to someone out-of-band, not something you upload to install.
+
 Two default paths, by repo layout:
 
 **Plugin-is-its-own-repo (default): the shipped Makefile.** Copy `assets/templates/Makefile` to the repo root at scaffold time. `make plugin` builds `dist/<name>-<version>-<sha>.plugin` from git-tracked content via `git archive`; `make verify` asserts the bundle carries the manifest and at least one skill and that the denylist leaked nothing. Reproducible, cannot leak untracked files (a `zip -r` of the working tree honors nothing in `.gitignore`), and immune to the stale-zip-update hazard by construction — a fresh archive every build. The versioned artifact name is the rollback key. Use `.gitattributes` `export-ignore` to drop docs/evals/tests from the bundle.

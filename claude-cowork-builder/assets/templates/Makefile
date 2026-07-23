@@ -1,8 +1,10 @@
 # Package this plugin as a portable .plugin bundle — a zip with the plugin
-# manifest (.claude-plugin/plugin.json) at its ROOT, the shape Claude Cowork
-# installs when you upload a plugin package. Built REPRODUCIBLY and LEAK-FREE
-# from git-tracked content via `git archive`, so a local `.venv`, `.DS_Store`,
-# `__pycache__`, or process scratch CANNOT slip in.
+# manifest (.claude-plugin/plugin.json) at its ROOT. This bundle is a
+# reproducible archive for rollback and portable hand-off — NOT the install
+# path: a plugin installs via `/plugin marketplace add <repo>` (the stable
+# local-install path in Claude Code), not by uploading this file. Built
+# REPRODUCIBLY and LEAK-FREE from git-tracked content via `git archive`, so a
+# local `.venv`, `.DS_Store`, `__pycache__`, or process scratch CANNOT slip in.
 #
 # Do NOT hand-zip the working tree — `zip -r` honors nothing in .gitignore.
 # Shipped by claude-cowork-builder (assets/templates/Makefile); default
