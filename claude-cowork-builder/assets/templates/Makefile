@@ -32,7 +32,7 @@ ARTIFACT := $(DIST)/$(NAME)-$(VERSION)-$(SHA).plugin
 # Paths that must never appear in a published bundle. `git archive` already
 # drops untracked/ignored files; this denylist turns "shouldn't happen" into
 # a hard build failure if one is ever force-added.
-FORBIDDEN := /.DS_Store __pycache__/ /.venv/ /.idea/ /node_modules/ .ruff_cache/ .pytest_cache/
+FORBIDDEN := .DS_Store __pycache__/ .venv/ .idea/ node_modules/ .ruff_cache/ .pytest_cache/
 
 .PHONY: all plugin verify clean print-version print-artifact
 
