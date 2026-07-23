@@ -46,9 +46,6 @@ class Report:
     findings: list[Finding] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
-    def ok(self, item: int, check: str, detail: str = "") -> None:
-        self.findings.append(Finding(item, check, "pass", detail))
-
     def fail(self, item: int, check: str, detail: str) -> None:
         self.findings.append(Finding(item, check, "fail", detail))
 
@@ -161,10 +158,15 @@ def check_distribution(root: Path, manifest: dict | None, profile: str,
     if not has_exact(root, "README.md"):
         report.fail(10, "readme", "README.md missing at the plugin root")
     tokens = sorted(set(TILDE_TOKEN.findall(_skill_bodies(root))))
+    if profile == "public" and not (
+        (root / ".claude-plugin" / "marketplace.json").is_file()
+        or (root.parent / ".claude-plugin" / "marketplace.json").is_file()
+    ):
+        report.fail(10, "public-marketplace-missing", "public profile but no marketplace.json in the plugin or a parent — a public plugin lives in (or is) a marketplace repo")
     if profile == "public":
         for fname in ("CHANGELOG.md", "CONNECTORS.md"):
             if not has_exact(root, fname):
-                report.fail(10, f"public-{fname.lower()}", f"{fname} required at the plugin root for a public plugin")
+                report.fail(10, f"public-{fname.lower().removesuffix('.md')}", f"{fname} required at the plugin root for a public plugin")
         if not tokens:
             report.fail(10, "genericize", "public profile but no ~~category placeholders in skill bodies — going public is the trigger to genericize")
     elif tokens:
@@ -227,7 +229,7 @@ OPEN_CMD = re.compile(r"(?m)^\s*(?:[$>]\s*)?(?:open|xdg-open)\s+\S")
 JUDGMENT_POINTER = (
     "Judgment items remain (model-audited): 0 deviations, 3 pushy descriptions, "
     "4 progressive disclosure, 5 standalone+supercharged, 6 ~~ four-way sync, "
-    "7 output hygiene, 9 security/disclosure, 11 dedup, 12 disclaimers, "
+    "7 output hygiene, 8 ${CLAUDE_PLUGIN_ROOT} runtime use, 9 security/disclosure, 11 dedup, 12 disclaimers, "
     "14 connector-safe state — see references/audit-checklist.md"
 )
 

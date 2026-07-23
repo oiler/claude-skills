@@ -188,7 +188,27 @@ def test_public_requires_changelog_connectors_and_tokens(tmp_path):
     report = vp.Report()
     vp.check_distribution(root, manifest, "public", None, report)
     checks = {f.check for f in report.failures}
-    assert {"public-changelog.md", "public-connectors.md", "genericize"} <= checks
+    assert {"public-changelog", "public-connectors", "genericize"} <= checks
+
+
+def test_public_without_marketplace_fails(tmp_path):
+    extra = {"license": "MIT", "homepage": "https://x", "repository": "https://x", "keywords": ["a"]}
+    root = make_plugin(tmp_path, manifest_extra=extra)
+    manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+    report = vp.Report()
+    vp.check_distribution(root, manifest, "public", None, report)
+    assert fails(report, "public-marketplace-missing")
+
+
+def test_public_with_marketplace_no_missing_failure(tmp_path):
+    mkt = {"name": "m", "owner": {"name": "oiler"},
+           "plugins": [{"name": "demo-plugin", "source": "./"}]}
+    extra = {"license": "MIT", "homepage": "https://x", "repository": "https://x", "keywords": ["a"]}
+    root = make_plugin(tmp_path, manifest_extra=extra, marketplace=mkt)
+    manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+    report = vp.Report()
+    vp.check_distribution(root, manifest, "public", None, report)
+    assert not fails(report, "public-marketplace-missing")
 
 
 def test_private_with_tilde_tokens_fails_coupling(tmp_path):
