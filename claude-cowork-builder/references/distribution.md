@@ -119,7 +119,12 @@ Semver (`MAJOR.MINOR.PATCH`). New plugins start at `0.1.0`. Bump `version` in `p
 
 ## 6. Packaging
 
-Packaging produces a `.plugin` archive for rollback and portable hand-off — it is not the install path. A plugin installs via `/plugin marketplace add <repo>` from its self-marketplace repo (§4, the stable local-install path); a `.plugin` is a `git archive` snapshot you keep for versioned rollback or hand to someone out-of-band, not something you upload to install.
+Packaging produces a `.plugin` — a zip with `.claude-plugin/plugin.json` at the archive **root** (the structure Cowork's upload validator checks for; a wrapper directory like `my-plugin/.claude-plugin/plugin.json` fails). There are two install surfaces, differing by client, and both work offline for a private local-only plugin:
+
+- **Claude Cowork (web/app):** upload the `.plugin`. Cowork validates the archive structure and installs it.
+- **Claude Code (desktop/CLI):** `/plugin marketplace add <local-repo-path>` points at the working tree directly (§4) — no file to upload, and it picks up changes without a rebuild.
+
+The versioned artifact name doubles as a rollback / portable hand-off key — keep a build to reinstall a known-good commit or share the plugin out-of-band.
 
 Two default paths, by repo layout:
 

@@ -1,5 +1,9 @@
 # claude-cowork-builder — Changelog
 
+## v0.3.2 — 2026-07-23
+
+- Corrected the install framing again (v0.3.1 over-corrected). A `.plugin` **is** a valid install artifact for Claude Cowork: you upload it, and Cowork validates its structure (`.claude-plugin/plugin.json` at the archive root — a wrapper directory fails). The two install surfaces are now named accurately in the Makefile template header and `distribution.md` §6: **Cowork** installs by uploading the `.plugin`; **Claude Code desktop/CLI** installs by `/plugin marketplace add <local-repo-path>`. The rollback / portable-hand-off role stays, but no longer at the expense of denying the upload path.
+
 ## v0.3.1 — 2026-07-23
 
 - Corrected stale install framing: the Makefile template header and `distribution.md` §6 said the `.plugin` bundle was "the shape Cowork installs when you upload a plugin package." It isn't — the stable local-install path is `/plugin marketplace add <repo>` from the self-marketplace repo (§4). The `.plugin` is a reproducible `git archive` snapshot for rollback and portable hand-off, not an upload-to-install artifact. Both docs now say so.
