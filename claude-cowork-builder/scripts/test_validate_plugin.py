@@ -96,6 +96,13 @@ def test_claude_plugin_dir_holds_only_manifests(tmp_path):
     assert fails(report, "claude-plugin-extras")
 
 
+def test_claude_plugin_dir_clean_no_failures(tmp_path):
+    root = make_plugin(tmp_path)
+    report = vp.Report()
+    vp.check_claude_plugin_contents(root, report)
+    assert report.failures == []
+
+
 def test_frontmatter_parses():
     fm, err = vp.parse_frontmatter("---\nname: x\ndescription: y\n---\n\nBody\n")
     assert err is None

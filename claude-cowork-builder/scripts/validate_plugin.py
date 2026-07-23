@@ -96,7 +96,7 @@ def check_manifest(root: Path, report: Report) -> dict | None:
     if has_exact(root, "plugin.json"):
         report.fail(2, "manifest-at-root", "plugin.json found at the plugin root — the manifest lives at .claude-plugin/plugin.json")
     mp = root / ".claude-plugin" / "plugin.json"
-    if not mp.is_file():
+    if not has_exact(root / ".claude-plugin", "plugin.json"):
         report.fail(2, "manifest-missing", "no manifest at .claude-plugin/plugin.json")
         return None
     manifest, err = read_json(mp)
