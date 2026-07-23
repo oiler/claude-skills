@@ -143,6 +143,22 @@ this skill produces goes into that folder.
 
 This guard is optional per skill, not a required section in every template — add it when the skill's output is sensitive or destructive enough to warrant halting up front; skip it for skills that only read or advise. And never add it to a skill meant to run as a scheduled task: scheduled runs execute remotely with no working folder and no user present to select one, so the guard dead-ends every run (`cowork-runtime.md` § Scheduled tasks).
 
+## Where mutable state lives
+
+Any plugin that remembers between runs — baselines, caches, "what I saw last time" — needs a state home, decided at design time (`build-spine.md` Phase 2), not discovered in production. Three data classes, three answers:
+
+| Data | Write model | Home |
+|---|---|---|
+| **Config the user owns** (watch-lists, briefs, settings) | Plugin reads, never writes | Connected storage (their sheet/doc) or a working-folder file |
+| **Immutable outputs** (reports, exports) | Create once, never touch again | Connected storage or working folder — dated filenames |
+| **Mutable state** (baselines, memory, caches) | Overwritten every run | **The working folder.** Never through a native connector — create-only surfaces duplicate instead of overwriting (`connectors-and-mcp.md` § Native connectors — capability model) |
+
+Consequences to surface in the design, in writing:
+
+- A state-dependent skill needs the working-folder guard (above), and the guard makes it **non-schedulable** — scheduled runs have no working folder (`cowork-runtime.md` § Scheduled tasks). Choosing local state is choosing between-run continuity *over* schedulability; say so and choose deliberately.
+- Continuity depends on folder reuse: a fresh working folder means a fresh baseline. Tell the user once per session that reusing the same folder is what makes the plugin remember.
+- If state genuinely must be **shared or durable** (any-teammate runs, scheduled runs), the create-only-safe pattern is **immutable versioned snapshots** in connected storage — `state-<timestamp>`, read the newest, write a new one on change — accepting that orphaned versions accumulate (native connectors have no delete tool).
+
 ## The CONNECTORS.md banner
 
 Every skill that touches an external tool — reads from a connector, writes through one, or references a `~~category` placeholder — emits this line, verbatim, near the top of its body (after `## Trigger`, before the skill gets into its own process):
