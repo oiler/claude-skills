@@ -47,6 +47,15 @@ Computer use in Cowork lets Claude control the user's actual computer — clicki
 
 Rule for emitted plugins: **author as if it doesn't exist.** The `open`/`xdg-open` ban and tell-the-user-the-path rule stand — not because opening things is impossible everywhere, but because a plugin that depends on a gated, plan-limited preview feature breaks for most of its users. If computer use happens to be active, Claude may use it at runtime on its own judgment; plugin instructions never require it.
 
+## Probe the real path — capability checks that don't lie
+
+Two production facts about egress make settings-based inference worthless:
+
+- **The Settings → Capabilities "network access" toggle does not govern a plugin's own fetch path.** It gates Claude's open-ended browsing tools (web fetch / web search). A bundled subprocess (curl, a Python fetcher) egresses through the sandbox proxy regardless — a plugin can work with the toggle off and fail with it on. A skill can't read the toggle anyway.
+- **The sandbox proxy can reset specific TLS client fingerprints** while passing others — so a probe using a different client than the real fetch path can false-negative (or false-positive). If the plugin bundles a fetch layer with its own retry/impersonation logic, the probe must run through that same layer.
+
+The rule: **capability truth comes from one honest probe of the exact path the plugin uses** — front-loaded (an egress failure is the one restart-class problem a user can't fix mid-session), run once per session, silent on success. Never infer capability from settings a skill can't read, environment sniffing, or product documentation. If the probe isn't the same code path as the real work, its answer is about a different question.
+
 ## Approval modes and trust (13364135)
 
 Three modes: **Manually approve** (recommended for sensitive files/accounts or hard-to-undo actions), **Automatically approve** (Claude safety-reviews each action, blocks or asks), **Skip all approvals**. Two constants regardless of mode:
