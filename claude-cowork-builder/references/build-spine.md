@@ -100,6 +100,7 @@ Phase 2 or 3.
 3. Each component, from its template (`assets/templates/`).
 4. `CONNECTORS.md` + `.mcp.json` (plugin root).
 5. `README.md`.
+6. Plugin-is-its-own-repo: copy `assets/templates/Makefile` to the repo root — it is the default packaging path (`distribution.md` §6).
 
 **Rules while scaffolding:**
 - Every intra-plugin path reference uses `${CLAUDE_PLUGIN_ROOT}` — never a hardcoded or relative path.
@@ -113,12 +114,12 @@ Phase 2 or 3.
 fallback paths, out-of-sync placeholders — then produce the installable
 artifact.
 
-**Resolve:** Walk every item in `audit-checklist.md` against the scaffolded
-directory. Fix failures before proceeding; don't package a plugin that fails
-the audit.
+**Resolve, in order:**
+1. Run the validator — `uv run ${CLAUDE_SKILL_DIR}/scripts/validate_plugin.py <plugin-dir>`. It is the authority for every `[script]`-tagged item in `audit-checklist.md`; fix failures and re-run until it exits 0. Don't re-derive its checks by hand.
+2. Walk the `[judgment]` items and the model-owned halves of the `[script-assisted]` items in `audit-checklist.md`.
+3. Don't package a plugin that fails either half.
 
-**Output:** An installable `.plugin`, packaged with the canonical zip
-command (see `distribution.md`).
+**Output:** An installable `.plugin` — `make plugin && make verify` for a plugin-is-its-own-repo layout, the canonical zip command inside a container repo (`distribution.md` §6).
 
 ---
 
