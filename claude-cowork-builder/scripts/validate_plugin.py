@@ -182,7 +182,7 @@ def check_distribution(root: Path, manifest: dict | None, profile: str,
                 report.fail(10, "marketplace-source", 'self-marketplace requires a plugins entry with source "./"')
             elif name and selfed[0].get("name") != name:
                 report.fail(10, "marketplace-name", f"marketplace entry name {selfed[0].get('name')!r} != manifest name {name!r}")
-    if profile == "container-marketplace":
+    if (root.parent / ".claude-plugin" / "marketplace.json").is_file():
         mkt, err = read_json(root.parent / ".claude-plugin" / "marketplace.json")
         if err:
             report.fail(10, "container-parse", err)

@@ -205,3 +205,34 @@ def test_profile_override_mismatch_fails(tmp_path):
     report = vp.Report()
     vp.check_distribution(root, {"name": "demo-plugin"}, "private-individual", "public", report)
     assert fails(report, "profile-override")
+
+
+def test_container_unlisted_plugin_fails_even_when_public(tmp_path):
+    container = tmp_path / "market"
+    (container / ".claude-plugin").mkdir(parents=True)
+    (container / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+        {"name": "m", "owner": {"name": "oiler"},
+         "plugins": [{"name": "other", "source": "./other"}]}), encoding="utf-8")
+    extra = {"license": "MIT", "homepage": "https://x", "repository": "https://x", "keywords": ["a"]}
+    root = make_plugin(container, manifest_extra=extra)
+    manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+    profile, _ = vp.infer_profile(root, manifest)
+    assert profile == "public"
+    report = vp.Report()
+    vp.check_distribution(root, manifest, profile, None, report)
+    assert fails(report, "container-listing")
+
+
+def test_container_listed_plugin_no_container_failure(tmp_path):
+    container = tmp_path / "market"
+    (container / ".claude-plugin").mkdir(parents=True)
+    (container / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+        {"name": "m", "owner": {"name": "oiler"},
+         "plugins": [{"name": "demo-plugin", "source": "./plug"}]}), encoding="utf-8")
+    root = make_plugin(container)
+    manifest = {"name": "demo-plugin"}
+    profile, _ = vp.infer_profile(root, manifest)
+    report = vp.Report()
+    vp.check_distribution(root, manifest, profile, None, report)
+    assert not fails(report, "container-listing")
+    assert not fails(report, "container-parse")
