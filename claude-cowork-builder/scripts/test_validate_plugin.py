@@ -390,3 +390,10 @@ def test_main_json_output(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["profile"] == "private-individual"
     assert out["failures"] == []
+
+
+def test_main_non_utf8_file_returns_2(tmp_path):
+    root = make_plugin(tmp_path)
+    (root / "skills" / "demo-skill" / "SKILL.md").write_bytes(
+        b"---\nname: demo-skill\ndescription: smart \x92 quote. Use when testing.\n---\n\nBody.\n")
+    assert vp.main([str(root)]) == 2

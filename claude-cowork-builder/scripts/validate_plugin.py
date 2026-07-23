@@ -290,7 +290,11 @@ def main(argv: list[str] | None = None) -> int:
     if not root.is_dir():
         print(f"ERROR: {root} is not a directory", file=sys.stderr)
         return 2
-    report = run_checks(root, args.profile)
+    try:
+        report = run_checks(root, args.profile)
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"ERROR: could not read plugin files: {e}", file=sys.stderr)
+        return 2
     if args.as_json:
         print(json.dumps({"profile": report.profile, "notes": report.notes,
                           "failures": [asdict(f) for f in report.failures]}, indent=2))
