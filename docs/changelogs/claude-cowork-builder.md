@@ -1,6 +1,6 @@
-# Changelog
+# claude-cowork-builder — Changelog
 
-## 0.2.0 — 2026-07-23
+## v0.2.0 — 2026-07-23
 
 Lessons from the first production plugin built with this skill (sitecheck, v0.5.0–v0.8.0):
 
@@ -11,6 +11,6 @@ Lessons from the first production plugin built with this skill (sitecheck, v0.5.
 - Probe the real path — capability checks run the plugin's actual code path (`cowork-runtime.md`).
 - Audit: deviations doc honored (item 0), connector-safe state (item 14), truthful artifact disclosure (item 9); self-marketplace and git-archive packaging sanctioned as recognized alternatives (items 10/13, `distribution.md`).
 
-## [0.1.0] - 2026-07-21
+## v0.1.0 — 2026-07-21
 ### Added
 - Initial claude-cowork-builder: build menu, 6-phase spine, skill-authoring / connectors / agent-playbook / distribution / live-artifacts / audit references, plugin/skill/agent templates, and the Google Drive integration recipe.
