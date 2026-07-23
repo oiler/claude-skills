@@ -1,5 +1,15 @@
 # claude-cowork-builder — Changelog
 
+## v0.3.0 — 2026-07-23
+
+Determinism pass (workshop determinism ladder, first application):
+
+- `scripts/validate_plugin.py` — deterministic validator for the audit checklist's mechanical items (manifest, profile/distribution coherence, skill filenames + frontmatter, `~~`-in-description, hardcoded paths, open/xdg-open in code blocks, `.mcp.json` parse). Profile inference: private-individual / self-marketplace / container-marketplace / public. `--json`, exit 0/1/2. Tier 3 on the ladder; tests via `uv run --with pytest --with pyyaml`.
+- `assets/templates/Makefile` — git-archive packaging template (from sitecheck production), emitted at scaffold for plugin-is-own-repo layouts. Tier 1: the script owns the artifact write.
+- Audit checklist partitioned: every item tagged `[script]` / `[script-assisted]` / `[judgment]`; Phase 5 is validator-first.
+- Promotions from deviation to default (eight sitecheck releases of evidence): self-marketplace layout for private plugin-is-own-repo (`distribution.md` §4, item 10) and git-archive packaging (`distribution.md` §6, item 13). `Exception:` clauses removed.
+- Gate: validator runs clean (exit 0) against sitecheck-claude v0.8.0, read-only.
+
 ## v0.2.0 — 2026-07-23
 
 Lessons from the first production plugin built with this skill (sitecheck, v0.5.0–v0.8.0):
