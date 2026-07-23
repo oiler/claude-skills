@@ -52,6 +52,8 @@ Minimal `plugin.json`:
 
 Concrete tool names and config are allowed and expected — skill bodies can say "Google Drive," `.mcp.json` can point at a real endpoint, `CONNECTORS.md` can be skipped entirely if there's nothing to translate. No `marketplace.json`, no `CHANGELOG.md` requirement.
 
+This bare shape is the validator's `private-individual` profile — the minimal private layout, legitimate for a plugin installed directly through app settings (individual install), which needs no `marketplace.json` at all. The self-marketplace below (§4) is the default only when the plugin is distributed as *its own git repo* for `/plugin marketplace add` local install — the two are different install mechanisms, both valid for a private plugin, and the validator names whichever the repo shape implies.
+
 ## 4. Public artifacts
 
 Everything in §3, plus:
