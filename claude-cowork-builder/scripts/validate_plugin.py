@@ -19,7 +19,7 @@ import argparse
 import json
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import yaml
@@ -220,6 +220,66 @@ def check_skills_layer(root: Path, report: Report) -> None:
             report.fail(6, "description-token", f"{d.name}: raw ~~ token in description frontmatter — descriptions use plain category language")
 
 
+HARDCODED = re.compile(r"(/Users/|/home/|/tmp/)")
+FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+OPEN_CMD = re.compile(r"(?m)^\s*(?:[$>]\s*)?(?:open|xdg-open)\s+\S")
+
+JUDGMENT_POINTER = (
+    "Judgment items remain (model-audited): 0 deviations, 3 pushy descriptions, "
+    "4 progressive disclosure, 5 standalone+supercharged, 6 ~~ four-way sync, "
+    "7 output hygiene, 9 security/disclosure, 11 dedup, 12 disclaimers, "
+    "14 connector-safe state — see references/audit-checklist.md"
+)
+
+
+def _markdown_files(root: Path) -> list[Path]:
+    out = []
+    for d in skill_dirs(root):
+        out.extend(sorted(d.rglob("*.md")))
+    agents = root / "agents"
+    if agents.is_dir():
+        out.extend(sorted(agents.rglob("*.md")))
+    return out
+
+
+def check_path_discipline(root: Path, report: Report) -> None:
+    for path in _markdown_files(root):
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(root)
+        for i, line in enumerate(text.splitlines(), 1):
+            if HARDCODED.search(line):
+                report.fail(8, "hardcoded-path", f"{rel}:{i}: hardcoded absolute path — use ${{CLAUDE_PLUGIN_ROOT}} or the working folder")
+        for block in FENCE.findall(text):
+            for m in OPEN_CMD.finditer(block):
+                report.fail(7, "open-command", f"{rel}: `{m.group(0).strip()}` in a code block — never open files for the user, tell them the path")
+
+
+def check_mcp(root: Path, report: Report) -> None:
+    mcp = root / ".mcp.json"
+    if not mcp.is_file():
+        return
+    _, err = read_json(mcp)
+    if err:
+        report.fail(9, "mcp-parse", err)
+
+
+def run_checks(root: Path, override: str | None) -> Report:
+    report = Report()
+    manifest = check_manifest(root, report)
+    check_claude_plugin_contents(root, report)
+    profile, evidence = infer_profile(root, manifest)
+    report.profile = profile
+    report.notes.append(f"profile: {profile} ({evidence})")
+    check_distribution(root, manifest, profile, override, report)
+    check_skills_layer(root, report)
+    check_path_discipline(root, report)
+    check_mcp(root, report)
+    dev = root / "docs" / "cowork-builder-deviations.md"
+    if dev.is_file():
+        report.notes.append("deviations doc present: docs/cowork-builder-deviations.md — reconcile during judgment item 0")
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("plugin_dir")
@@ -230,11 +290,17 @@ def main(argv: list[str] | None = None) -> int:
     if not root.is_dir():
         print(f"ERROR: {root} is not a directory", file=sys.stderr)
         return 2
-    report = Report()
-    check_manifest(root, report)
-    check_claude_plugin_contents(root, report)
-    for f in report.failures:
-        print(f"FAIL item {f.item:>2} [{f.check}] {f.detail}")
+    report = run_checks(root, args.profile)
+    if args.as_json:
+        print(json.dumps({"profile": report.profile, "notes": report.notes,
+                          "failures": [asdict(f) for f in report.failures]}, indent=2))
+    else:
+        for n in report.notes:
+            print(n)
+        for f in report.failures:
+            print(f"FAIL item {f.item:>2} [{f.check}] {f.detail}")
+        print(f"script checks: {len(report.failures)} failure(s)" if report.failures else "script checks: all pass")
+        print(JUDGMENT_POINTER)
     return 1 if report.failures else 0
 
 

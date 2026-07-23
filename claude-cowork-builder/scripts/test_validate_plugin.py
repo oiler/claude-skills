@@ -316,3 +316,77 @@ def test_happy_skills_layer_no_failures(tmp_path):
     report = vp.Report()
     vp.check_skills_layer(root, report)
     assert report.failures == []
+
+
+# --- Task 4: path discipline, mcp, CLI (items 7, 8, 9) ---
+
+def test_hardcoded_absolute_path_fails(tmp_path):
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: X. Use when testing.\n---\n\nCopy /Users/oiler/template.html into place.\n",
+        encoding="utf-8")
+    report = vp.Report()
+    vp.check_path_discipline(root, report)
+    assert fails(report, "hardcoded-path")
+
+
+def test_open_command_in_fenced_block_fails(tmp_path):
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: X. Use when testing.\n---\n\n```bash\nopen report.html\n```\n",
+        encoding="utf-8")
+    report = vp.Report()
+    vp.check_path_discipline(root, report)
+    assert fails(report, "open-command")
+
+
+def test_prose_open_is_not_flagged(tmp_path):
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: X. Use when testing.\n---\n\nTell the user to open the report themselves.\n",
+        encoding="utf-8")
+    report = vp.Report()
+    vp.check_path_discipline(root, report)
+    assert not fails(report, "open-command")
+
+
+def test_mcp_json_unparseable_fails(tmp_path):
+    root = make_plugin(tmp_path)
+    (root / ".mcp.json").write_text("{broken", encoding="utf-8")
+    report = vp.Report()
+    vp.check_mcp(root, report)
+    assert fails(report, "mcp-parse")
+
+
+def test_run_checks_happy_plugin_exits_clean(tmp_path):
+    root = make_plugin(tmp_path)
+    report = vp.run_checks(root, None)
+    assert report.failures == []
+    assert report.profile == "private-individual"
+
+
+def test_deviations_doc_noted(tmp_path):
+    root = make_plugin(tmp_path)
+    (root / "docs").mkdir()
+    (root / "docs" / "cowork-builder-deviations.md").write_text("# devs\n", encoding="utf-8")
+    report = vp.run_checks(root, None)
+    assert any("deviations" in n for n in report.notes)
+
+
+def test_main_exit_codes(tmp_path, capsys):
+    root = make_plugin(tmp_path)
+    assert vp.main([str(root)]) == 0
+    (root / ".claude-plugin" / "plugin.json").unlink()
+    assert vp.main([str(root)]) == 1
+    assert vp.main([str(tmp_path / "nope")]) == 2
+
+
+def test_main_json_output(tmp_path, capsys):
+    root = make_plugin(tmp_path)
+    vp.main([str(root), "--json"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["profile"] == "private-individual"
+    assert out["failures"] == []
