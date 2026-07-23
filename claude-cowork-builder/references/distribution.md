@@ -105,6 +105,8 @@ my-marketplace/                      ← the marketplace repo
 marketplace-listing copy and can match the plugin's own. A single-plugin
 marketplace is fine — the repo just holds one plugin subdirectory.
 
+**Recognized alternative — the self-marketplace private plugin.** A private plugin whose repo is *itself* a single-plugin marketplace — `.claude-plugin/marketplace.json` beside `plugin.json`, listing the plugin with `source: "./"` — is a sanctioned deviation from "marketplace.json is never a per-plugin file". Reason: `/plugin marketplace add <repo>` is the only stable local-install path in Claude Code, and restructuring into a container repo would move the manifest a directory above the packaging root. Record it in the plugin's deviations doc (audit item 0); if the plugin later goes public, migrate into a real container marketplace.
+
 **`CHANGELOG.md` — new file, plugin root.** Standard keep-a-changelog format: `## [0.1.0] - YYYY-MM-DD` sections, `Added`/`Changed`/`Fixed` subheads.
 
 **Genericize.** Every product name a skill body references gets swapped for a `~~category` placeholder, and every product name in a `description` frontmatter field drops to plain category language (descriptions never carry `~~` tokens — see `connectors-and-mcp.md`), with `CONNECTORS.md` added at the plugin root as the translation table (category → placeholder → included servers → other options). See `connectors-and-mcp.md` for the full `~~category` system and the `CONNECTORS.md` table format — this is the same mechanism, triggered by the visibility flip.
@@ -124,6 +126,8 @@ cd <plugin-dir> && zip -r /tmp/<name>.plugin . -x "*.DS_Store" && cp /tmp/<name>
 The `.plugin` filename is the plugin's `name` field from `plugin.json` (kebab-case) — `<name>.plugin`, not the directory name if they've diverged.
 
 Delete any stale `/tmp/<name>.plugin` from a previous run before zipping — `zip` updates an existing archive in place rather than replacing it, so a stale file can carry deleted entries into the "new" package.
+
+**Recognized alternative — git-archive packaging.** A plugin living in its own git repo may package via `git archive` from tracked content (e.g. a `make plugin` target) instead of the canonical zip. It is strictly stronger on this section's own motivations: reproducible, cannot leak untracked files, and immune to the stale-zip-update hazard by construction (fresh archive every build). Versioned artifact names — `<name>-<version>-<sha>.plugin` — are the rollback key. Record the deviation (audit item 0); the canonical command remains the default for a plugin that isn't its own repo.
 
 ## 7. Validation
 
