@@ -124,6 +124,74 @@ def check_claude_plugin_contents(root: Path, report: Report) -> None:
         report.fail(2, "claude-plugin-extras", f".claude-plugin/ holds only the manifests; found: {', '.join(extras)}")
 
 
+TILDE_TOKEN = re.compile(r"~~[a-z0-9-]+")
+
+
+def infer_profile(root: Path, manifest: dict | None) -> tuple[str, str]:
+    """Infer the distribution profile from repo shape. Returns (profile, evidence)."""
+    branding = manifest is not None and all(manifest.get(k) for k in BRANDING)
+    if (root / ".claude-plugin" / "marketplace.json").is_file():
+        base, evidence = "self-marketplace", "marketplace.json beside plugin.json"
+    elif (root.parent / ".claude-plugin" / "marketplace.json").is_file():
+        base, evidence = "container-marketplace", "parent repo carries .claude-plugin/marketplace.json"
+    else:
+        base, evidence = "private-individual", "no marketplace.json in plugin or parent"
+    if branding:
+        return "public", f"{evidence}; full branding metadata present"
+    return base, evidence
+
+
+def _skill_bodies(root: Path) -> str:
+    parts = []
+    for d in skill_dirs(root):
+        if has_exact(d, "SKILL.md"):
+            parts.append((d / "SKILL.md").read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
+def check_distribution(root: Path, manifest: dict | None, profile: str,
+                       override: str | None, report: Report) -> None:
+    if override and override != profile:
+        report.fail(10, "profile-override", f"--profile {override} but the repo shape infers {profile} — reshape the repo or drop the override")
+    name = (manifest or {}).get("name", "")
+    if manifest is not None:
+        present = [k for k in BRANDING if manifest.get(k)]
+        if present and len(present) < len(BRANDING):
+            report.fail(10, "branding-partial", f"partial branding metadata ({', '.join(present)}) — ship all of {', '.join(BRANDING)} or none")
+    if not has_exact(root, "README.md"):
+        report.fail(10, "readme", "README.md missing at the plugin root")
+    tokens = sorted(set(TILDE_TOKEN.findall(_skill_bodies(root))))
+    if profile == "public":
+        for fname in ("CHANGELOG.md", "CONNECTORS.md"):
+            if not has_exact(root, fname):
+                report.fail(10, f"public-{fname.lower()}", f"{fname} required at the plugin root for a public plugin")
+        if not tokens:
+            report.fail(10, "genericize", "public profile but no ~~category placeholders in skill bodies — going public is the trigger to genericize")
+    elif tokens:
+        report.fail(10, "coupling", f"~~ tokens in skill bodies ({', '.join(tokens)}) but profile {profile} is private — private plugins use concrete tool names")
+    if profile in ("self-marketplace", "public") and (root / ".claude-plugin" / "marketplace.json").is_file():
+        mkt, err = read_json(root / ".claude-plugin" / "marketplace.json")
+        if err:
+            report.fail(10, "marketplace-parse", err)
+        else:
+            if not mkt.get("owner"):
+                report.fail(10, "marketplace-owner", "marketplace.json missing owner")
+            entries = [e for e in (mkt.get("plugins") or []) if isinstance(e, dict)]
+            selfed = [e for e in entries if e.get("source") == "./"]
+            if not selfed:
+                report.fail(10, "marketplace-source", 'self-marketplace requires a plugins entry with source "./"')
+            elif name and selfed[0].get("name") != name:
+                report.fail(10, "marketplace-name", f"marketplace entry name {selfed[0].get('name')!r} != manifest name {name!r}")
+    if profile == "container-marketplace":
+        mkt, err = read_json(root.parent / ".claude-plugin" / "marketplace.json")
+        if err:
+            report.fail(10, "container-parse", err)
+        else:
+            srcs = {str(e.get("source", "")).rstrip("/") for e in (mkt.get("plugins") or []) if isinstance(e, dict)}
+            if f"./{root.name}" not in srcs:
+                report.fail(10, "container-listing", f"container marketplace.json does not list ./{root.name}")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("plugin_dir")

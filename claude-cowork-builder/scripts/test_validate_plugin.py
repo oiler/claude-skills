@@ -112,3 +112,96 @@ def test_frontmatter_parses():
 def test_frontmatter_unclosed_fence():
     fm, err = vp.parse_frontmatter("---\nname: x\n")
     assert fm is None and "fence" in err
+
+
+# --- Task 2: profile inference + distribution (item 10) ---
+
+def test_infer_private_individual(tmp_path):
+    root = make_plugin(tmp_path)
+    profile, _ = vp.infer_profile(root, {"name": "demo-plugin"})
+    assert profile == "private-individual"
+
+
+def test_infer_self_marketplace(tmp_path):
+    mkt = {"name": "demo", "owner": {"name": "oiler"},
+           "plugins": [{"name": "demo-plugin", "source": "./"}]}
+    root = make_plugin(tmp_path, marketplace=mkt)
+    profile, _ = vp.infer_profile(root, {"name": "demo-plugin"})
+    assert profile == "self-marketplace"
+
+
+def test_infer_container_marketplace(tmp_path):
+    container = tmp_path / "market"
+    (container / ".claude-plugin").mkdir(parents=True)
+    (container / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+        {"name": "m", "owner": {"name": "oiler"},
+         "plugins": [{"name": "demo-plugin", "source": "./plug"}]}), encoding="utf-8")
+    root = make_plugin(container)  # make_plugin builds at <base>/plug
+    profile, _ = vp.infer_profile(root, {"name": "demo-plugin"})
+    assert profile == "container-marketplace"
+
+
+def test_infer_public_from_full_branding(tmp_path):
+    extra = {"license": "MIT", "homepage": "https://x", "repository": "https://x", "keywords": ["a"]}
+    root = make_plugin(tmp_path, manifest_extra=extra)
+    profile, _ = vp.infer_profile(root, json.loads((root / ".claude-plugin" / "plugin.json").read_text()))
+    assert profile == "public"
+
+
+def test_partial_branding_fails(tmp_path):
+    root = make_plugin(tmp_path, manifest_extra={"license": "MIT"})
+    manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+    report = vp.Report()
+    vp.check_distribution(root, manifest, "private-individual", None, report)
+    assert fails(report, "branding-partial")
+
+
+def test_missing_readme_fails(tmp_path):
+    root = make_plugin(tmp_path, readme=False)
+    report = vp.Report()
+    vp.check_distribution(root, {"name": "demo-plugin"}, "private-individual", None, report)
+    assert fails(report, "readme")
+
+
+def test_self_marketplace_requires_source_dot(tmp_path):
+    mkt = {"name": "demo", "owner": {"name": "oiler"},
+           "plugins": [{"name": "demo-plugin", "source": "./demo-plugin"}]}
+    root = make_plugin(tmp_path, marketplace=mkt)
+    report = vp.Report()
+    vp.check_distribution(root, {"name": "demo-plugin"}, "self-marketplace", None, report)
+    assert fails(report, "marketplace-source")
+
+
+def test_self_marketplace_name_must_match(tmp_path):
+    mkt = {"name": "demo", "owner": {"name": "oiler"},
+           "plugins": [{"name": "other", "source": "./"}]}
+    root = make_plugin(tmp_path, marketplace=mkt)
+    report = vp.Report()
+    vp.check_distribution(root, {"name": "demo-plugin"}, "self-marketplace", None, report)
+    assert fails(report, "marketplace-name")
+
+
+def test_public_requires_changelog_connectors_and_tokens(tmp_path):
+    extra = {"license": "MIT", "homepage": "https://x", "repository": "https://x", "keywords": ["a"]}
+    root = make_plugin(tmp_path, manifest_extra=extra)
+    manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+    report = vp.Report()
+    vp.check_distribution(root, manifest, "public", None, report)
+    checks = {f.check for f in report.failures}
+    assert {"public-changelog.md", "public-connectors.md", "genericize"} <= checks
+
+
+def test_private_with_tilde_tokens_fails_coupling(tmp_path):
+    root = make_plugin(tmp_path)
+    skill = root / "skills" / "demo-skill" / "SKILL.md"
+    skill.write_text(skill.read_text() + "\nUse ~~file-storage when connected.\n", encoding="utf-8")
+    report = vp.Report()
+    vp.check_distribution(root, {"name": "demo-plugin"}, "private-individual", None, report)
+    assert fails(report, "coupling")
+
+
+def test_profile_override_mismatch_fails(tmp_path):
+    root = make_plugin(tmp_path)
+    report = vp.Report()
+    vp.check_distribution(root, {"name": "demo-plugin"}, "private-individual", "public", report)
+    assert fails(report, "profile-override")
