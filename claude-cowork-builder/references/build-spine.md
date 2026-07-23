@@ -49,7 +49,8 @@ declines and why — not just what it includes.
 - Which skills (command / knowledge / router) this plugin needs, primary layer.
 - Whether MCP connectors are needed, and which categories.
 - Whether an agent is justified — only if the `agent-playbook.md` gate passes. Default is no agent.
-- Whether custom UI is needed — a static HTML deliverable (shipped + copied) or a Live Artifact (created by prompt, connector-refreshed); two different surfaces, chosen per `live-artifacts.md` §3. Default is neither.
+- Whether custom UI is needed — a static HTML deliverable (shipped + copied), an authored artifact from a sanitized payload (a prominent snapshot in the Artifacts view), or a Live Artifact (connector-refreshed); three surfaces, chosen per `live-artifacts.md` §3. Default is none.
+- Where mutable state lives, if the plugin remembers between runs — working folder vs. versioned snapshots in connected storage. This decision couples to schedulability; resolve it here per `skill-authoring.md` § Where mutable state lives.
 - Whether a router skill is needed — default heuristic: only when skill count ≥ 8.
 
 **Output:** A component table, one row per component type considered —
@@ -62,7 +63,7 @@ declines and why — not just what it includes.
 | Router skill | No | Skill count < 8 |
 | Agent | No | No autonomous multi-step job — `agent-playbook.md` gate fails |
 | MCP connector | Yes/No | … |
-| Custom UI (deliverable / Live Artifact) | No | No persistent UI need |
+| Custom UI (deliverable / authored artifact / Live Artifact) | No | No persistent UI need |
 
 Don't skip the "No" rows — the table's value is showing what was considered
 and declined, not just what shipped.
@@ -78,6 +79,7 @@ component — enough detail that Phase 4 is pure scaffolding, no more decisions.
 - Tool scoping — for agents, which tools are pinned vs. omitted.
 - Standalone/supercharged fallback — the zero-connector path and the connected path.
 - Agent contracts — if an agent is in the plan, its frontmatter fields and the skill→agent delegation shape.
+- Cowork gates — list every design fact that can only be verified in a live Cowork session (a connector's actual tool surface, artifact behavior, egress/proxy quirks), each with a designed fallback for the unfavorable outcome. The list carries into Phase 5 and gets re-verified after the first real session; a gate without a recorded fallback is an unresolved design decision.
 
 Route to the detail reference for each component type:
 - Skills (command/knowledge/router) → `skill-authoring.md`
