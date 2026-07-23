@@ -88,9 +88,21 @@ will iterate on layout in follow-ups.
 Rules when a skill does this:
 
 - **Name data sources by `~~category`**, same as everywhere else (`connectors-and-mcp.md`) — the live artifact will bind to whatever the user actually has connected.
-- **Disclose the auto-refresh behavior in user-facing copy.** Because live artifacts read connectors without approval prompts, a skill that spawns one quietly widens what the plugin touches. The skill's user-facing output says, in plain language, that the artifact keeps itself current from their connected tools. This is an audit item (`audit-checklist.md` item 9).
+- **Disclose the refresh behavior truthfully in user-facing copy.** Connector-refreshed artifact: say in plain language that it keeps itself current from their connected tools — live artifacts read connectors without approval prompts, so silence quietly widens what the plugin touches. Static/authored snapshot: say it reflects the latest run and does **not** update on its own — never let the artifact's own copy claim "Live" when nothing refreshes. Either way this is an audit item (`audit-checklist.md` item 9).
 - **The standalone floor still applies.** With zero connectors, the skill either builds the artifact from pasted/uploaded data (static content, no refresh) or falls back to a §1 static deliverable — it never hard-fails for want of a connector.
 - **Desktop/plan caveats are the user's reality, not yours to detect.** Don't try to sniff the environment; if artifact creation isn't available, Claude will surface that in-task, and the skill's fallback path covers it.
+
+### Cowork enforces Claude-authored artifacts (verbatim publishing fails)
+
+An artifact's HTML is authored by Claude at creation time — there is no path for a skill to publish a pre-rendered file byte-for-byte. An instruction like "render the page with the bundled tool, then publish that exact HTML verbatim — do not re-author" does not survive contact: Claude re-authors anyway, inventing copy the tool never emitted and sometimes introducing encoding damage (observed in production: a verbatim-publish design produced an artifact with invented header wording and `Â·` mojibake, provably not the renderer's output). Design consequences:
+
+- **Never design a render-then-publish-verbatim flow.** A bundled renderer's output file serves the working-folder / fallback surface (§1) — never the artifact surface.
+- **A bundled renderer's escaping does not protect the artifact.** If the artifact displays untrusted content (fetched pages, third-party text), the injection guarantee moves to a **sanitized-payload boundary**: deterministic bundled code validates the injection-critical fields *before Claude sees them*, and the skill instructs Claude to author only from the sanitized payload.
+  - URLs are the critical class. Validate the scheme against an allow-list (`{http, https}`); an unsafe or malformed URL becomes `null`, and the skill renders no link for a nulled field. Scheme-valid URLs are additionally percent-encoded for the characters RFC 3986 forbids raw (`"` `'` `<` `>` space `\`) — lossless for valid URLs and inert in both raw-HTML and auto-escaping authoring contexts, so it cannot double-escape. (Implementation note: Python's `urlsplit` *raises* on some malformed input rather than returning an odd scheme — the validator wraps it and returns `null`.)
+  - State the **link contract** in the skill body so a reviewer can audit it: *hrefs come only from sanitized URL fields; never construct a URL from a text field; never emit a link for a field the sanitizer nulled.*
+  - Text fields stay data. Whether the authoring context escapes text is an **assumption, not a guarantee** — verify it in a real session (put `<b>bold</b><script>` in a test field; it must render literally) and record a text-escaping fallback in the design.
+- **One artifact, updated in place.** Update the existing artifact when one exists; create only when none does. Version history makes updating lossless, while creating per run accumulates stale copies and makes "which one is current" undefined. Artifacts are per-device, so a returning user on a new machine simply hits the create branch.
+- **Verify UTF-8 cleanliness.** Hand-authored HTML can double-encode (`·` → `Â·`); check for mojibake when validating the artifact in a real session.
 
 ## 3. Choosing a surface
 
@@ -99,6 +111,7 @@ Rules when a skill does this:
 | One-off report or summary | Neither — a skill writes the file and tells the user where it is |
 | A form or a few inputs | Neither — ask conversationally, turn by turn |
 | Snapshot dashboard: offline, portable, frozen at generation time | §1 static deliverable |
+| Snapshot that must be **prominent** — revisited in the Artifacts view, refreshed by the skill each run | §2 authored artifact from a **sanitized payload** (zero connectors; disclose "reflects your last check", never "Live"); keep a §1 file as the fallback floor |
 | Persistent tracker/dashboard the user revisits and that must stay current with connector data | §2 Live Artifact (accepting desktop-only + paid-plan constraints) |
 | "It would look nicer as a UI" with no persistence or interactivity requirement | Neither — chat is the default surface; don't dress up what chat already handles |
 

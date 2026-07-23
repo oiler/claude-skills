@@ -43,7 +43,7 @@ Pick a START option, then walk the checkboxes top to bottom. Every decision has 
 |---|---|---|
 | 0 · Charter | Problem, Cowork audience, external tools. One-paragraph charter. | Scope statement |
 | 1 · Distribution | Install + visibility decisions, each with a default + tradeoff. | Install + visibility locked |
-| 2 · Component plan | Skills (primary) + MCP; agents only if playbook justifies; router if large; custom UI (deliverable or Live Artifact) only if warranted. | Confirmed components |
+| 2 · Component plan | Skills (primary) + MCP; agents only if playbook justifies; router if large; custom UI (deliverable / authored artifact / Live Artifact) only if warranted. | Confirmed components |
 | 3 · Component design | Per component: triggers, references, tool scoping, standalone/supercharged, agent contracts. | Specs |
 | 4 · Scaffold | .claude-plugin/plugin.json, skills, CONNECTORS.md, .mcp.json, README, optional agents/static-UI asset. | Plugin directory |
 | 5 · Audit + package | Run the audit checklist → package .plugin. | Installable artifact |
@@ -59,7 +59,7 @@ Full walkthrough of every phase: `references/build-spine.md`.
 | Wiring external tools | references/connectors-and-mcp.md |
 | Deciding whether to add an agent | references/agent-playbook.md |
 | Choosing install/visibility & packaging | references/distribution.md |
-| Custom UI (static deliverable / Live Artifacts) | references/live-artifacts.md |
+| Custom UI (static deliverable / authored artifact / Live Artifacts) | references/live-artifacts.md |
 | Runtime realities (sessions, platforms, scheduled tasks, computer use) | references/cowork-runtime.md |
 | Pre-package check | references/audit-checklist.md |
 | Adding Google Drive | integrations/google-drive/recipe.md |
