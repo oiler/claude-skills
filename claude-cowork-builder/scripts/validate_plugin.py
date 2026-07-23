@@ -220,7 +220,7 @@ def check_skills_layer(root: Path, report: Report) -> None:
             report.fail(6, "description-token", f"{d.name}: raw ~~ token in description frontmatter — descriptions use plain category language")
 
 
-HARDCODED = re.compile(r"(/Users/|/home/|/tmp/)")
+HARDCODED = re.compile(r"(/Users/|/home/)")
 FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 OPEN_CMD = re.compile(r"(?m)^\s*(?:[$>]\s*)?(?:open|xdg-open)\s+\S")
 

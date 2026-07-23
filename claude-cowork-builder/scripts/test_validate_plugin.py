@@ -331,6 +331,17 @@ def test_hardcoded_absolute_path_fails(tmp_path):
     assert fails(report, "hardcoded-path")
 
 
+def test_tmp_scratch_path_not_flagged(tmp_path):
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: X. Use when testing.\n---\n\nRun with --prev-state /tmp/<site>-state.json for scratch.\n",
+        encoding="utf-8")
+    report = vp.Report()
+    vp.check_path_discipline(root, report)
+    assert not fails(report, "hardcoded-path")
+
+
 def test_open_command_in_fenced_block_fails(tmp_path):
     root = make_plugin(tmp_path)
     d = root / "skills" / "demo-skill"
