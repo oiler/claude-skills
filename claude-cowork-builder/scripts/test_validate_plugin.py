@@ -236,3 +236,83 @@ def test_container_listed_plugin_no_container_failure(tmp_path):
     vp.check_distribution(root, manifest, profile, None, report)
     assert not fails(report, "container-listing")
     assert not fails(report, "container-parse")
+
+
+# --- Task 3: skills layer (items 1, 3, 6) ---
+
+def test_no_skills_dir_fails(tmp_path):
+    root = make_plugin(tmp_path, skills=())
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "skills-missing")
+
+
+def test_wrong_case_skill_filename_fails(tmp_path):
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").rename(d / "renamed.tmp")
+    (d / "renamed.tmp").rename(d / "skill.md")
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "skill-filename")
+
+
+def test_prefixed_skill_filename_fails(tmp_path):
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").rename(d / "demo-SKILL.md")
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "skill-filename")
+
+
+def test_non_kebab_skill_dir_fails(tmp_path):
+    root = make_plugin(tmp_path, skills=("Demo_Skill",))
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "skill-dir-kebab")
+
+
+def test_frontmatter_name_mismatch_fails(tmp_path):
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").write_text("---\nname: other-name\ndescription: X. Use when testing.\n---\n\nBody.\n", encoding="utf-8")
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "skill-name-match")
+
+
+def test_broken_frontmatter_fails(tmp_path):
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").write_text("---\nname: [unclosed\n---\n\nBody.\n", encoding="utf-8")
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "frontmatter")
+
+
+def test_empty_description_fails(tmp_path):
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").write_text("---\nname: demo-skill\ndescription: ''\n---\n\nBody.\n", encoding="utf-8")
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "description-empty")
+
+
+def test_tilde_token_in_description_fails(tmp_path):
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: Reads ~~file-storage. Use when testing.\n---\n\nBody.\n",
+        encoding="utf-8")
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "description-token")
+
+
+def test_happy_skills_layer_no_failures(tmp_path):
+    root = make_plugin(tmp_path, skills=("demo-skill", "second-skill"))
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert report.failures == []

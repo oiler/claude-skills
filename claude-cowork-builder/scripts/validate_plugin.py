@@ -192,6 +192,34 @@ def check_distribution(root: Path, manifest: dict | None, profile: str,
                 report.fail(10, "container-listing", f"container marketplace.json does not list ./{root.name}")
 
 
+def check_skills_layer(root: Path, report: Report) -> None:
+    dirs = skill_dirs(root)
+    if not dirs:
+        report.fail(1, "skills-missing", "no skills/ directory with skill subdirectories — skills are the primary layer of a Cowork plugin")
+        return
+    for d in dirs:
+        if not KEBAB.match(d.name):
+            report.fail(1, "skill-dir-kebab", f"{d.name}: skill directory name is not kebab-case")
+        if not has_exact(d, "SKILL.md"):
+            names = [f.name for f in d.iterdir() if f.is_file()]
+            near = [n for n in names if n.lower() == "skill.md" or n.lower().endswith("-skill.md")]
+            hint = f"found {near[0]!r} — the filename must be exactly SKILL.md" if near else "no SKILL.md present"
+            report.fail(1, "skill-filename", f"{d.name}: {hint} (wrong filename fails silently at runtime)")
+            continue
+        fm, err = parse_frontmatter((d / "SKILL.md").read_text(encoding="utf-8"))
+        if err:
+            report.fail(3, "frontmatter", f"{d.name}: {err}")
+            continue
+        fm_name = fm.get("name")
+        if fm_name is not None and fm_name != d.name:
+            report.fail(1, "skill-name-match", f"{d.name}: frontmatter name {fm_name!r} != folder name")
+        desc = str(fm.get("description") or "").strip()
+        if not desc:
+            report.fail(3, "description-empty", f"{d.name}: description missing or empty")
+        elif TILDE_TOKEN.search(desc):
+            report.fail(6, "description-token", f"{d.name}: raw ~~ token in description frontmatter — descriptions use plain category language")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("plugin_dir")
