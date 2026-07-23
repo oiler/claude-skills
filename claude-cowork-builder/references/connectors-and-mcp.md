@@ -185,6 +185,15 @@ resolved through env vars does:
 treat it as a fixed value, not a per-plugin choice, unless something else on
 the host machine is already bound to that port.
 
+## Native connectors — capability model
+
+The `~~category` a skill names may resolve at runtime to an **Anthropic-managed native connector** (Drive, Gmail, …) rather than an MCP server from `.mcp.json`. For a nontechnical Cowork audience the native connector is the default reality — it's what an org can approve without OAuth-token custody — and it is **narrower than the product's API**:
+
+- Observed native tool surfaces can be **create-and-read only**: no update-in-place, no delete, no cell-level writes to spreadsheets. "Overwriting" a file by creating it again does not overwrite — it **duplicates**, and whichever skill later reads "the" file has an undefined pick. A flow that mutates a connector-hosted file in place corrupts silently; it does not fail loudly.
+- **Design rule: be a read-mostly, append-only citizen of the user's connected storage.** Read what the user owns (config they edit), create immutable dated files (reports, exports), and never update a file or cell in place through a native connector. Mutable state belongs in the working folder — or, when it genuinely must be shared and durable, in immutable versioned snapshots (`state-<timestamp>`, read newest, write a new one on change), which a create-only surface supports. See `skill-authoring.md` § Where mutable state lives.
+- **Probe capability from the tool surface, never by writing.** To learn what a connection can do this session, read which tools are actually available; do not create a probe file in the user's storage.
+- The exact tool surface is live Cowork behavior — treat it as a **Cowork gate** (`build-spine.md` Phase 3): verify in a real session, and record a designed fallback for the narrower outcome.
+
 ## Security
 
 - **Secrets go through environment variables, never literals.** `${SERVICE_TOKEN}`, `${SLACK_CLIENT_ID}` — every credential in `.mcp.json` is a `${VAR}` substitution. A literal API key or bearer token committed into `.mcp.json` is a Phase 5 audit failure, not a style nit.
