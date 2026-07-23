@@ -61,7 +61,7 @@ Full walkthrough of every phase: `references/build-spine.md`.
 | Choosing install/visibility & packaging | references/distribution.md |
 | Custom UI (static deliverable / authored artifact / Live Artifacts) | references/live-artifacts.md |
 | Runtime realities (sessions, platforms, scheduled tasks, computer use) | references/cowork-runtime.md |
-| Pre-package check | references/audit-checklist.md |
+| Pre-package check | run scripts/validate_plugin.py, then references/audit-checklist.md |
 | Adding Google Drive | integrations/google-drive/recipe.md |
 
 ## The two first-class defaults
