@@ -80,3 +80,11 @@ authorized it yet), both skills fall back to asking the user to upload or
 paste the file/content directly into the chat. Confirm this fallback still
 reads cleanly after any renaming in step 3 — it's the floor every copy of
 this recipe must clear, connected or not.
+
+## Drive production facts (verified 2026-07)
+
+Facts from running a Drive-backed plugin in real Cowork sessions — they bound what a consumer of this recipe can design:
+
+- **The native Drive connector is create-and-read only.** No file update, no delete, no Sheets cell writes. Follow the append-only design rule in `connectors-and-mcp.md` § Native connectors — capability model. A self-run Google MCP server (this recipe's route) is the opt-in power path for in-place writes — never a requirement.
+- **Workspace Shared Drives are unreachable through the native connector** — requests omit `supportsAllDrives` / `includeItemsFromAllDrives` / `corpora=allDrives`, so reads come back empty or 404 (anthropics/claude-code#53442). Until fixed, a team's shared home is a **My Drive folder shared with the team**. Accept a pasted folder URL agnostically so a Shared Drive URL "just works" once the connector supports it.
+- **The Drive-for-Desktop sync trap:** if the user points their *working folder* at a locally-synced Google Drive folder, sync conflicts can replace files with stub JSON. Onboarding copy should steer the working folder to a plain local folder, not a synced one.
