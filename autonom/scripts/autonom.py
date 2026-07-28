@@ -48,6 +48,10 @@ PLACEHOLDER_RE = re.compile(
 )
 OPEN_QUESTION_RE = re.compile(r"\*\*Open question|\?\?\?|\[\?\]", re.IGNORECASE)
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+# The ledger header is one line. A topic carrying a newline or any other control
+# character writes a header no later command can parse, and the run is then
+# unrecoverable without hand-editing the ledger.
+CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 
 # Heading-keyword requirements. Matching is by whole word against the heading
@@ -284,8 +288,12 @@ def _header(topic: str, slug: str, date: str) -> str:
 
 def _parse_header(ledger: Path) -> dict[str, str] | None:
     """Read topic/slug/date back out of a ledger's first line, or None if
-    the header is unreadable."""
-    first = ledger.read_text(encoding="utf-8").splitlines()[0]
+    the header is unreadable. An empty file is unreadable, not a crash: every
+    caller turns None into exit 2, and exit 1 is reserved for findings."""
+    lines = ledger.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        return None
+    first = lines[0]
     match = re.match(
         r"# autonom run — topic: (?P<topic>.*) — slug: (?P<slug>[a-z0-9-]+) "
         r"— date: (?P<date>\d{4}-\d{2}-\d{2})$",
@@ -311,8 +319,17 @@ def cmd_init(args: argparse.Namespace) -> int:
     if root is None:
         print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
         return 2
+    if CONTROL_RE.search(args.topic):
+        print("autonom: topic contains a newline or control character; the ledger "
+              "header is a single line and could not be read back",
+              file=sys.stderr)
+        return 2
     date = args.date or _dt.date.today().isoformat()
-    slug = slugify(args.topic)
+    try:
+        slug = slugify(args.topic)
+    except ValueError as error:
+        print(f"autonom: {error}", file=sys.stderr)
+        return 2
     paths = compute_paths(root, slug, date)
     ledger = Path(paths["ledger"])
     ensure_gitignored(root)
@@ -454,10 +471,14 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         print(f"autonom: cannot read {source}: {error}", file=sys.stderr)
         return 2
 
+    # {{ROOT}} anchors the reviewer's git commands with `git -C`. A subagent
+    # inherits the session's working directory, not the run's, and while Read
+    # and Edit are safe on absolute paths, git subcommands are cwd-bound.
     text = (text
             .replace("{{ARTIFACT_PATH}}", run[args.kind])
             .replace("{{SPEC_PATH}}", run["spec"])
             .replace("{{RUN_DIR}}", run["run_dir"])
+            .replace("{{ROOT}}", run["root"])
             .replace("{{SLUG}}", args.slug))
 
     leftover = re.search(r"\{\{[A-Z_]+\}\}", text)

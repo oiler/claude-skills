@@ -31,8 +31,14 @@ would change — and leave the spec as written. That decision belongs to a human
 
 When you are done, commit your changes alone:
 
-    git add {{ARTIFACT_PATH}}
-    git commit -m "review(fable): spec — {{SLUG}}"
+    git -C {{ROOT}} add {{ARTIFACT_PATH}}
+    git -C {{ROOT}} commit -m "review(fable): spec — {{SLUG}}"
+
+Both `-C` flags are required. Your working directory is the dispatching
+session's, not this repository's, and git subcommands act on the working
+directory no matter how absolute the paths you hand them are. Without `-C` the
+`add` fails and the `commit` lands in whatever repository you happen to be
+standing in.
 
 If you made no edits, make no commit.
 

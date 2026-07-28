@@ -13,15 +13,20 @@ description: >-
 disable-model-invocation: true
 allowed-tools: >-
   Bash(uv run *) Bash(git add *) Bash(git commit *) Bash(git diff *)
-  Bash(git rev-parse *) Bash(git log *) Bash(git worktree *) Bash(git checkout *)
-  Read Write Edit Agent Skill
+  Bash(git rev-parse *) Bash(git log *) Bash(git worktree *)
+  Bash(git checkout -b *) Bash(cd *) Read Write Edit Agent Skill
+metadata:
+  author: oiler
+  version: 0.1.0
 ---
 
 # autonom
 
 autonom runs superpowers steps 6 through 9 — author spec, review spec, author plan, review plan — as one unattended relay. You are the orchestrator. You hold the brainstorming context, so you author both artifacts yourself; you dispatch a Claude Fable subagent to review each one.
 
-`scripts/autonom.py` owns every deterministic surface: artifact paths, the run ledger, artifact validation, and the two reviewer prompts. Prose is yours, structure is the script's. If you find yourself constructing an artifact path, inventing a ledger line, or composing a reviewer prompt, you have left the contract — ask the script instead. That division is what makes the run survivable: it cannot skip a step, misname an artifact, lose its place after a compaction, or advance past a half-finished document.
+`scripts/autonom.py` owns every deterministic surface: artifact paths, the run ledger, artifact validation, and the two reviewer prompts. Prose is yours, structure is the script's. If you find yourself constructing an artifact path, inventing a ledger line, or composing a reviewer prompt, you have left the contract — ask the script instead.
+
+Be exact about what that division buys, because overstating it is how it gets weakened. It is not a sandbox. The script owns prompt *generation*, but the prompt still passes through your context on its way to the subagent, and nothing inspects it afterwards; you could paste extra framing into a reviewer dispatch and no check would catch it. What the division does is turn every such move from a judgment call you get to make in the moment into an overt violation of a written contract — and, for the reviews, the separate commit leaves the result auditable afterwards. A bright line plus a record, not a lock. That is enough, and only because you are the one holding it.
 
 Start only after `superpowers:brainstorming`'s Q&A has concluded and the design is agreed. autonom does not do discovery.
 
@@ -57,7 +62,9 @@ Run these in order, before authoring anything. The order matters: the run cannot
 
 **The run operates on the repository your working directory is inside.** Nothing else selects it. `autonom.py` resolves the root with `git rev-parse --show-toplevel` from cwd, and every path in `init`'s JSON — spec, plan, run directory, ledger, escalations — is derived from that root. So `cd` to the target project first, print `git rev-parse --show-toplevel`, and confirm that repository with oiler as part of onboarding rather than assuming the session started in it. autonom is normally invoked to build something in a *project*, which is usually not the repository this session happens to be sitting in.
 
-This is the same hazard as the absolute paths in the reviewer prompt (step 7): a working directory is an invisible, inherited, per-process thing, and every place autonom depends on one is a place a run can silently land in the wrong repository. Resolve the root once, out loud, and keep every path derived from it.
+This is the same hazard the reviewer prompts guard against with `git -C` (step 7): a working directory is an invisible, inherited, per-process thing, and every place autonom depends on one is a place a run can silently land in the wrong repository. Resolve the root once, out loud, and keep every path derived from it.
+
+**Confirm the run repository is writable by this session while a human is still present.** autonom writes to it from the main session and from two subagents, and the reviewers run for many minutes in a repository that is usually not the session's own. A permission stall *inside* a dispatch is invisible — no output, no prompt you can see, indistinguishable from a reviewer that is still thinking. Onboarding is the last moment anyone is watching, so raise it there rather than discovering it at minute nine of an unattended run.
 
 **2. Look for an existing run.**
 
@@ -90,6 +97,14 @@ Read the slug, both artifact paths, the run directory, the ledger path, the esca
 - `6` — a new or freshly initialized run. Begin at step 6.
 - `7`, `8`, or `9` — a resume. Begin at that step. Never re-run a step the ledger records as complete.
 - `null` — every step is already complete. Author nothing and re-run nothing; go straight to *Ending*. Falling through to step 6 here would overwrite a reviewed spec, which is the exact harm the ledger exists to prevent.
+
+**When resuming onto a step whose last ledger line is `dispatched`, check whether that review already happened before dispatching another.** A compaction between the reviewer's commit and the `complete` line leaves the ledger looking exactly like a dispatch that never returned. The `dispatched` line carries the base SHA, so the question is answerable:
+
+```bash
+git log --oneline <base sha>..HEAD
+```
+
+A `review(fable):` commit in that range means the review is done: validate the artifact, record `complete` with that SHA or range, and move on. Dispatching again would mint a second review of an already-reviewed artifact — a duplicate review commit, and a violation of the one-review-pass-per-artifact rule the whole design rests on.
 
 **5. Move to an isolated branch — in both modes.**
 
@@ -154,7 +169,7 @@ Dispatch one subagent with `subagent_type: "general-purpose"` and `model: "fable
 
 The reason is the whole reason step 7 exists. You wrote the spec, so you cannot see what you failed to consider — that blind spot is exactly what a fresh reader finds. Every sentence of context you add narrows where the reviewer looks and pre-loads your framing, and a primed reviewer returns an echo of the author rather than a critique of the artifact. The prompt already tells the reviewer to read the repository cold and where its write authority begins and ends. Adding to it can only subtract.
 
-Every path in that prompt is absolute, because `compute_paths` builds it from the run's repository root. That is what makes the dispatch safe: a subagent inherits the *session's* working directory, not the run's repository, so relative paths would send the reviewer's edits and its commit into whatever repo the session happens to be sitting in, and you would read the unchanged HEAD as a clean review. Never "tidy" those paths into relative form.
+A subagent inherits the *session's* working directory, not the run's repository, and the prompt is built for that in two different ways. Every path in it is absolute, which is what makes Read and Edit land in the run repository. But **git subcommands are cwd-bound no matter how absolute their arguments are**, so the prompt's commit block is anchored separately, with `git -C <root>`. Both halves are load-bearing and neither substitutes for the other: absolute paths alone produce a reviewer whose edits land correctly, whose `git add` fails, and whose `git commit` then succeeds *in the wrong repository* — leaving the run's HEAD unmoved, so you read a review that really happened as "no changes". Never make those paths relative and never drop a `-C`.
 
 The reviewer edits the spec in place and commits it itself, inside its own context — the commit SHA never reaches you in its report, which the prompt deliberately keeps brief. So when it returns, run `git rev-parse HEAD` again. A changed HEAD means the reviewer committed; count what it committed before you record anything:
 
@@ -169,7 +184,14 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py validate spec "<spec path>"
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 7 complete --slug <slug> --commit <review sha or range>
 ```
 
-An unchanged HEAD is not a failure. The prompt tells the reviewer to make no commit if it made no edits, so unchanged means a clean review: record `ledger 7 complete --slug <slug>` with no `--commit`, and print "no changes" where the spec's diff range would go at the checkpoint.
+An unchanged HEAD is *usually* a clean review — the prompt tells the reviewer to make no commit if it made no edits — but never record that on the strength of an unmoved HEAD alone. Confirm the artifact is genuinely untouched first:
+
+```bash
+git -C <root> diff --stat <base sha> -- "<spec path>"
+git -C <root> diff -- "<spec path>"
+```
+
+Both empty means a real clean review: record `ledger 7 complete --slug <slug>` with no `--commit`, and print "no changes" where the spec's diff range would go at the checkpoint. **If either shows changes while HEAD did not move, the review happened and the commit did not land here** — the failure the `-C` anchoring exists to prevent, plus a probable stray `review(fable):` commit in another repository. Stop and report it; do not record a clean review over a review that was actually performed, and do not commit the reviewer's edits yourself under your own authorship.
 
 The second validation is not redundant. A reviewer with write authority can break the artifact contract exactly as an author can — strand an edit mid-sentence, delete a required section.
 
@@ -180,6 +202,8 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py escalations <slug>
 ```
 
 Exit `0` means continue — absent, empty, and whitespace-only all count as nothing escalated, and absent is the ordinary case because neither the script nor a clean review creates the file. Exit `1` means the reviewer escalated, and the command has already printed the contents for you; see *Error handling*. Do not read or test for the file yourself: what counts as "non-empty" belongs to the script, for the same reason the validators do.
+
+**Emptying `escalations.md` is the human act that marks an escalation resolved, and it is oiler's alone.** Nothing in autonom clears it — no subcommand, no reviewer, and never you. That asymmetry is the whole design: a reviewer and the orchestrator can both raise the gate, only a human can lower it, and a gate the orchestrator can clear is not a gate. So when a resumed run re-fires this check on contents oiler has already dealt with, the answer is not to clear the file and continue; it is to report that the escalation is still outstanding and stop. Say so plainly at the checkpoint, because emptying the file is a step oiler has to know to take.
 
 ### Step 8 — author the plan
 
@@ -203,10 +227,10 @@ Record the base SHA the same way — `git rev-parse HEAD`, then `ledger 9 dispat
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py validate plan "<plan path>"
-uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 9 complete --slug <slug> --commit <review sha>
+uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 9 complete --slug <slug> --commit <review sha or range>
 ```
 
-Unchanged HEAD is handled the same way: no `--commit`, "no changes" in place of the plan's diff range.
+Unchanged HEAD is handled the same way, including the two `git -C <root> diff` checks against the plan path before you accept it as a clean review.
 
 Then run the escalation gate again — same command, same meaning:
 
@@ -240,7 +264,7 @@ Never treat `2` as a validation failure. `1` means the artifact is wrong; `2` me
 | Validator fails on a freshly authored artifact (step 6 or 8) | One repair attempt by the same author, targeted at the reported findings. If it fails again, stop and report both findings sets. No loop. |
 | Validator fails after a review pass (step 7 or 9) | Stop. Report the findings and the review diff. No repair attempt — the reviewer subagent is gone, and a main-session rewrite of a Fable edit would silently undo the escalation it was making. |
 | Fable subagent dies, errors, or returns nothing | Stop. `ledger <step> failed` and **no** `complete` line — the step did not finish, so the run must not advance past an unreviewed artifact. |
-| `escalations` exits `1` after either review | Stop before `superpowers:subagent-driven-development`, **in both modes**. Record `ledger <step> complete` first — the review itself finished — then `ledger <step> escalated` as the additional marker, per *Ledger statuses*. Print the contents the gate emitted and hand the decision to oiler. Full-auto authorizes skipping a routine checkpoint; it does not authorize ignoring a flagged scope conflict, which is the one decision in this pipeline that was never a human's to delegate. |
+| `escalations` exits `1` after either review | Stop before `superpowers:subagent-driven-development`, **in both modes**. Record `ledger <step> complete` first — the review itself finished — then `ledger <step> escalated` as the additional marker, per *Ledger statuses*. Print the contents the gate emitted, hand the decision to oiler, and say that resolving it means emptying `escalations.md` — the run cannot proceed until the file is empty, and only oiler may empty it. Full-auto authorizes skipping a routine checkpoint; it does not authorize ignoring a flagged scope conflict, which is the one decision in this pipeline that was never a human's to delegate. |
 | Session compacts mid-run | Re-invoke `/autonom` from the run repository. `autonom.py status` prints the resume point from the ledger, the `dispatched` line carries the pre-dispatch base SHA so the review diff range is still reconstructible, and committed artifacts are recoverable from git regardless of context. Never re-run a step the ledger records complete. |
 
 ## Ending
@@ -249,7 +273,7 @@ Never treat `2` as a validation failure. `1` means the artifact is wrong; `2` me
 
 **auto mode** — invoke `superpowers:subagent-driven-development` with the plan path, then exit. SDD owns the task loop, its own ledger, per-task review, and the handoff to `finishing-a-development-branch`. Do not duplicate any of it and do not override its model selection.
 
-**An outstanding escalation overrides both, in either mode.** Print the artifact paths, the review diff ranges, and the escalation contents, state that the run is blocked on it, and stop. Do **not** print a resume-into-implementation instruction and do not invoke `subagent-driven-development` — implementation is precisely what the escalation is blocking, and an ending that offers a resume line alongside an unresolved scope conflict invites someone to take it.
+**An outstanding escalation overrides both, in either mode.** Print the artifact paths, the review diff ranges, and the escalation contents, state that the run is blocked on it and that clearing it means emptying `escalations.md`, then stop. Do **not** print a resume-into-implementation instruction and do not invoke `subagent-driven-development` — implementation is precisely what the escalation is blocking, and an ending that offers a resume line alongside an unresolved scope conflict invites someone to take it.
 
 ## Narration
 

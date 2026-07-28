@@ -122,6 +122,38 @@ class TestErrorContracts:
         assert rc == 2
         assert "unreadable ledger header" in capsys.readouterr().err
 
+    def test_an_empty_ledger_reports_an_error_rather_than_crashing(
+        self, tmp_path, capsys
+    ):
+        run_dir = tmp_path / ".superpowers" / "autonom" / "demo-topic"
+        run_dir.mkdir(parents=True)
+        (run_dir / "progress.md").write_text("")
+        assert autonom.main(["init", "Demo Topic", "--root", str(tmp_path),
+                             "--date", "2026-07-28"]) == 2
+        assert "unreadable ledger header" in capsys.readouterr().err
+        assert autonom.main(["status", "demo-topic", "--root", str(tmp_path)]) == 2
+
+    @pytest.mark.parametrize("topic", [
+        "Demo\nTopic",
+        "Demo\tTopic",
+        "Demo\x00Topic",
+    ])
+    def test_a_topic_with_a_control_character_is_rejected(self, tmp_path, capsys,
+                                                          topic):
+        rc = autonom.main(["init", topic, "--root", str(tmp_path),
+                           "--date", "2026-07-28"])
+        assert rc == 2
+        assert "control character" in capsys.readouterr().err
+        assert not (tmp_path / ".superpowers").exists()
+
+    def test_a_topic_that_slugifies_to_nothing_is_an_error_not_a_traceback(
+        self, tmp_path, capsys
+    ):
+        rc = autonom.main(["init", "日本語", "--root", str(tmp_path),
+                           "--date", "2026-07-28"])
+        assert rc == 2
+        assert "empty slug" in capsys.readouterr().err
+
 
 class TestDependencyCheck:
     real_dependency_check = True
@@ -473,8 +505,21 @@ class TestPrompt:
                     .replace("{{ARTIFACT_PATH}}", paths["spec"])
                     .replace("{{SPEC_PATH}}", paths["spec"])
                     .replace("{{RUN_DIR}}", paths["run_dir"])
+                    .replace("{{ROOT}}", paths["root"])
                     .replace("{{SLUG}}", "demo-topic"))
         assert out == expected
+
+    @pytest.mark.parametrize("kind", ["spec", "plan"])
+    def test_prompt_anchors_the_reviewer_git_commands_to_the_run_root(
+        self, tmp_path, capsys, kind
+    ):
+        self._init(tmp_path, capsys)
+        assert autonom.main(["prompt", kind, "demo-topic",
+                             "--root", str(tmp_path)]) == 0
+        out = capsys.readouterr().out
+        assert f"git -C {tmp_path} add " in out
+        assert f"git -C {tmp_path} commit -m " in out
+        assert "\n    git add " not in out
 
     def test_unknown_slug_is_an_error(self, tmp_path, capsys):
         assert autonom.main(["prompt", "spec", "nope", "--root", str(tmp_path)]) == 2
@@ -485,6 +530,7 @@ class TestPrompt:
             text = (autonom.references_dir() / name).read_text(encoding="utf-8")
             assert "{{ARTIFACT_PATH}}" in text
             assert "{{RUN_DIR}}" in text
+            assert "{{ROOT}}" in text
             assert "escalations.md" in text
 
 
