@@ -1,5 +1,15 @@
 # autonom — Changelog
 
+## Unreleased
+
+Fixes from the 2026-07-28 clean-room smoke run.
+
+- **New `escalations` subcommand** — `uv run autonom.py escalations <slug> [--root DIR]` exits `0` when `escalations.md` is absent, empty, or whitespace-only and `1` when it has content, printing the contents to stdout. The escalation gate in steps 7 and 9 now calls it instead of describing a file check in prose, which puts "non-empty" in the script and removes the need for an `ls`/`test` tool permission the skill never granted.
+- Ledger statuses documented: `complete` is the only status that advances the run, `escalated` is recorded *in addition to* it, and `failed` is recorded without it.
+- SKILL.md now publishes the spec and plan validator contracts, including the warning that structural markers inside a code fence are invisible to the validator.
+- `Bash(git worktree *)` added to `allowed-tools`; step 3 could not otherwise create the worktree it requires.
+- Step 7 records why the reviewer prompt's paths are absolute — a dispatched subagent inherits the session's working directory, not the run's repository.
+
 ## v0.1.0 — 2026-07-28
 
 Initial release.

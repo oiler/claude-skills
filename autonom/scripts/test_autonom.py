@@ -467,3 +467,52 @@ class TestPrompt:
             assert "{{ARTIFACT_PATH}}" in text
             assert "{{RUN_DIR}}" in text
             assert "escalations.md" in text
+
+
+class TestEscalations:
+    def _init(self, tmp_path, capsys):
+        autonom.main(["init", "Demo Topic", "--root", str(tmp_path),
+                      "--date", "2026-07-28"])
+        capsys.readouterr()
+
+    def _escalations_path(self, tmp_path) -> Path:
+        return tmp_path / ".superpowers/autonom/demo-topic/escalations.md"
+
+    def test_absent_file_exits_zero_and_prints_nothing(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        assert autonom.main(["escalations", "demo-topic",
+                             "--root", str(tmp_path)]) == 0
+        assert capsys.readouterr().out == ""
+
+    def test_empty_file_exits_zero(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        self._escalations_path(tmp_path).write_text("")
+        assert autonom.main(["escalations", "demo-topic",
+                             "--root", str(tmp_path)]) == 0
+
+    def test_whitespace_only_file_exits_zero(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        self._escalations_path(tmp_path).write_text("\n\n   \n\t\n")
+        assert autonom.main(["escalations", "demo-topic",
+                             "--root", str(tmp_path)]) == 0
+        assert capsys.readouterr().out == ""
+
+    def test_file_with_content_exits_one_and_prints_it(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        self._escalations_path(tmp_path).write_text(
+            "## Escalation\n\nThe spec contradicts itself about `007`.\n"
+        )
+        assert autonom.main(["escalations", "demo-topic",
+                             "--root", str(tmp_path)]) == 1
+        out = capsys.readouterr().out
+        assert "contradicts itself" in out
+        assert out.endswith("\n")
+
+    def test_unknown_slug_is_an_error(self, tmp_path, capsys):
+        assert autonom.main(["escalations", "nope", "--root", str(tmp_path)]) == 2
+        assert "no run" in capsys.readouterr().err
+
+    def test_outside_a_git_repo_is_an_error(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert autonom.main(["escalations", "demo-topic"]) == 2
+        assert "not inside a git repository" in capsys.readouterr().err

@@ -13,7 +13,8 @@ description: >-
 disable-model-invocation: true
 allowed-tools: >-
   Bash(uv run *) Bash(git add *) Bash(git commit *) Bash(git diff *)
-  Bash(git rev-parse *) Bash(git log *) Read Write Edit Agent Skill
+  Bash(git rev-parse *) Bash(git log *) Bash(git worktree *) Read Write Edit
+  Agent Skill
 ---
 
 # autonom
@@ -86,6 +87,18 @@ Read the slug, both artifact paths, the run directory, the ledger path, the esca
 - `7`, `8`, or `9` — a resume. Begin at that step. Never re-run a step the ledger records as complete.
 - `null` — every step is already complete. Author nothing and re-run nothing; go straight to *Ending*. Falling through to step 6 here would overwrite a reviewed spec, which is the exact harm the ledger exists to prevent.
 
+## What the validators require
+
+Author to this contract the first time. *Error handling* below allows exactly one repair attempt, and it is meant for a real defect — not for discovering the schema by trial.
+
+**Both artifacts** — no `TBD`, `TODO`, `FIXME`, or `XXX`; no `<placeholder>` or `[fill in]`.
+
+**Spec** — one level-1 title, plus level-2-or-deeper headings whose text contains `problem` or `goal`, `architecture` or `design`, `error`, and `test`. Every matched section needs a body. No `**Open question`, `???`, or `[?]`: an unresolved question is an escalation, not a spec line.
+
+**Plan** — a line carrying both `REQUIRED SUB-SKILL` and `superpowers:subagent-driven-development`; a heading that is exactly `## Global Constraints`; at least one `### Task N:` block; and inside every task block a `**Files:**` line and at least one `- [ ] **Step` checkbox. The validator also rejects the vague directives `Similar to Task N`, `add appropriate error handling`, `add validation`, `handle edge cases`, and a bare `Write tests for the above` line.
+
+**Every structural marker must be live prose, never inside a fence or backticks.** The validator blanks fenced blocks and inline code spans before it scans, so that a document may *document* a forbidden marker without *containing* one. The cost is that a required marker written inside a fence is invisible too. This bites hardest on the plan: `superpowers:writing-plans` presents its mandatory header *inside* a ```` ```markdown ```` fence, so copying that template verbatim fails with "missing the mandatory REQUIRED SUB-SKILL header line" against a plan that visibly contains it. Lift the header, `## Global Constraints`, and the task blocks out of the fence.
+
 ## The four steps
 
 ### Step 6 — author the spec
@@ -112,6 +125,8 @@ Dispatch one subagent with `subagent_type: "general-purpose"` and `model: "fable
 
 The reason is the whole reason step 7 exists. You wrote the spec, so you cannot see what you failed to consider — that blind spot is exactly what a fresh reader finds. Every sentence of context you add narrows where the reviewer looks and pre-loads your framing, and a primed reviewer returns an echo of the author rather than a critique of the artifact. The prompt already tells the reviewer to read the repository cold and where its write authority begins and ends. Adding to it can only subtract.
 
+Every path in that prompt is absolute, because `compute_paths` builds it from the run's repository root. That is what makes the dispatch safe: a subagent inherits the *session's* working directory, not the run's repository, so relative paths would send the reviewer's edits and its commit into whatever repo the session happens to be sitting in, and you would read the unchanged HEAD as a clean review. Never "tidy" those paths into relative form.
+
 The reviewer edits the spec in place and commits it itself, inside its own context — the commit SHA never reaches you in its report, which the prompt deliberately keeps brief. So when it returns, run `git rev-parse HEAD` again. A changed HEAD is the review commit; that SHA is the `--commit` value and the second endpoint of the review diff range.
 
 ```bash
@@ -123,7 +138,13 @@ An unchanged HEAD is not a failure. The prompt tells the reviewer to make no com
 
 The second validation is not redundant. A reviewer with write authority can break the artifact contract exactly as an author can — strand an edit mid-sentence, delete a required section.
 
-Then check for `escalations.md` in the run directory. Absent or empty both mean continue — neither the script nor a clean review creates it, so "no such file" is the ordinary case. See *Error handling* for a non-empty one.
+Then run the escalation gate:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py escalations <slug>
+```
+
+Exit `0` means continue — absent, empty, and whitespace-only all count as nothing escalated, and absent is the ordinary case because neither the script nor a clean review creates the file. Exit `1` means the reviewer escalated, and the command has already printed the contents for you; see *Error handling*. Do not read or test for the file yourself: what counts as "non-empty" belongs to the script, for the same reason the validators do.
 
 ### Step 8 — author the plan
 
@@ -152,7 +173,11 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 9 complete --slug <slug> --
 
 Unchanged HEAD is handled the same way: no `--commit`, "no changes" in place of the plan's diff range.
 
-Then check for `escalations.md` again — absent or empty means continue.
+Then run the escalation gate again — same command, same meaning:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py escalations <slug>
+```
 
 ## Reading the script's exit codes
 
@@ -164,14 +189,22 @@ Then check for `escalations.md` again — absent or empty means continue.
 
 Never treat `2` as a validation failure. `1` means the artifact is wrong; `2` means the command was wrong.
 
+## Ledger statuses
+
+`complete` is the only status that advances the run. `autonom.py` computes `next_step` by counting `step N complete` lines and nothing else, so the other two statuses are annotations on top of it, not alternatives to it.
+
+- **`complete`** — record it whenever a step's work actually finished, every time, without exception. It is the only thing stopping a post-compaction resume from re-dispatching a reviewer over an already-reviewed artifact and minting a duplicate review commit.
+- **`escalated`** — an *additional* line, written immediately after that step's `complete` line, never instead of it. A review that finished and escalated is still a finished review; recording only `escalated` pins `next_step` at that step forever and the resume re-runs it.
+- **`failed`** — written on its own, *without* a `complete` line, because the step's work did not finish. Not advancing is the point here: the artifact is unreviewed and the step has to run again.
+
 ## Error handling
 
 | Condition | Behavior |
 |---|---|
 | Validator fails on a freshly authored artifact (step 6 or 8) | One repair attempt by the same author, targeted at the reported findings. If it fails again, stop and report both findings sets. No loop. |
 | Validator fails after a review pass (step 7 or 9) | Stop. Report the findings and the review diff. No repair attempt — the reviewer subagent is gone, and a main-session rewrite of a Fable edit would silently undo the escalation it was making. |
-| Fable subagent dies, errors, or returns nothing | Stop. `ledger <step> failed`. Never advance with an unreviewed artifact. |
-| `escalations.md` is non-empty after either review | Stop before `superpowers:subagent-driven-development`, **in both modes**. `ledger <step> escalated`, then print the escalation contents and hand the decision to oiler. Full-auto authorizes skipping a routine checkpoint; it does not authorize ignoring a flagged scope conflict, which is the one decision in this pipeline that was never a human's to delegate. |
+| Fable subagent dies, errors, or returns nothing | Stop. `ledger <step> failed` and **no** `complete` line — the step did not finish, so the run must not advance past an unreviewed artifact. |
+| `escalations` exits `1` after either review | Stop before `superpowers:subagent-driven-development`, **in both modes**. Record `ledger <step> complete` first — the review itself finished — then `ledger <step> escalated` as the additional marker, per *Ledger statuses*. Print the contents the gate emitted and hand the decision to oiler. Full-auto authorizes skipping a routine checkpoint; it does not authorize ignoring a flagged scope conflict, which is the one decision in this pipeline that was never a human's to delegate. |
 | Session compacts mid-run | Re-invoke `/autonom`. `autonom.py status` prints the resume point from the ledger, and committed artifacts are recoverable from git regardless of context. Never re-run a step the ledger records complete. |
 
 ## Ending

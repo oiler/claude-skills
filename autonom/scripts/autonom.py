@@ -16,6 +16,7 @@ Usage:
     uv run autonom.py ledger <step> <status> [--slug SLUG] [--commit SHA]
     uv run autonom.py status [<slug>] [--root DIR]
     uv run autonom.py prompt {spec|plan} <slug> [--root DIR]
+    uv run autonom.py escalations <slug> [--root DIR]
     uv run autonom.py validate {spec|plan} <path>
 
 Exit codes: 0 success / all checks pass; 1 validation failures; 2 usage or IO error.
@@ -464,6 +465,37 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_escalations(args: argparse.Namespace) -> int:
+    """Gate the escalation check. `0` = nothing to escalate, `1` = stop the run.
+
+    "Non-empty" lives here rather than in the orchestrator's prose for the same
+    reason the validators do: a reviewer that writes a bare heading must not
+    halt a run, and an orchestrator with no `ls`/`test` permission has no other
+    way to tell an absent file from an empty one.
+    """
+    root = _resolved_root(args)
+    if root is None:
+        print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        return 2
+    run_dir = _run_dir_root(root) / args.slug
+    if not (run_dir / "progress.md").exists():
+        print(f"autonom: no run named {args.slug!r}", file=sys.stderr)
+        return 2
+
+    target = run_dir / "escalations.md"
+    if not target.exists():
+        return 0
+    try:
+        text = target.read_text(encoding="utf-8")
+    except OSError as error:
+        print(f"autonom: cannot read {target}: {error}", file=sys.stderr)
+        return 2
+    if not text.strip():
+        return 0
+    sys.stdout.write(text if text.endswith("\n") else text + "\n")
+    return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="autonom")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -499,6 +531,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_prompt.add_argument("slug")
     p_prompt.add_argument("--root")
     p_prompt.set_defaults(func=cmd_prompt)
+
+    p_escalations = sub.add_parser(
+        "escalations", help="0 when there is nothing to escalate, 1 when there is")
+    p_escalations.add_argument("slug")
+    p_escalations.add_argument("--root")
+    p_escalations.set_defaults(func=cmd_escalations)
 
     return parser
 
