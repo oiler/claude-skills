@@ -360,6 +360,26 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+LEDGER_LINE_RE = re.compile(
+    r"^step (?P<step>\d+) (?P<status>dispatched|complete|failed|escalated)"
+    r"(?: commit=(?P<commit>\S+))?$"
+)
+
+
+def _ledger_entries(ledger: Path) -> list[dict[str, str | None]]:
+    """Parsed step records in order, header excluded. Unparseable lines are
+    skipped: the ledger is append-only, so a malformed line is damage to
+    inspect, never a reason to refuse to report the rest of the run."""
+    if not ledger.exists():
+        return []
+    entries: list[dict[str, str | None]] = []
+    for line in ledger.read_text(encoding="utf-8").splitlines()[1:]:
+        match = LEDGER_LINE_RE.match(line.strip())
+        if match:
+            entries.append(match.groupdict())
+    return entries
+
+
 def _next_step(ledger: Path) -> int | None:
     """Lowest pipeline step not recorded complete; None when the run is done.
 
@@ -367,14 +387,29 @@ def _next_step(ledger: Path) -> int | None:
     are annotations that survive a compaction, and none of them may move the
     resume point — a dispatched-but-unreturned review has not happened yet.
     """
-    done = set()
-    if ledger.exists():
-        for line in ledger.read_text(encoding="utf-8").splitlines()[1:]:
-            match = re.match(r"step (\d+) complete", line.strip())
-            if match:
-                done.add(int(match.group(1)))
+    done = {
+        int(entry["step"])
+        for entry in _ledger_entries(ledger)
+        if entry["status"] == "complete"
+    }
     remaining = [step for step in sorted(STEPS) if step not in done]
     return remaining[0] if remaining else None
+
+
+def _dispatched_base(entries: list[dict[str, str | None]],
+                     step: int | None) -> str | None:
+    """Base SHA of the most recent `dispatched` line for `step`.
+
+    This is what makes the resume rule actionable: after a compaction between a
+    reviewer's commit and its `complete` line, it is the only way to ask whether
+    that review already happened without hand-parsing the ledger.
+    """
+    if step is None:
+        return None
+    for entry in reversed(entries):
+        if int(entry["step"]) == step and entry["status"] == "dispatched":
+            return entry["commit"]
+    return None
 
 
 def _run_dir_root(root: Path) -> Path:
@@ -387,12 +422,15 @@ def _describe_run(root: Path, slug: str) -> dict | None:
     header = _parse_header(ledger)
     if header is None:
         return None
+    entries = _ledger_entries(ledger)
     next_step = _next_step(ledger)
     return dict(
         compute_paths(root, slug, header["date"]),
         topic=header["topic"],
         next_step=next_step,
         next_step_name=STEPS.get(next_step) if next_step else None,
+        last_status=entries[-1]["status"] if entries else None,
+        dispatched_base=_dispatched_base(entries, next_step),
     )
 
 

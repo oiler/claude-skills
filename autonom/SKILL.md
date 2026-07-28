@@ -14,7 +14,8 @@ disable-model-invocation: true
 allowed-tools: >-
   Bash(uv run *) Bash(git add *) Bash(git commit *) Bash(git diff *)
   Bash(git rev-parse *) Bash(git log *) Bash(git worktree *)
-  Bash(git checkout -b *) Bash(cd *) Read Write Edit Agent Skill
+  Bash(git checkout -b *) Bash(git checkout autonom/*) Bash(cd *)
+  Read Write Edit Agent Skill
 metadata:
   author: oiler
   version: 0.1.0
@@ -98,27 +99,38 @@ Read the slug, both artifact paths, the run directory, the ledger path, the esca
 - `7`, `8`, or `9` — a resume. Begin at that step. Never re-run a step the ledger records as complete.
 - `null` — every step is already complete. Author nothing and re-run nothing; go straight to *Ending*. Falling through to step 6 here would overwrite a reviewed spec, which is the exact harm the ledger exists to prevent.
 
-**When resuming onto a step whose last ledger line is `dispatched`, check whether that review already happened before dispatching another.** A compaction between the reviewer's commit and the `complete` line leaves the ledger looking exactly like a dispatch that never returned. The `dispatched` line carries the base SHA, so the question is answerable:
-
-```bash
-git log --oneline <base sha>..HEAD
-```
-
-A `review(fable):` commit in that range means the review is done: validate the artifact, record `complete` with that SHA or range, and move on. Dispatching again would mint a second review of an already-reviewed artifact — a duplicate review commit, and a violation of the one-review-pass-per-artifact rule the whole design rests on.
-
 **5. Move to an isolated branch — in both modes.**
 
 ```bash
-git checkout -b autonom/<slug>
+git checkout -b autonom/<slug>      # new run
+git checkout autonom/<slug>         # resume: the branch already exists
 ```
 
-Use the slug from `init`, so two runs can never collide on a branch name and a human reading `git branch` can see at a glance what each one is for. This is not optional in auto mode and not optional in checkpoint mode either. Two reasons: the spec, plan, and both review commits stay off `master`, and `subagent-driven-development`'s hard gate — never implement on a main branch without explicit consent — is satisfied by construction, so nothing interrupts a full-auto run halfway through.
+A resume must switch, not create — `checkout -b` fails on an existing branch. Use the slug from `init`, so two runs can never collide on a branch name and a human reading `git branch` can see at a glance what each one is for. This is not optional in auto mode and not optional in checkpoint mode either. Two reasons: the spec, plan, and both review commits stay off `master`, and `subagent-driven-development`'s hard gate — never implement on a main branch without explicit consent — is satisfied by construction, so nothing interrupts a full-auto run halfway through.
 
 Create the branch **in the run repository**, with `git checkout -b` or `git worktree add`, and not through `superpowers:using-git-worktrees`. That skill prefers the native `EnterWorktree` tool, which operates on the *session's* repository and branches from `origin/<default-branch>` — the wrong repository, and a ref the run repository may not even have. When the run repository is not the session's own, which is the normal case, the native tool does not apply.
 
 A branch is the default because it leaves the git toplevel unchanged, so every path `init` just emitted stays valid. A worktree is a *different* toplevel: if you use one, `cd` into it and re-run `init "<topic>"` verbatim from there, and use that JSON instead — the first `init`'s paths point at the wrong tree.
 
 If `init` added the `.gitignore` line, it is part of the run. Include it in the first authoring commit (`git add .gitignore` alongside the spec) so the reviewer inherits a clean tree rather than a stray modification it did not make and cannot explain.
+
+**6. On a resume only — reconcile the ledger against the branch.**
+
+Both checks below need the run branch checked out, which is why they come after step 5 and not with `init`: `git log … HEAD` resolves HEAD on whatever branch you are actually on, and run from `master` it would miss the run's commits entirely and conclude the opposite of the truth. Ask the script for the run's state rather than reading `progress.md` — the ledger's format is the script's, not yours:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py status <slug>
+```
+
+**If `last_status` is `dispatched`, check whether that review already happened before dispatching another.** A compaction between the reviewer's commit and its `complete` line leaves the ledger looking exactly like a dispatch that never returned. `dispatched_base` is that dispatch's base SHA, so the question is answerable:
+
+```bash
+git log --oneline <dispatched_base>..HEAD
+```
+
+A `review(fable):` commit in that range means the review is done. Finish the step the way the step itself would have: validate the artifact, record `complete` with that SHA or range, **then run the escalation gate for that step** — `escalations <slug>`, and on exit `1` record `escalated` and stop. Do not skip the gate. A reviewer that escalated and committed, followed by a compaction, is exactly the case this branch handles, and a resume that records `complete` and walks on spends a second Fable dispatch before the scope conflict ever surfaces. Dispatching again is the other failure: a second review of an already-reviewed artifact, which is the duplicate the ledger exists to prevent.
+
+**Then run the escalation gate regardless of where you are resuming**, before authoring anything. `escalated` is recorded *alongside* `complete`, so a step-7 escalation still leaves `next_step: 8` — a resume that trusts `next_step` alone walks straight past an unresolved scope conflict and authors a plan against it.
 
 ## What the validators require
 
@@ -187,11 +199,13 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 7 complete --slug <slug> --
 An unchanged HEAD is *usually* a clean review — the prompt tells the reviewer to make no commit if it made no edits — but never record that on the strength of an unmoved HEAD alone. Confirm the artifact is genuinely untouched first:
 
 ```bash
-git -C <root> diff --stat <base sha> -- "<spec path>"
-git -C <root> diff -- "<spec path>"
+git diff --stat <base sha> -- "<spec path>"
+git diff -- "<spec path>"
 ```
 
-Both empty means a real clean review: record `ledger 7 complete --slug <slug>` with no `--commit`, and print "no changes" where the spec's diff range would go at the checkpoint. **If either shows changes while HEAD did not move, the review happened and the commit did not land here** — the failure the `-C` anchoring exists to prevent, plus a probable stray `review(fable):` commit in another repository. Stop and report it; do not record a clean review over a review that was actually performed, and do not commit the reviewer's edits yourself under your own authorship.
+Both run from the run repository, like every other command you issue — startup step 1 established that cwd, and your own commands rely on it throughout. Only the *reviewer's* commands carry `git -C`, because a subagent's working directory is not yours to set.
+
+Both empty means a real clean review: record `ledger 7 complete --slug <slug>` with no `--commit`, and print "no changes" where the spec's diff range would go at the checkpoint. **If either shows changes while HEAD did not move, the review happened and the commit did not land here** — the failure the reviewer's `-C` anchoring exists to prevent, plus a probable stray `review(fable):` commit in another repository. Stop and report it; do not record a clean review over a review that was actually performed, and do not commit the reviewer's edits yourself under your own authorship.
 
 The second validation is not redundant. A reviewer with write authority can break the artifact contract exactly as an author can — strand an edit mid-sentence, delete a required section.
 
@@ -230,7 +244,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py validate plan "<plan path>"
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 9 complete --slug <slug> --commit <review sha or range>
 ```
 
-Unchanged HEAD is handled the same way, including the two `git -C <root> diff` checks against the plan path before you accept it as a clean review.
+Unchanged HEAD is handled the same way, including the two `git diff` checks against the plan path before you accept it as a clean review.
 
 Then run the escalation gate again — same command, same meaning:
 

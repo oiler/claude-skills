@@ -262,6 +262,90 @@ class TestLedgerAndStatus:
         assert rc == 0
         assert json.loads(capsys.readouterr().out) == []
 
+    def test_status_exposes_the_last_status_and_the_dispatched_base(
+        self, tmp_path, capsys
+    ):
+        self._init(tmp_path, capsys)
+        autonom.main(["ledger", "6", "complete", "--slug", "demo-topic",
+                      "--root", str(tmp_path), "--commit", "aaa111"])
+        autonom.main(["ledger", "7", "dispatched", "--slug", "demo-topic",
+                      "--root", str(tmp_path), "--commit", "bbb222"])
+        capsys.readouterr()
+        autonom.main(["status", "demo-topic", "--root", str(tmp_path)])
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["next_step"] == 7
+        assert payload["last_status"] == "dispatched"
+        assert payload["dispatched_base"] == "bbb222"
+
+    def test_a_fresh_run_reports_no_last_status_and_no_dispatched_base(
+        self, tmp_path, capsys
+    ):
+        self._init(tmp_path, capsys)
+        autonom.main(["status", "demo-topic", "--root", str(tmp_path)])
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["last_status"] is None
+        assert payload["dispatched_base"] is None
+
+    def test_the_dispatched_base_is_scoped_to_the_step_being_resumed(
+        self, tmp_path, capsys
+    ):
+        self._init(tmp_path, capsys)
+        for step, status, commit in (
+            (6, "complete", "aaa111"),
+            (7, "dispatched", "bbb222"),
+            (7, "complete", "ccc333"),
+            (8, "complete", "ddd444"),
+        ):
+            autonom.main(["ledger", str(step), status, "--slug", "demo-topic",
+                          "--root", str(tmp_path), "--commit", commit])
+        capsys.readouterr()
+        autonom.main(["status", "demo-topic", "--root", str(tmp_path)])
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["next_step"] == 9
+        assert payload["last_status"] == "complete"
+        # Step 7's base must not leak into a step-9 resume.
+        assert payload["dispatched_base"] is None
+
+    def test_the_latest_dispatch_wins_when_a_step_was_dispatched_twice(
+        self, tmp_path, capsys
+    ):
+        self._init(tmp_path, capsys)
+        for commit in ("bbb222", "eee555"):
+            autonom.main(["ledger", "7", "dispatched", "--slug", "demo-topic",
+                          "--root", str(tmp_path), "--commit", commit])
+        autonom.main(["ledger", "6", "complete", "--slug", "demo-topic",
+                      "--root", str(tmp_path)])
+        capsys.readouterr()
+        autonom.main(["status", "demo-topic", "--root", str(tmp_path)])
+        assert json.loads(capsys.readouterr().out)["dispatched_base"] == "eee555"
+
+    def test_an_escalated_line_is_the_last_status_after_a_completed_step(
+        self, tmp_path, capsys
+    ):
+        self._init(tmp_path, capsys)
+        autonom.main(["ledger", "6", "complete", "--slug", "demo-topic",
+                      "--root", str(tmp_path), "--commit", "aaa111"])
+        autonom.main(["ledger", "6", "escalated", "--slug", "demo-topic",
+                      "--root", str(tmp_path)])
+        capsys.readouterr()
+        autonom.main(["status", "demo-topic", "--root", str(tmp_path)])
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["next_step"] == 7
+        assert payload["last_status"] == "escalated"
+
+    def test_a_malformed_ledger_line_is_skipped_not_fatal(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        ledger = tmp_path / ".superpowers/autonom/demo-topic/progress.md"
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write("this is not a step record\n")
+        autonom.main(["ledger", "6", "complete", "--slug", "demo-topic",
+                      "--root", str(tmp_path)])
+        capsys.readouterr()
+        assert autonom.main(["status", "demo-topic", "--root", str(tmp_path)]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["next_step"] == 7
+        assert payload["last_status"] == "complete"
+
     def test_status_for_an_unknown_slug_is_an_error(self, tmp_path, capsys):
         rc = autonom.main(["status", "nope", "--root", str(tmp_path)])
         assert rc == 2
