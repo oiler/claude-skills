@@ -422,6 +422,48 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def references_dir() -> Path:
+    """The skill's references/ directory, resolved through any symlink."""
+    return Path(__file__).resolve().parent.parent / "references"
+
+
+def cmd_prompt(args: argparse.Namespace) -> int:
+    root = _resolved_root(args)
+    if root is None:
+        print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        return 2
+    if not (_run_dir_root(root) / args.slug / "progress.md").exists():
+        print(f"autonom: no run named {args.slug!r}", file=sys.stderr)
+        return 2
+
+    run = _describe_run(root, args.slug)
+    if run is None:
+        print(f"autonom: unreadable ledger header for run {args.slug!r}",
+              file=sys.stderr)
+        return 2
+    source = references_dir() / f"{args.kind}-reviewer.md"
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as error:
+        print(f"autonom: cannot read {source}: {error}", file=sys.stderr)
+        return 2
+
+    text = (text
+            .replace("{{ARTIFACT_PATH}}", run[args.kind])
+            .replace("{{SPEC_PATH}}", run["spec"])
+            .replace("{{RUN_DIR}}", run["run_dir"])
+            .replace("{{SLUG}}", args.slug))
+
+    leftover = re.search(r"\{\{[A-Z_]+\}\}", text)
+    if leftover:
+        print(f"autonom: unsubstituted token {leftover.group(0)} in {source}",
+              file=sys.stderr)
+        return 2
+
+    sys.stdout.write(text)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="autonom")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -451,6 +493,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate.add_argument("kind", choices=["spec", "plan"])
     p_validate.add_argument("path")
     p_validate.set_defaults(func=cmd_validate)
+
+    p_prompt = sub.add_parser("prompt", help="emit a reviewer dispatch prompt")
+    p_prompt.add_argument("kind", choices=["spec", "plan"])
+    p_prompt.add_argument("slug")
+    p_prompt.add_argument("--root")
+    p_prompt.set_defaults(func=cmd_prompt)
 
     return parser
 

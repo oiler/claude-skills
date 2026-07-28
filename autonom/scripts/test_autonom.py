@@ -416,3 +416,54 @@ class TestValidatePlan:
         if not plan.exists():
             pytest.skip("workshop plan not present in this checkout")
         assert autonom.validate_plan(plan.read_text(encoding="utf-8")) == []
+
+
+class TestPrompt:
+    def _init(self, tmp_path, capsys):
+        autonom.main(["init", "Demo Topic", "--root", str(tmp_path),
+                      "--date", "2026-07-28"])
+        capsys.readouterr()
+
+    def test_spec_prompt_substitutes_every_token(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        assert autonom.main(["prompt", "spec", "demo-topic",
+                             "--root", str(tmp_path)]) == 0
+        out = capsys.readouterr().out
+        assert "{{" not in out
+        assert str(tmp_path / "docs/superpowers/specs/2026-07-28-demo-topic-design.md") in out
+        assert str(tmp_path / ".superpowers/autonom/demo-topic") in out
+
+    def test_plan_prompt_carries_the_spec_path_as_its_contract(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        autonom.main(["prompt", "plan", "demo-topic", "--root", str(tmp_path)])
+        out = capsys.readouterr().out
+        assert str(tmp_path / "docs/superpowers/plans/2026-07-28-demo-topic.md") in out
+        assert str(tmp_path / "docs/superpowers/specs/2026-07-28-demo-topic-design.md") in out
+
+    def test_output_is_the_reference_file_verbatim_with_substitutions_only(
+        self, tmp_path, capsys
+    ):
+        self._init(tmp_path, capsys)
+        autonom.main(["prompt", "spec", "demo-topic", "--root", str(tmp_path)])
+        out = capsys.readouterr().out
+        paths = autonom.compute_paths(tmp_path, "demo-topic", "2026-07-28")
+        expected = (autonom.references_dir() / "spec-reviewer.md").read_text(
+            encoding="utf-8"
+        )
+        expected = (expected
+                    .replace("{{ARTIFACT_PATH}}", paths["spec"])
+                    .replace("{{SPEC_PATH}}", paths["spec"])
+                    .replace("{{RUN_DIR}}", paths["run_dir"])
+                    .replace("{{SLUG}}", "demo-topic"))
+        assert out == expected
+
+    def test_unknown_slug_is_an_error(self, tmp_path, capsys):
+        assert autonom.main(["prompt", "spec", "nope", "--root", str(tmp_path)]) == 2
+        assert "no run" in capsys.readouterr().err
+
+    def test_both_reference_files_ship_and_carry_the_scope_carve_out(self):
+        for name in ("spec-reviewer.md", "plan-reviewer.md"):
+            text = (autonom.references_dir() / name).read_text(encoding="utf-8")
+            assert "{{ARTIFACT_PATH}}" in text
+            assert "{{RUN_DIR}}" in text
+            assert "escalations.md" in text
