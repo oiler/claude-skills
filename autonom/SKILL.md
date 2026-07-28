@@ -76,9 +76,15 @@ Invoke `superpowers:using-git-worktrees`. This is not optional in auto mode and 
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py init "<topic>"
 ```
 
+When resuming a run that `status` found, pass that run's `topic` string **verbatim** — copy it out of the `status` JSON rather than re-describing the work. `init` keys the run on the slug and rejects a different topic that slugifies the same, so a paraphrase either mints a duplicate run under a new slug or exits `2` on the collision. After a compaction the `status` output is the only place the original topic still exists.
+
 Read the slug, both artifact paths, the run directory, the ledger path, the escalations path, and `next_step` from its JSON output. **Never construct an artifact path.** The script derives them from the date and slug so that every other superpowers skill can find them; a hand-built path is a silently orphaned artifact.
 
-If `next_step` comes back higher than 6, this is a resume. Start at that step. Never re-run a step the ledger records as complete.
+`next_step` tells you where to start:
+
+- `6` — a new or freshly initialized run. Begin at step 6.
+- `7`, `8`, or `9` — a resume. Begin at that step. Never re-run a step the ledger records as complete.
+- `null` — every step is already complete. Author nothing and re-run nothing; go straight to *Ending*. Falling through to step 6 here would overwrite a reviewed spec, which is the exact harm the ledger exists to prevent.
 
 ## The four steps
 
@@ -100,20 +106,24 @@ Validate before committing. See *Error handling* for a non-zero exit.
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py prompt spec <slug>
 ```
 
-Dispatch one subagent with `model: "fable"`. **Its entire prompt is that stdout, passed byte-for-byte.** Add nothing: no summary of the spec, no authoring rationale, no brainstorming Q&A, no list of areas you are worried about, no "focus especially on…".
+Record `git rev-parse HEAD` before dispatching — the before/after pair is how you identify the review commit below.
+
+Dispatch one subagent with `subagent_type: "general-purpose"` and `model: "fable"`. The type matters: the prompt requires Read, Edit, and `git add`/`git commit`, and a read-only agent type would do the review and then fail silently at the commit, losing the whole pass. **Its entire prompt is that stdout, passed byte-for-byte.** Add nothing: no summary of the spec, no authoring rationale, no brainstorming Q&A, no list of areas you are worried about, no "focus especially on…".
 
 The reason is the whole reason step 7 exists. You wrote the spec, so you cannot see what you failed to consider — that blind spot is exactly what a fresh reader finds. Every sentence of context you add narrows where the reviewer looks and pre-loads your framing, and a primed reviewer returns an echo of the author rather than a critique of the artifact. The prompt already tells the reviewer to read the repository cold and where its write authority begins and ends. Adding to it can only subtract.
 
-The reviewer edits the spec in place and commits it itself. When it returns:
+The reviewer edits the spec in place and commits it itself, inside its own context — the commit SHA never reaches you in its report, which the prompt deliberately keeps brief. So when it returns, run `git rev-parse HEAD` again. A changed HEAD is the review commit; that SHA is the `--commit` value and the second endpoint of the review diff range.
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py validate spec "<spec path>"
-uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 7 complete --slug <slug> --commit <sha>
+uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 7 complete --slug <slug> --commit <review sha>
 ```
+
+An unchanged HEAD is not a failure. The prompt tells the reviewer to make no commit if it made no edits, so unchanged means a clean review: record `ledger 7 complete --slug <slug>` with no `--commit`, and print "no changes" where the spec's diff range would go at the checkpoint.
 
 The second validation is not redundant. A reviewer with write authority can break the artifact contract exactly as an author can — strand an edit mid-sentence, delete a required section.
 
-Then check `escalations.md` in the run directory. See *Error handling*.
+Then check for `escalations.md` in the run directory. Absent or empty both mean continue — neither the script nor a clean review creates it, so "no such file" is the ordinary case. See *Error handling* for a non-empty one.
 
 ### Step 8 — author the plan
 
@@ -131,16 +141,18 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 8 complete --slug <slug> --
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py prompt plan <slug>
 ```
 
-Same dispatch discipline as step 7, without exception: `model: "fable"`, the stdout as the entire prompt, byte-for-byte, nothing added. The plan reviewer's prompt already carries the spec path — it judges the plan against the spec, not against your intent for it.
+Same dispatch discipline as step 7, without exception: `subagent_type: "general-purpose"`, `model: "fable"`, the stdout as the entire prompt, byte-for-byte, nothing added. The plan reviewer's prompt already carries the spec path — it judges the plan against the spec, not against your intent for it.
 
-When it returns:
+Bracket the dispatch with `git rev-parse HEAD` exactly as in step 7, and read the review commit the same way. When it returns:
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py validate plan "<plan path>"
-uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 9 complete --slug <slug> --commit <sha>
+uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 9 complete --slug <slug> --commit <review sha>
 ```
 
-Then check `escalations.md` again.
+Unchanged HEAD is handled the same way: no `--commit`, "no changes" in place of the plan's diff range.
+
+Then check for `escalations.md` again — absent or empty means continue.
 
 ## Reading the script's exit codes
 
@@ -164,7 +176,7 @@ Never treat `2` as a validation failure. `1` means the artifact is wrong; `2` me
 
 ## Ending
 
-**checkpoint mode** — stop and print, in one message: both artifact paths, both review diff ranges (`git diff <author-sha>..<review-sha>` for the spec and for the plan), and the instruction to resume into implementation by invoking `superpowers:subagent-driven-development` with the plan path. The diffs are the point of the checkpoint — they are what oiler reads to decide whether the reviews were right.
+**checkpoint mode** — stop and print, in one message: both artifact paths, both review diff ranges (`git diff <author-sha>..<review-sha>` for the spec and for the plan, or "no changes" for a review that committed nothing), and the instruction to resume into implementation by invoking `superpowers:subagent-driven-development` with the plan path. The diffs are the point of the checkpoint — they are what oiler reads to decide whether the reviews were right.
 
 **auto mode** — invoke `superpowers:subagent-driven-development` with the plan path, then exit. SDD owns the task loop, its own ledger, per-task review, and the handoff to `finishing-a-development-branch`. Do not duplicate any of it and do not override its model selection.
 
