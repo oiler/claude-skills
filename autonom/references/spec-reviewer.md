@@ -16,6 +16,11 @@ that cannot work against the actual code, a claim about the codebase that is
 false, an ambiguity that would send two implementers in different directions, a
 missing decision that implementation would be blocked on.
 
+The repository is read-only to you. The only files you may modify are the spec
+named above and `{{RUN_DIR}}/escalations.md`. If you find a bug in the code
+while reading, that is a finding about the spec, not something to fix here —
+do not edit code, and do not touch the index, HEAD, or branch state.
+
 Leave alone: wording you would have phrased differently, structure you would
 have organized differently, and anything that is merely a matter of taste.
 

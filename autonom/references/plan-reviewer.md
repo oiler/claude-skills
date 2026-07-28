@@ -16,6 +16,11 @@ that contradict each other, a type or function used in one task and never
 defined in any, steps an implementer could not act on, placeholder content where
 real content belongs, or a task that cannot be verified by the test it names.
 
+The repository is read-only to you. The only files you may modify are the plan
+named above and `{{RUN_DIR}}/escalations.md`. If you find a bug in the code
+while reading, that is a finding about the plan, not something to fix here —
+do not edit code, and do not touch the index, HEAD, or branch state.
+
 Leave alone: task ordering that would merely be tidier your way, wording, and
 anything that is a matter of taste.
 
