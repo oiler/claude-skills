@@ -177,6 +177,74 @@ def _next_step(ledger: Path) -> int | None:
     return remaining[0] if remaining else None
 
 
+def _run_dir_root(root: Path) -> Path:
+    return root / ".superpowers" / "autonom"
+
+
+def _describe_run(root: Path, slug: str) -> dict | None:
+    """Run summary for `slug`, or None when its ledger header is unreadable."""
+    ledger = _run_dir_root(root) / slug / "progress.md"
+    header = _parse_header(ledger)
+    if header is None:
+        return None
+    next_step = _next_step(ledger)
+    return dict(
+        compute_paths(root, slug, header["date"]),
+        topic=header["topic"],
+        next_step=next_step,
+        next_step_name=STEPS.get(next_step) if next_step else None,
+    )
+
+
+def _resolved_root(args: argparse.Namespace) -> Path | None:
+    """Shared root resolution. None means: not a repo, report exit 2."""
+    return Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
+
+
+def cmd_ledger(args: argparse.Namespace) -> int:
+    root = _resolved_root(args)
+    if root is None:
+        print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        return 2
+    ledger = _run_dir_root(root) / args.slug / "progress.md"
+    if not ledger.exists():
+        print(f"autonom: no run named {args.slug!r}; run init first", file=sys.stderr)
+        return 2
+    line = f"step {args.step} {args.status}"
+    if args.commit:
+        line += f" commit={args.commit}"
+    with ledger.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    root = _resolved_root(args)
+    if root is None:
+        print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        return 2
+
+    if args.slug:
+        if not (_run_dir_root(root) / args.slug / "progress.md").exists():
+            print(f"autonom: no run named {args.slug!r}", file=sys.stderr)
+            return 2
+        run = _describe_run(root, args.slug)
+        if run is None:
+            print(f"autonom: unreadable ledger header for run {args.slug!r}",
+                  file=sys.stderr)
+            return 2
+        print(json.dumps(run, indent=2))
+        return 0
+
+    base = _run_dir_root(root)
+    slugs = sorted(
+        child.name for child in base.iterdir() if (child / "progress.md").exists()
+    ) if base.exists() else []
+    runs = [_describe_run(root, slug) for slug in slugs]
+    print(json.dumps([run for run in runs if run is not None], indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="autonom")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -188,6 +256,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--plugin-cache",
                         help="plugin cache root (default: ~/.claude/plugins/cache)")
     p_init.set_defaults(func=cmd_init)
+
+    p_ledger = sub.add_parser("ledger", help="append a step record")
+    p_ledger.add_argument("step", type=int, choices=sorted(STEPS))
+    p_ledger.add_argument("status", choices=["complete", "failed", "escalated"])
+    p_ledger.add_argument("--slug", required=True)
+    p_ledger.add_argument("--root")
+    p_ledger.add_argument("--commit")
+    p_ledger.set_defaults(func=cmd_ledger)
+
+    p_status = sub.add_parser("status", help="print the resume point")
+    p_status.add_argument("slug", nargs="?")
+    p_status.add_argument("--root")
+    p_status.set_defaults(func=cmd_status)
 
     return parser
 

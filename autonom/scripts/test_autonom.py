@@ -148,3 +148,69 @@ class TestDependencyCheck:
                            "--date", "2026-07-28", "--plugin-cache", str(cache)])
         assert rc == 2
         assert "superpowers" in capsys.readouterr().err
+
+
+class TestLedgerAndStatus:
+    def _init(self, tmp_path, capsys, topic="Demo Topic"):
+        autonom.main(["init", topic, "--root", str(tmp_path), "--date", "2026-07-28"])
+        capsys.readouterr()
+
+    def test_ledger_appends_a_line_with_commit(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        rc = autonom.main(["ledger", "6", "complete", "--slug", "demo-topic",
+                           "--root", str(tmp_path), "--commit", "abc1234"])
+        assert rc == 0
+        text = (tmp_path / ".superpowers/autonom/demo-topic/progress.md").read_text()
+        assert text.splitlines()[1] == "step 6 complete commit=abc1234"
+
+    def test_ledger_is_append_only(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        for step in (6, 7):
+            autonom.main(["ledger", str(step), "complete", "--slug", "demo-topic",
+                          "--root", str(tmp_path)])
+        lines = (tmp_path / ".superpowers/autonom/demo-topic/progress.md").read_text().splitlines()
+        assert lines[1] == "step 6 complete"
+        assert lines[2] == "step 7 complete"
+
+    def test_status_with_slug_reports_the_resume_point(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        autonom.main(["ledger", "6", "complete", "--slug", "demo-topic",
+                      "--root", str(tmp_path)])
+        capsys.readouterr()
+        rc = autonom.main(["status", "demo-topic", "--root", str(tmp_path)])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["next_step"] == 7
+        assert payload["next_step_name"] == "review spec"
+        assert payload["topic"] == "Demo Topic"
+
+    def test_status_reports_none_when_the_run_is_complete(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        for step in (6, 7, 8, 9):
+            autonom.main(["ledger", str(step), "complete", "--slug", "demo-topic",
+                          "--root", str(tmp_path)])
+        capsys.readouterr()
+        autonom.main(["status", "demo-topic", "--root", str(tmp_path)])
+        assert json.loads(capsys.readouterr().out)["next_step"] is None
+
+    def test_bare_status_lists_every_run(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, topic="Alpha Feature")
+        self._init(tmp_path, capsys, topic="Beta Feature")
+        autonom.main(["ledger", "6", "complete", "--slug", "alpha-feature",
+                      "--root", str(tmp_path)])
+        capsys.readouterr()
+        rc = autonom.main(["status", "--root", str(tmp_path)])
+        assert rc == 0
+        runs = json.loads(capsys.readouterr().out)
+        assert [r["slug"] for r in runs] == ["alpha-feature", "beta-feature"]
+        assert [r["next_step"] for r in runs] == [7, 6]
+
+    def test_bare_status_on_a_repo_with_no_runs_prints_an_empty_list(self, tmp_path, capsys):
+        rc = autonom.main(["status", "--root", str(tmp_path)])
+        assert rc == 0
+        assert json.loads(capsys.readouterr().out) == []
+
+    def test_status_for_an_unknown_slug_is_an_error(self, tmp_path, capsys):
+        rc = autonom.main(["status", "nope", "--root", str(tmp_path)])
+        assert rc == 2
+        assert "no run" in capsys.readouterr().err
