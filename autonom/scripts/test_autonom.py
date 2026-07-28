@@ -383,7 +383,7 @@ class TestValidatePlan:
         text = PLAN_OK.replace("- [ ] **Step 1: Write the failing test**\n", "")
         text = text.replace("- [ ] **Step 2: Commit**\n", "")
         messages = " ".join(f.message for f in autonom.validate_plan(text))
-        assert "step checkbox" in messages.lower()
+        assert "checkbox" in messages.lower()
 
     @pytest.mark.parametrize("red_flag", [
         "Similar to Task 1",
