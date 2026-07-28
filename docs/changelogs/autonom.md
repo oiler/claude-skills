@@ -16,6 +16,7 @@ Fixes from the 2026-07-28 clean-room smoke run.
 - `init`'s `.gitignore` line is now committed with the first authoring commit, so no run leaves a dirty tree for the reviewer.
 - Step 6 no longer tells the orchestrator to follow `superpowers:brainstorming`, which cannot be invoked without starting the discovery gate autonom has already satisfied; the validator-contract section is the authority instead.
 - An outstanding escalation now overrides both endings: no resume-into-implementation instruction is printed, because resuming is what the escalation blocks.
+- Steps 7 and 9 now count the reviewer's commits with `git log --oneline <base sha>..HEAD` before recording. A reviewer that split its edits across several commits is not an error, but the ledger records the range rather than a single SHA so the record matches what the reviewer actually did.
 
 ## v0.1.0 — 2026-07-28
 

@@ -156,11 +156,17 @@ The reason is the whole reason step 7 exists. You wrote the spec, so you cannot 
 
 Every path in that prompt is absolute, because `compute_paths` builds it from the run's repository root. That is what makes the dispatch safe: a subagent inherits the *session's* working directory, not the run's repository, so relative paths would send the reviewer's edits and its commit into whatever repo the session happens to be sitting in, and you would read the unchanged HEAD as a clean review. Never "tidy" those paths into relative form.
 
-The reviewer edits the spec in place and commits it itself, inside its own context — the commit SHA never reaches you in its report, which the prompt deliberately keeps brief. So when it returns, run `git rev-parse HEAD` again. A changed HEAD is the review commit; that SHA is the `--commit` value and the second endpoint of the review diff range.
+The reviewer edits the spec in place and commits it itself, inside its own context — the commit SHA never reaches you in its report, which the prompt deliberately keeps brief. So when it returns, run `git rev-parse HEAD` again. A changed HEAD means the reviewer committed; count what it committed before you record anything:
+
+```bash
+git log --oneline <base sha>..HEAD
+```
+
+**One commit** is the normal case: that SHA is the `--commit` value and the second endpoint of the review diff range. **More than one** is not an error — a reviewer that splits its edits is behaving reasonably — but the record has to match it. The range `<base sha>..HEAD` still contains everything, so pass the range as `--commit` instead of a single SHA, and say at the checkpoint that the reviewer made N commits. The separate review commit is the entire mitigation for granting a reviewer write authority; a ledger claiming one commit when there were three understates what the reviewer did and quietly weakens the thing that made the write grant safe.
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py validate spec "<spec path>"
-uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 7 complete --slug <slug> --commit <review sha>
+uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 7 complete --slug <slug> --commit <review sha or range>
 ```
 
 An unchanged HEAD is not a failure. The prompt tells the reviewer to make no commit if it made no edits, so unchanged means a clean review: record `ledger 7 complete --slug <slug>` with no `--commit`, and print "no changes" where the spec's diff range would go at the checkpoint.
