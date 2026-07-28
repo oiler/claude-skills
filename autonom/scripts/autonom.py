@@ -146,6 +146,62 @@ def validate_spec(text: str) -> list[Finding]:
     return sorted(findings)
 
 
+PLAN_RED_FLAGS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"Similar to Task \d", re.IGNORECASE),
+     "'Similar to Task N' — repeat the content; tasks are read out of order"),
+    (re.compile(r"add appropriate error handling", re.IGNORECASE),
+     "vague directive 'add appropriate error handling' — show the handling"),
+    (re.compile(r"\badd validation\b", re.IGNORECASE),
+     "vague directive 'add validation' — show the validation"),
+    (re.compile(r"handle edge cases", re.IGNORECASE),
+     "vague directive 'handle edge cases' — name the cases"),
+    (re.compile(r"^\s*[-*]?\s*\[?[ x]?\]?\s*Write tests for the above\s*$",
+                re.IGNORECASE | re.MULTILINE),
+     "'Write tests for the above' without the actual test code"),
+)
+
+TASK_HEADING_RE = re.compile(r"^###\s+Task\s+\d+\s*:", re.MULTILINE)
+
+
+def validate_plan(text: str) -> list[Finding]:
+    scanned = strip_code(text)
+    lines = scanned.split("\n")
+    findings: list[Finding] = []
+
+    for index, line in enumerate(lines, start=1):
+        for match in PLACEHOLDER_RE.finditer(line):
+            findings.append(Finding(index, f"placeholder marker {match.group(0)!r}"))
+        for pattern, message in PLAN_RED_FLAGS:
+            if pattern.search(line):
+                findings.append(Finding(index, message))
+
+    if not ("REQUIRED SUB-SKILL" in scanned
+            and "subagent-driven-development" in scanned):
+        findings.append(Finding(
+            1, "missing the mandatory 'REQUIRED SUB-SKILL: ... "
+               "superpowers:subagent-driven-development' header line"))
+
+    if not re.search(r"^##\s+Global Constraints\s*$", scanned, re.MULTILINE):
+        findings.append(Finding(1, "missing the '## Global Constraints' section"))
+
+    task_starts = [
+        (scanned[:match.start()].count("\n") + 1, match.start())
+        for match in TASK_HEADING_RE.finditer(scanned)
+    ]
+    if not task_starts:
+        findings.append(Finding(1, "no '### Task N:' task block found"))
+
+    for position, (line_no, offset) in enumerate(task_starts):
+        end = task_starts[position + 1][1] if position + 1 < len(task_starts) else len(scanned)
+        block = scanned[offset:end]
+        if "**Files:**" not in block:
+            findings.append(Finding(line_no, "task block has no '**Files:**' subsection"))
+        if not re.search(r"^\s*-\s*\[ \]\s*\*\*Step", block, re.MULTILINE):
+            findings.append(Finding(line_no, "task block has no '- [ ] **Step' checkbox"))
+
+    return sorted(findings)
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     target = Path(args.path)
     try:
@@ -154,7 +210,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print(f"autonom: cannot read {target}: {error}", file=sys.stderr)
         return 2
 
-    findings = validate_spec(text)
+    findings = {"spec": validate_spec, "plan": validate_plan}[args.kind](text)
     if not findings:
         print(f"OK: {target} passes the {args.kind} validator")
         return 0
@@ -392,7 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.set_defaults(func=cmd_status)
 
     p_validate = sub.add_parser("validate", help="check an artifact")
-    p_validate.add_argument("kind", choices=["spec"])
+    p_validate.add_argument("kind", choices=["spec", "plan"])
     p_validate.add_argument("path")
     p_validate.set_defaults(func=cmd_validate)
 

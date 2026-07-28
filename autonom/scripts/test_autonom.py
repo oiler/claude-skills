@@ -330,3 +330,89 @@ class TestValidateCLI:
     def test_missing_file_exits_two(self, tmp_path, capsys):
         assert autonom.main(["validate", "spec", str(tmp_path / "nope.md")]) == 2
         assert "cannot read" in capsys.readouterr().err
+
+
+PLAN_OK = """# Demo Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task.
+
+**Goal:** Build the demo.
+
+## Global Constraints
+
+- Python 3.12+.
+
+---
+
+### Task 1: First component
+
+**Files:**
+- Create: `src/demo.py`
+
+- [ ] **Step 1: Write the failing test**
+
+- [ ] **Step 2: Commit**
+"""
+
+
+class TestValidatePlan:
+    def test_a_complete_plan_passes(self):
+        assert autonom.validate_plan(PLAN_OK) == []
+
+    def test_missing_required_sub_skill_header_is_reported(self):
+        text = PLAN_OK.replace("REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development", "Go build it")
+        messages = " ".join(f.message for f in autonom.validate_plan(text))
+        assert "REQUIRED SUB-SKILL" in messages
+
+    def test_missing_global_constraints_is_reported(self):
+        text = PLAN_OK.replace("## Global Constraints", "## Notes")
+        messages = " ".join(f.message for f in autonom.validate_plan(text))
+        assert "Global Constraints" in messages
+
+    def test_no_task_blocks_is_reported(self):
+        text = PLAN_OK.replace("### Task 1: First component", "### Notes")
+        messages = " ".join(f.message for f in autonom.validate_plan(text))
+        assert "task block" in messages.lower()
+
+    def test_task_without_files_subsection_is_reported(self):
+        text = PLAN_OK.replace("**Files:**\n- Create: `src/demo.py`\n", "")
+        messages = " ".join(f.message for f in autonom.validate_plan(text))
+        assert "Files:" in messages
+
+    def test_task_without_step_checkbox_is_reported(self):
+        text = PLAN_OK.replace("- [ ] **Step 1: Write the failing test**\n", "")
+        text = text.replace("- [ ] **Step 2: Commit**\n", "")
+        messages = " ".join(f.message for f in autonom.validate_plan(text))
+        assert "step checkbox" in messages.lower()
+
+    @pytest.mark.parametrize("red_flag", [
+        "Similar to Task 1",
+        "Add appropriate error handling",
+        "add validation",
+        "handle edge cases",
+        "Write tests for the above",
+    ])
+    def test_red_flags_are_reported(self, red_flag):
+        messages = " ".join(
+            f.message for f in autonom.validate_plan(PLAN_OK + f"\n{red_flag}\n")
+        )
+        assert red_flag.lower().split()[0] in messages.lower()
+
+    def test_red_flags_inside_code_spans_are_ignored(self):
+        assert autonom.validate_plan(
+            PLAN_OK + "\nNever write `Similar to Task N` in a plan.\n"
+        ) == []
+
+    def test_placeholder_markers_are_reported(self):
+        findings = autonom.validate_plan(PLAN_OK + "\nTBD\n")
+        assert any("TBD" in f.message for f in findings)
+
+    def test_this_plan_is_the_passing_fixture(self):
+        plan = (
+            Path.home()
+            / "files/projects/001-claude-skills-creator"
+            / "docs/superpowers/plans/2026-07-28-autonom.md"
+        )
+        if not plan.exists():
+            pytest.skip("workshop plan not present in this checkout")
+        assert autonom.validate_plan(plan.read_text(encoding="utf-8")) == []
