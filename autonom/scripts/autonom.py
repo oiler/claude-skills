@@ -55,13 +55,14 @@ def slugify(topic: str) -> str:
     return slug
 
 
-def find_repo_root(start: Path) -> Path:
+def find_repo_root(start: Path) -> Path | None:
+    """Git toplevel of `start`, or None when `start` is not inside a repo."""
     result = subprocess.run(
         ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
         capture_output=True, text=True, check=False,
     )
     if result.returncode != 0:
-        raise SystemExit(f"autonom: not inside a git repository: {start}")
+        return None
     return Path(result.stdout.strip())
 
 
@@ -103,8 +104,9 @@ def _header(topic: str, slug: str, date: str) -> str:
     return f"# autonom run — topic: {topic} — slug: {slug} — date: {date}"
 
 
-def _parse_header(ledger: Path) -> dict[str, str]:
-    """Read topic/slug/date back out of a ledger's first line."""
+def _parse_header(ledger: Path) -> dict[str, str] | None:
+    """Read topic/slug/date back out of a ledger's first line, or None if
+    the header is unreadable."""
     first = ledger.read_text(encoding="utf-8").splitlines()[0]
     match = re.match(
         r"# autonom run — topic: (?P<topic>.*) — slug: (?P<slug>[a-z0-9-]+) "
@@ -112,7 +114,7 @@ def _parse_header(ledger: Path) -> dict[str, str]:
         first,
     )
     if not match:
-        raise SystemExit(f"autonom: unreadable ledger header in {ledger}")
+        return None
     return match.groupdict()
 
 
@@ -128,6 +130,9 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 2
 
     root = Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
+    if root is None:
+        print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        return 2
     date = args.date or _dt.date.today().isoformat()
     slug = slugify(args.topic)
     paths = compute_paths(root, slug, date)
@@ -137,6 +142,9 @@ def cmd_init(args: argparse.Namespace) -> int:
     resumed = False
     if ledger.exists():
         existing = _parse_header(ledger)
+        if existing is None:
+            print(f"autonom: unreadable ledger header in {ledger}", file=sys.stderr)
+            return 2
         if existing["topic"] != args.topic:
             print(
                 f"autonom: topic {args.topic!r} collides with the existing run "

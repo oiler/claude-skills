@@ -102,6 +102,26 @@ class TestInit:
         assert (tmp_path / ".gitignore").read_text().count(".superpowers/") == 1
 
 
+class TestErrorContracts:
+    def test_init_outside_a_git_repo_returns_usage_error(self, tmp_path, capsys,
+                                                          monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        rc = autonom.main(["init", "Demo Topic", "--date", "2026-07-28"])
+        assert rc == 2
+        assert "not inside a git repository" in capsys.readouterr().err
+
+    def test_init_with_an_unreadable_ledger_header_returns_usage_error(
+        self, tmp_path, capsys
+    ):
+        run_dir = tmp_path / ".superpowers" / "autonom" / "demo-topic"
+        run_dir.mkdir(parents=True)
+        (run_dir / "progress.md").write_text("not a valid header\n")
+        rc = autonom.main(["init", "Demo Topic", "--root", str(tmp_path),
+                           "--date", "2026-07-28"])
+        assert rc == 2
+        assert "unreadable ledger header" in capsys.readouterr().err
+
+
 class TestDependencyCheck:
     real_dependency_check = True
 
