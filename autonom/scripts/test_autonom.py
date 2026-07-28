@@ -1,5 +1,6 @@
 """Tests for autonom.py — the deterministic spine of the autonom skill."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -214,3 +215,111 @@ class TestLedgerAndStatus:
         rc = autonom.main(["status", "nope", "--root", str(tmp_path)])
         assert rc == 2
         assert "no run" in capsys.readouterr().err
+
+
+SPEC_OK = """# Demo Design Spec
+
+## Problem
+
+Things are bad.
+
+## Architecture
+
+A box connected to another box.
+
+## Error handling
+
+Everything stops loudly.
+
+## Testing
+
+We test it.
+"""
+
+
+class TestStripCode:
+    def test_blanks_inline_code_but_keeps_line_count(self):
+        out = autonom.strip_code("alpha `TODO` omega\nsecond line\n")
+        assert "TODO" not in out
+        assert out.splitlines()[0].startswith("alpha ")
+        assert len(out.splitlines()) == 2
+
+    def test_blanks_fenced_blocks(self):
+        text = "before\n```\nTODO inside a fence\n```\nafter\n"
+        out = autonom.strip_code(text)
+        assert "TODO" not in out
+        assert out.splitlines()[0] == "before"
+        assert out.splitlines()[4] == "after"
+
+    def test_blanks_tilde_fences(self):
+        out = autonom.strip_code("~~~\nTBD\n~~~\n")
+        assert "TBD" not in out
+
+    def test_leaves_ordinary_prose_untouched(self):
+        assert autonom.strip_code("plain words\n") == "plain words\n"
+
+
+class TestValidateSpec:
+    def test_a_complete_spec_passes(self):
+        assert autonom.validate_spec(SPEC_OK) == []
+
+    def test_placeholder_markers_are_reported_with_line_numbers(self):
+        findings = autonom.validate_spec(SPEC_OK + "\nStill TODO here.\n")
+        assert len(findings) == 1
+        assert findings[0].line == 19
+        assert "TODO" in findings[0].message
+
+    def test_markers_inside_code_spans_are_ignored(self):
+        assert autonom.validate_spec(SPEC_OK + "\nWe scan for `TODO` markers.\n") == []
+
+    def test_missing_section_is_reported(self):
+        text = SPEC_OK.replace("## Testing\n\nWe test it.\n", "")
+        messages = " ".join(f.message for f in autonom.validate_spec(text))
+        assert "testing" in messages.lower()
+
+    def test_empty_section_body_is_reported(self):
+        text = SPEC_OK.replace("Everything stops loudly.\n", "")
+        messages = " ".join(f.message for f in autonom.validate_spec(text))
+        assert "empty" in messages.lower()
+
+    def test_missing_title_is_reported(self):
+        text = SPEC_OK.replace("# Demo Design Spec\n", "")
+        messages = " ".join(f.message for f in autonom.validate_spec(text))
+        assert "title" in messages.lower()
+
+    def test_open_question_marker_is_reported(self):
+        findings = autonom.validate_spec(SPEC_OK + "\n**Open question:** which one?\n")
+        assert any("open question" in f.message.lower() for f in findings)
+
+    def test_heading_keyword_matching_does_not_match_substrings(self):
+        text = SPEC_OK.replace("## Testing", "## Latest news")
+        messages = " ".join(f.message for f in autonom.validate_spec(text))
+        assert "testing" in messages.lower()
+
+    def test_the_design_spec_is_the_passing_fixture(self):
+        spec = (
+            Path.home()
+            / "files/projects/001-claude-skills-creator"
+            / "docs/superpowers/specs/2026-07-28-autonom-design.md"
+        )
+        if not spec.exists():
+            pytest.skip("workshop spec not present in this checkout")
+        assert autonom.validate_spec(spec.read_text(encoding="utf-8")) == []
+
+
+class TestValidateCLI:
+    def test_passing_spec_exits_zero(self, tmp_path, capsys):
+        target = tmp_path / "spec.md"
+        target.write_text(SPEC_OK)
+        assert autonom.main(["validate", "spec", str(target)]) == 0
+        assert "OK" in capsys.readouterr().out
+
+    def test_failing_spec_exits_one_and_lists_findings(self, tmp_path, capsys):
+        target = tmp_path / "spec.md"
+        target.write_text(SPEC_OK + "\nTBD\n")
+        assert autonom.main(["validate", "spec", str(target)]) == 1
+        assert "spec.md:19:" in capsys.readouterr().out
+
+    def test_missing_file_exits_two(self, tmp_path, capsys):
+        assert autonom.main(["validate", "spec", str(tmp_path / "nope.md")]) == 2
+        assert "cannot read" in capsys.readouterr().err

@@ -30,6 +30,7 @@ import subprocess
 import sys
 import unicodedata
 from pathlib import Path
+from typing import NamedTuple
 
 SLUG_MAX = 60
 
@@ -40,6 +41,123 @@ STEPS: dict[int, str] = {
     8: "author plan",
     9: "review plan",
 }
+
+PLACEHOLDER_RE = re.compile(
+    r"\b(?:TBD|TODO|FIXME|XXX)\b|<placeholder>|\[fill in\]", re.IGNORECASE
+)
+OPEN_QUESTION_RE = re.compile(r"\*\*Open question|\?\?\?|\[\?\]", re.IGNORECASE)
+INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+
+# Heading-keyword requirements. Matching is by whole word against the heading
+# text, so "Latest news" does not satisfy "testing" but "Testing" does. The list
+# mirrors what superpowers:brainstorming actually emits.
+SPEC_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("a problem or goal section", ("problem", "goal")),
+    ("an architecture or design section", ("architecture", "design")),
+    ("an error handling section", ("error",)),
+    ("a testing section", ("test",)),
+)
+
+
+class Finding(NamedTuple):
+    line: int
+    message: str
+
+
+def strip_code(text: str) -> str:
+    """Blank fenced blocks and inline code spans, preserving line count.
+
+    Every validator scan runs against this, structural checks included: a
+    document that *documents* a marker in backticks does not *contain* one.
+    """
+    out: list[str] = []
+    fence: str | None = None
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        if fence is None and (stripped.startswith("```") or stripped.startswith("~~~")):
+            fence = stripped[:3]
+            out.append("")
+            continue
+        if fence is not None:
+            if stripped.startswith(fence):
+                fence = None
+            out.append("")
+            continue
+        out.append(INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line))
+    return "\n".join(out)
+
+
+def _headings(lines: list[str]) -> list[tuple[int, int, str]]:
+    """(line_number, level, text) for every ATX heading, 1-indexed."""
+    found = []
+    for index, line in enumerate(lines, start=1):
+        match = HEADING_RE.match(line)
+        if match:
+            found.append((index, len(match.group(1)), match.group(2)))
+    return found
+
+
+def _section_is_empty(lines: list[str], headings: list[tuple[int, int, str]],
+                      position: int) -> bool:
+    start, level, _ = headings[position]
+    end = len(lines)
+    for line_no, other_level, _ in headings[position + 1:]:
+        if other_level <= level:
+            end = line_no - 1
+            break
+    body = [line for line in lines[start:end] if line.strip()]
+    return not body
+
+
+def validate_spec(text: str) -> list[Finding]:
+    scanned = strip_code(text)
+    lines = scanned.split("\n")
+    findings: list[Finding] = []
+
+    for index, line in enumerate(lines, start=1):
+        for match in PLACEHOLDER_RE.finditer(line):
+            findings.append(
+                Finding(index, f"placeholder marker {match.group(0)!r}")
+            )
+        if OPEN_QUESTION_RE.search(line):
+            findings.append(Finding(index, "unresolved open question marker"))
+
+    headings = _headings(lines)
+    if not any(level == 1 for _, level, _ in headings):
+        findings.append(Finding(1, "missing a title (no level-1 heading)"))
+
+    for label, keywords in SPEC_SECTIONS:
+        matches = [
+            position for position, (_, _, heading) in enumerate(headings)
+            if any(re.search(rf"\b{kw}", heading, re.IGNORECASE) for kw in keywords)
+        ]
+        if not matches:
+            findings.append(Finding(1, f"missing {label}"))
+            continue
+        for position in matches:
+            if _section_is_empty(lines, headings, position):
+                line_no, _, heading = headings[position]
+                findings.append(Finding(line_no, f"section {heading!r} is empty"))
+
+    return sorted(findings)
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    target = Path(args.path)
+    try:
+        text = target.read_text(encoding="utf-8")
+    except OSError as error:
+        print(f"autonom: cannot read {target}: {error}", file=sys.stderr)
+        return 2
+
+    findings = validate_spec(text)
+    if not findings:
+        print(f"OK: {target} passes the {args.kind} validator")
+        return 0
+    for finding in findings:
+        print(f"{target}:{finding.line}: {finding.message}")
+    return 1
 
 
 def slugify(topic: str) -> str:
@@ -269,6 +387,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("slug", nargs="?")
     p_status.add_argument("--root")
     p_status.set_defaults(func=cmd_status)
+
+    p_validate = sub.add_parser("validate", help="check an artifact")
+    p_validate.add_argument("kind", choices=["spec"])
+    p_validate.add_argument("path")
+    p_validate.set_defaults(func=cmd_validate)
 
     return parser
 
