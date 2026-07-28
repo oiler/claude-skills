@@ -296,6 +296,13 @@ class TestValidateSpec:
         messages = " ".join(f.message for f in autonom.validate_spec(text))
         assert "testing" in messages.lower()
 
+    def test_the_title_cannot_satisfy_a_section_requirement(self):
+        text = SPEC_OK.replace(
+            "## Architecture\n\nA box connected to another box.\n\n", ""
+        )
+        messages = " ".join(f.message for f in autonom.validate_spec(text))
+        assert "architecture" in messages.lower()
+
     def test_the_design_spec_is_the_passing_fixture(self):
         spec = (
             Path.home()

@@ -129,8 +129,11 @@ def validate_spec(text: str) -> list[Finding]:
 
     for label, keywords in SPEC_SECTIONS:
         matches = [
-            position for position, (_, _, heading) in enumerate(headings)
-            if any(re.search(rf"\b{kw}", heading, re.IGNORECASE) for kw in keywords)
+            position for position, (_, level, heading) in enumerate(headings)
+            if level >= 2 and any(
+                re.search(rf"\b{re.escape(kw)}", heading, re.IGNORECASE)
+                for kw in keywords
+            )
         ]
         if not matches:
             findings.append(Finding(1, f"missing {label}"))
