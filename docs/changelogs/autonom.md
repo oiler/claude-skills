@@ -9,6 +9,13 @@ Fixes from the 2026-07-28 clean-room smoke run.
 - SKILL.md now publishes the spec and plan validator contracts, including the warning that structural markers inside a code fence are invisible to the validator.
 - `Bash(git worktree *)` added to `allowed-tools`; step 3 could not otherwise create the worktree it requires.
 - Step 7 records why the reviewer prompt's paths are absolute — a dispatched subagent inherits the session's working directory, not the run's repository.
+- **New `dispatched` ledger status** — `ledger <step> dispatched --slug <slug> --commit <base sha>` records the pre-dispatch HEAD so a compaction mid-Fable-dispatch cannot lose the review diff's first endpoint. Like `escalated` and `failed`, it never advances `next_step`.
+- Startup sequence reordered: establish the run repository, `status`, onboarding question, `init`, *then* branch. The workspace is now named `autonom/<slug>` from the slug `init` mints, which did not exist yet under the old ordering.
+- SKILL.md now states that the run operates on the repository the orchestrator's cwd is inside, and that the orchestrator confirms it with the human at onboarding.
+- The branch is created directly in the run repository rather than through `superpowers:using-git-worktrees`, whose native `EnterWorktree` tool is bound to the session's repository. `Bash(git checkout *)` added to `allowed-tools`.
+- `init`'s `.gitignore` line is now committed with the first authoring commit, so no run leaves a dirty tree for the reviewer.
+- Step 6 no longer tells the orchestrator to follow `superpowers:brainstorming`, which cannot be invoked without starting the discovery gate autonom has already satisfied; the validator-contract section is the authority instead.
+- An outstanding escalation now overrides both endings: no resume-into-implementation instruction is printed, because resuming is what the escalation blocks.
 
 ## v0.1.0 — 2026-07-28
 

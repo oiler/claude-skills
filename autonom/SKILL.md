@@ -13,8 +13,8 @@ description: >-
 disable-model-invocation: true
 allowed-tools: >-
   Bash(uv run *) Bash(git add *) Bash(git commit *) Bash(git diff *)
-  Bash(git rev-parse *) Bash(git log *) Bash(git worktree *) Read Write Edit
-  Agent Skill
+  Bash(git rev-parse *) Bash(git log *) Bash(git worktree *) Bash(git checkout *)
+  Read Write Edit Agent Skill
 ---
 
 # autonom
@@ -51,25 +51,27 @@ Do not "correct" this back. A future reader who sees the gates skipped and resto
 
 ## Startup sequence
 
-Run these in order, before authoring anything.
+Run these in order, before authoring anything. The order matters: the run cannot be named until `init` has minted its slug, and the workspace is named from that slug.
 
-**1. Look for an existing run.**
+**1. Establish the run repository.**
+
+**The run operates on the repository your working directory is inside.** Nothing else selects it. `autonom.py` resolves the root with `git rev-parse --show-toplevel` from cwd, and every path in `init`'s JSON — spec, plan, run directory, ledger, escalations — is derived from that root. So `cd` to the target project first, print `git rev-parse --show-toplevel`, and confirm that repository with oiler as part of onboarding rather than assuming the session started in it. autonom is normally invoked to build something in a *project*, which is usually not the repository this session happens to be sitting in.
+
+This is the same hazard as the absolute paths in the reviewer prompt (step 7): a working directory is an invisible, inherited, per-process thing, and every place autonom depends on one is a place a run can silently land in the wrong repository. Resolve the root once, out loud, and keep every path derived from it.
+
+**2. Look for an existing run.**
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py status
 ```
 
-This prints every run directory and its resume point as JSON. If one of them is incomplete and its topic matches what oiler just asked for, offer to resume it instead of starting fresh. Resume keys on the slug, so a topic phrased even slightly differently would mint a duplicate run and re-author artifacts that already exist — this check is the only thing preventing that.
+This prints every run directory in that repository and its resume point as JSON. If one of them is incomplete and its topic matches what oiler just asked for, offer to resume it instead of starting fresh. Resume keys on the slug, so a topic phrased even slightly differently would mint a duplicate run and re-author artifacts that already exist — this check is the only thing preventing that.
 
-**2. Ask the one onboarding question.**
+**3. Ask the one onboarding question.**
 
 > **checkpoint** (stop after the plan review) or **auto** (continue straight into `superpowers:subagent-driven-development`)?
 
-Ask it once, immediately, and do not ask anything else. Every other decision in the pipeline is already made.
-
-**3. Ensure an isolated workspace — in both modes.**
-
-Invoke `superpowers:using-git-worktrees`. This is not optional in auto mode and not optional in checkpoint mode either. Two reasons: the spec, plan, and both review commits stay off `master`, and `subagent-driven-development`'s hard gate — never implement on a main branch without explicit consent — is satisfied by construction, so nothing interrupts a full-auto run halfway through.
+Ask it once, immediately, alongside the repository confirmation from step 1, and ask nothing else. Every other decision in the pipeline is already made.
 
 **4. Create or resume the run.**
 
@@ -81,11 +83,27 @@ When resuming a run that `status` found, pass that run's `topic` string **verbat
 
 Read the slug, both artifact paths, the run directory, the ledger path, the escalations path, and `next_step` from its JSON output. **Never construct an artifact path.** The script derives them from the date and slug so that every other superpowers skill can find them; a hand-built path is a silently orphaned artifact.
 
+`init` runs before the workspace exists on purpose: the slug is the run's one canonical name, and it does not exist until `init` mints it. Running `init` first is safe because its only effects are the run directory — git-ignored, so it never appears in a diff — and possibly one `.gitignore` line.
+
 `next_step` tells you where to start:
 
 - `6` — a new or freshly initialized run. Begin at step 6.
 - `7`, `8`, or `9` — a resume. Begin at that step. Never re-run a step the ledger records as complete.
 - `null` — every step is already complete. Author nothing and re-run nothing; go straight to *Ending*. Falling through to step 6 here would overwrite a reviewed spec, which is the exact harm the ledger exists to prevent.
+
+**5. Move to an isolated branch — in both modes.**
+
+```bash
+git checkout -b autonom/<slug>
+```
+
+Use the slug from `init`, so two runs can never collide on a branch name and a human reading `git branch` can see at a glance what each one is for. This is not optional in auto mode and not optional in checkpoint mode either. Two reasons: the spec, plan, and both review commits stay off `master`, and `subagent-driven-development`'s hard gate — never implement on a main branch without explicit consent — is satisfied by construction, so nothing interrupts a full-auto run halfway through.
+
+Create the branch **in the run repository**, with `git checkout -b` or `git worktree add`, and not through `superpowers:using-git-worktrees`. That skill prefers the native `EnterWorktree` tool, which operates on the *session's* repository and branches from `origin/<default-branch>` — the wrong repository, and a ref the run repository may not even have. When the run repository is not the session's own, which is the normal case, the native tool does not apply.
+
+A branch is the default because it leaves the git toplevel unchanged, so every path `init` just emitted stays valid. A worktree is a *different* toplevel: if you use one, `cd` into it and re-run `init "<topic>"` verbatim from there, and use that JSON instead — the first `init`'s paths point at the wrong tree.
+
+If `init` added the `.gitignore` line, it is part of the run. Include it in the first authoring commit (`git add .gitignore` alongside the spec) so the reviewer inherits a clean tree rather than a stray modification it did not make and cannot explain.
 
 ## What the validators require
 
@@ -103,11 +121,13 @@ Author to this contract the first time. *Error handling* below allows exactly on
 
 ### Step 6 — author the spec
 
-Write the spec at the `spec` path from `init`, following `superpowers:brainstorming`'s spec conventions and the design agreed during Q&A. Then:
+Write the spec at the `spec` path from `init`, from the design agreed during Q&A, in the shape *What the validators require* prescribes above — that section is the authority on what a passing spec contains.
+
+**Do not invoke `superpowers:brainstorming` here.** Invoking it starts its discovery Q&A and its hard gate, and that gate is the thing autonom has already satisfied: the Q&A concluded before `/autonom` was called. If you want its conventions, read its SKILL.md; do not invoke it. Then:
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py validate spec "<spec path>"
-git add "<spec path>" && git commit -m "docs: <slug> design spec"
+git add "<spec path>" .gitignore && git commit -m "docs: <slug> design spec"
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 6 complete --slug <slug> --commit <sha>
 ```
 
@@ -119,7 +139,16 @@ Validate before committing. See *Error handling* for a non-zero exit.
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py prompt spec <slug>
 ```
 
-Record `git rev-parse HEAD` before dispatching — the before/after pair is how you identify the review commit below.
+Before dispatching, record the current HEAD in the ledger:
+
+```bash
+git rev-parse HEAD
+uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py ledger 7 dispatched --slug <slug> --commit <base sha>
+```
+
+Two commands, not one with `$(...)`: command substitution defeats the prefix matching that `allowed-tools` uses, and a permission prompt in the middle of an unattended run is the failure this skill exists to avoid.
+
+That before/after pair is how you identify the review commit below, and the ledger is where it has to live: a Fable dispatch runs for many minutes, and if the session compacts mid-dispatch a base SHA held only in context is gone and the review diff range is unrecoverable. `dispatched` does not advance the run — only `complete` does.
 
 Dispatch one subagent with `subagent_type: "general-purpose"` and `model: "fable"`. The type matters: the prompt requires Read, Edit, and `git add`/`git commit`, and a read-only agent type would do the review and then fail silently at the commit, losing the whole pass. **Its entire prompt is that stdout, passed byte-for-byte.** Add nothing: no summary of the spec, no authoring rationale, no brainstorming Q&A, no list of areas you are worried about, no "focus especially on…".
 
@@ -164,7 +193,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py prompt plan <slug>
 
 Same dispatch discipline as step 7, without exception: `subagent_type: "general-purpose"`, `model: "fable"`, the stdout as the entire prompt, byte-for-byte, nothing added. The plan reviewer's prompt already carries the spec path — it judges the plan against the spec, not against your intent for it.
 
-Bracket the dispatch with `git rev-parse HEAD` exactly as in step 7, and read the review commit the same way. When it returns:
+Record the base SHA the same way — `git rev-parse HEAD`, then `ledger 9 dispatched --slug <slug> --commit <base sha>` — and read the review commit exactly as in step 7. When it returns:
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/autonom.py validate plan "<plan path>"
@@ -191,8 +220,9 @@ Never treat `2` as a validation failure. `1` means the artifact is wrong; `2` me
 
 ## Ledger statuses
 
-`complete` is the only status that advances the run. `autonom.py` computes `next_step` by counting `step N complete` lines and nothing else, so the other two statuses are annotations on top of it, not alternatives to it.
+`complete` is the only status that advances the run. `autonom.py` computes `next_step` by counting `step N complete` lines and nothing else, so the other three statuses are annotations on top of it, not alternatives to it.
 
+- **`dispatched`** — written with `--commit <base sha>` immediately before a Fable dispatch, so the review diff's first endpoint survives a compaction that happens mid-dispatch. It records that a step started, which is deliberately not the same as finishing it.
 - **`complete`** — record it whenever a step's work actually finished, every time, without exception. It is the only thing stopping a post-compaction resume from re-dispatching a reviewer over an already-reviewed artifact and minting a duplicate review commit.
 - **`escalated`** — an *additional* line, written immediately after that step's `complete` line, never instead of it. A review that finished and escalated is still a finished review; recording only `escalated` pins `next_step` at that step forever and the resume re-runs it.
 - **`failed`** — written on its own, *without* a `complete` line, because the step's work did not finish. Not advancing is the point here: the artifact is unreviewed and the step has to run again.
@@ -205,13 +235,15 @@ Never treat `2` as a validation failure. `1` means the artifact is wrong; `2` me
 | Validator fails after a review pass (step 7 or 9) | Stop. Report the findings and the review diff. No repair attempt — the reviewer subagent is gone, and a main-session rewrite of a Fable edit would silently undo the escalation it was making. |
 | Fable subagent dies, errors, or returns nothing | Stop. `ledger <step> failed` and **no** `complete` line — the step did not finish, so the run must not advance past an unreviewed artifact. |
 | `escalations` exits `1` after either review | Stop before `superpowers:subagent-driven-development`, **in both modes**. Record `ledger <step> complete` first — the review itself finished — then `ledger <step> escalated` as the additional marker, per *Ledger statuses*. Print the contents the gate emitted and hand the decision to oiler. Full-auto authorizes skipping a routine checkpoint; it does not authorize ignoring a flagged scope conflict, which is the one decision in this pipeline that was never a human's to delegate. |
-| Session compacts mid-run | Re-invoke `/autonom`. `autonom.py status` prints the resume point from the ledger, and committed artifacts are recoverable from git regardless of context. Never re-run a step the ledger records complete. |
+| Session compacts mid-run | Re-invoke `/autonom` from the run repository. `autonom.py status` prints the resume point from the ledger, the `dispatched` line carries the pre-dispatch base SHA so the review diff range is still reconstructible, and committed artifacts are recoverable from git regardless of context. Never re-run a step the ledger records complete. |
 
 ## Ending
 
 **checkpoint mode** — stop and print, in one message: both artifact paths, both review diff ranges (`git diff <author-sha>..<review-sha>` for the spec and for the plan, or "no changes" for a review that committed nothing), and the instruction to resume into implementation by invoking `superpowers:subagent-driven-development` with the plan path. The diffs are the point of the checkpoint — they are what oiler reads to decide whether the reviews were right.
 
 **auto mode** — invoke `superpowers:subagent-driven-development` with the plan path, then exit. SDD owns the task loop, its own ledger, per-task review, and the handoff to `finishing-a-development-branch`. Do not duplicate any of it and do not override its model selection.
+
+**An outstanding escalation overrides both, in either mode.** Print the artifact paths, the review diff ranges, and the escalation contents, state that the run is blocked on it, and stop. Do **not** print a resume-into-implementation instruction and do not invoke `subagent-driven-development` — implementation is precisely what the escalation is blocking, and an ending that offers a resume line alongside an unresolved scope conflict invites someone to take it.
 
 ## Narration
 

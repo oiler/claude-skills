@@ -173,6 +173,25 @@ class TestLedgerAndStatus:
         assert lines[1] == "step 6 complete"
         assert lines[2] == "step 7 complete"
 
+    def test_ledger_records_a_dispatched_base_sha(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        rc = autonom.main(["ledger", "7", "dispatched", "--slug", "demo-topic",
+                           "--root", str(tmp_path), "--commit", "base123"])
+        assert rc == 0
+        text = (tmp_path / ".superpowers/autonom/demo-topic/progress.md").read_text()
+        assert text.splitlines()[1] == "step 7 dispatched commit=base123"
+
+    @pytest.mark.parametrize("status", ["dispatched", "escalated", "failed"])
+    def test_only_complete_advances_the_resume_point(self, tmp_path, capsys, status):
+        self._init(tmp_path, capsys)
+        autonom.main(["ledger", "6", "complete", "--slug", "demo-topic",
+                      "--root", str(tmp_path)])
+        autonom.main(["ledger", "7", status, "--slug", "demo-topic",
+                      "--root", str(tmp_path), "--commit", "base123"])
+        capsys.readouterr()
+        autonom.main(["status", "demo-topic", "--root", str(tmp_path)])
+        assert json.loads(capsys.readouterr().out)["next_step"] == 7
+
     def test_status_with_slug_reports_the_resume_point(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
         autonom.main(["ledger", "6", "complete", "--slug", "demo-topic",

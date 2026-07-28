@@ -344,7 +344,12 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def _next_step(ledger: Path) -> int | None:
-    """Lowest pipeline step not recorded complete; None when the run is done."""
+    """Lowest pipeline step not recorded complete; None when the run is done.
+
+    Only `complete` advances the run. `dispatched`, `escalated`, and `failed`
+    are annotations that survive a compaction, and none of them may move the
+    resume point — a dispatched-but-unreturned review has not happened yet.
+    """
     done = set()
     if ledger.exists():
         for line in ledger.read_text(encoding="utf-8").splitlines()[1:]:
@@ -510,7 +515,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ledger = sub.add_parser("ledger", help="append a step record")
     p_ledger.add_argument("step", type=int, choices=sorted(STEPS))
-    p_ledger.add_argument("status", choices=["complete", "failed", "escalated"])
+    p_ledger.add_argument(
+        "status", choices=["dispatched", "complete", "failed", "escalated"])
     p_ledger.add_argument("--slug", required=True)
     p_ledger.add_argument("--root")
     p_ledger.add_argument("--commit")
