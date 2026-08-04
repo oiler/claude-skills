@@ -1,4 +1,9 @@
 {
+  "invalidated": {
+    "reason": "stock-detector suffix bug: models strip the -<8hex> suffix when invoking, scoring every real trigger as a miss (harness README delta 4)",
+    "diagnosed": "2026-07-21",
+    "note": "run predates the patched harness; negatives-all-pass + positives-floored signature; original results preserved below as historical evidence"
+  },
   "skill_name": "web-security",
   "description": "Application-level security for web development. Use when writing, reviewing, or auditing code for security in WordPress, Laravel, Django, Flask, FastAPI, or Plotly Dash. Covers OWASP Top 10 2025, XSS prevention, SQL injection, command injection, path traversal, CSRF, security headers (CSP, HSTS, CORS), session and cookie security, JWT handling, authentication, password policy, file uploads, API security, PII protection, and secure configuration. Trigger on \"security review\", \"secure this\", \"harden\", \"vulnerability\", \"XSS\", \"injection\", \"CSRF\", \"CORS\", \"CSP\", \"security headers\", \"session security\", \"JWT\", \"password\", \"auth\", \"path traversal\", \"command injection\", \"shell exec\", or \"OWASP\".",
   "results": [

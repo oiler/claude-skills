@@ -1,4 +1,9 @@
 {
+  "invalidated": {
+    "reason": "stock-detector suffix bug: models strip the -<8hex> suffix when invoking, scoring every real trigger as a miss (harness README delta 4)",
+    "diagnosed": "2026-07-21",
+    "note": "run predates the patched harness; negatives-all-pass + positives-floored signature; original results preserved below as historical evidence"
+  },
   "skill_name": "product-management",
   "description": "Generate clear, people-first product management artifacts and apply oiler's product operating principles. Use when writing or refining a PRD or product requirements document, problem statement, hypothesis, OKRs or objectives and key results, product strategy one-pager, roadmap, milestones or project plan, RACI or roles and responsibilities matrix, user persona, or retrospective/postmortem. Triggers on \"write a PRD\", \"product requirements\", \"define the problem\", \"frame a hypothesis\", \"draft OKRs\", \"product strategy\", \"roadmap\", \"milestones\", \"RACI\", \"roles and responsibilities\", \"user persona\", \"retro\", \"postmortem\", \"product brief\", \"product spec\", \"as a PM\", \"product management\". Produces a tailored draft immediately, then refines. Output is human-facing and concise; external prose (announcements, emails) routes to the writing-style skill instead.",
   "results": [
