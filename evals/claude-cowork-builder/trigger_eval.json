@@ -1,0 +1,34 @@
+[
+  {
+    "query": "build a Cowork plugin for my team",
+    "should_trigger": true
+  },
+  {
+    "query": "package this workflow as a .plugin for Cowork",
+    "should_trigger": true
+  },
+  {
+    "query": "add Google Drive to my Cowork plugin",
+    "should_trigger": true
+  },
+  {
+    "query": "scaffold a Cowork knowledge-work plugin",
+    "should_trigger": true
+  },
+  {
+    "query": "audit my Cowork plugin before I share it with the org",
+    "should_trigger": true
+  },
+  {
+    "query": "build a WordPress plugin for custom post types",
+    "should_trigger": false
+  },
+  {
+    "query": "create a Claude Code plugin marketplace for my dotfiles repo",
+    "should_trigger": false
+  },
+  {
+    "query": "write a Python CLI that renames files in bulk",
+    "should_trigger": false
+  }
+]

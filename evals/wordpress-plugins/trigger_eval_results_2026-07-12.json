@@ -1,0 +1,171 @@
+{
+  "skill_name": "wordpress-plugins",
+  "description": "Build, audit, secure, and scale WordPress plugins to VIP Coding Standards, with a deterministic scaffolder. Use for all WordPress plugin work: build a plugin, plugin development, WordPress VIP plugin, VIP coding standards, VIPCS, VIP compliant, audit my plugin, plugin boilerplate, scaffold a plugin, composer autoload, PSR-4, plugin performance, object cache, transients, plugin security, nonces, escape output, prepared statements, readme.txt, plugin headers, plugin release, shortcodes, REST endpoints, register post type or taxonomy, enqueue scripts/styles, admin settings page, Options/Settings API, activation/deactivation/uninstall hooks, cron jobs, wp_schedule_event, multisite or network-activated plugin, WordPress coding standards, phpcs, plugin unit tests, WP_Mock, plugin changelog, plugin versioning. NOT for: Gutenberg blocks or block editor components (use wordpress-blocks); generic OWASP fundamentals unrelated to WordPress (use web-security); block themes or FSE (not covered).",
+  "results": [
+    {
+      "query": "i'm building a wp plugin for our events calendar \u2014 custom post type, admin settings page, and it has to pass VIP review. scaffold it out for me",
+      "should_trigger": true,
+      "trigger_rate": 0.3333333333333333,
+      "triggers": 1,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "vip reviewers flagged my plugin for uncached remote calls, the fetch happens in src/Feed.php \u2014 fix it properly",
+      "should_trigger": true,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "audit wp-content/plugins/acme-analytics for VIP compliance before we open the PR to the vip repo",
+      "should_trigger": true,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "set up phpcs with the vip coding standards in this plugin repo, we use composer",
+      "should_trigger": true,
+      "trigger_rate": 0.3333333333333333,
+      "triggers": 1,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "add a REST endpoint to my plugin that returns the 10 latest 'deal' posts as json, public read-only",
+      "should_trigger": true,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "need a [countdown date=2026-09-01] shortcode in my plugin that renders a live countdown, make sure output is escaped right",
+      "should_trigger": true,
+      "trigger_rate": 0.3333333333333333,
+      "triggers": 1,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "write phpunit tests for the Settings class in my wordpress plugin, we mock wp functions with WP_Mock",
+      "should_trigger": true,
+      "trigger_rate": 0.3333333333333333,
+      "triggers": 1,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "prepping v1.2.0 of the plugin \u2014 update readme.txt stable tag and the changelog section",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "is posts_per_page -1 ok here? it runs in our plugin on every archive page load",
+      "should_trigger": true,
+      "trigger_rate": 0.6666666666666666,
+      "triggers": 2,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "add a custom image size and enqueue the new stylesheet from my theme's functions.php",
+      "should_trigger": false,
+      "trigger_rate": 0.3333333333333333,
+      "triggers": 1,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "my plugin needs a weekly cron job that syncs products from the supplier api overnight",
+      "should_trigger": true,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "explain the OWASP top 10 2021 and which security headers i should set on my nginx server",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "tag v2.0.0 of my repo and create a github release with the changelog notes",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "build a gutenberg block with a MediaUpload image picker and a server-side render callback",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "debug this php fatal: Cannot redeclare function formatMoney() in my laravel app",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "refactor the wp admin page css into sass partials with BEM naming",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "how do i bulk-deactivate plugins across a multisite network with wp-cli?",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "my woocommerce checkout is slow \u2014 which caching plugin should i install, wp rocket or w3 total cache?",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "write a python script that scaffolds a flask project structure with blueprints",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "create a block theme with theme.json design tokens and FSE templates",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 20,
+    "passed": 12,
+    "failed": 8
+  }
+}

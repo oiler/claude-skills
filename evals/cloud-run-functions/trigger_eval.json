@@ -1,0 +1,83 @@
+[
+  {
+    "query": "i want a small python endpoint that takes a POST with a customer id, calls our internal pricing api, and returns a quote as json. low traffic, don't want to manage a server. cloud run function seems right? can you scaffold it",
+    "should_trigger": true
+  },
+  {
+    "query": "deployed a function with gcloud functions deploy quote-svc --gen2 and it worked but when i curl the url i get a 403 forbidden. the deploy output didn't error. what am i missing",
+    "should_trigger": true
+  },
+  {
+    "query": "we publish an order-created message to a pubsub topic and i need something to pick it up, write a row to firestore and fire off a confirmation email. python. was gonna do it as a cloud function off the topic",
+    "should_trigger": true
+  },
+  {
+    "query": "our data science team wants to serve a fine-tuned whisper model for audio transcription. i figured we'd just drop it in a cloud run function since it's basically one endpoint. files are up to 200MB. thoughts on how to structure it?",
+    "should_trigger": true
+  },
+  {
+    "query": "got a thumbnail generator that should fire whenever someone drops an image in our uploads bucket. gcs trigger, resize to 400px, write to a thumbs bucket. python 3.12",
+    "should_trigger": true
+  },
+  {
+    "query": "how do i test a cloudevent handler locally before i deploy it? i've got functions-framework running but i can't figure out what to POST at localhost:8080 to fake a pubsub message",
+    "should_trigger": true
+  },
+  {
+    "query": "our gcp bill jumped from like $30 to $340 last month and it's basically all cloud run. we've got maybe 15 functions, the busiest one does about 8M requests a month. where do i even start looking",
+    "should_trigger": true
+  },
+  {
+    "query": "i want to return the http response to the caller right away and then do the slow part (writing to bigquery + calling segment) afterwards so the client isn't blocked. can i just spawn a thread before i return? this is on gcp serverless",
+    "should_trigger": true
+  },
+  {
+    "query": "when someone edits a doc in a specific shared drive folder i want to run some python that reparses it and updates a sheet. i think workspace events api can push to pubsub but i'm hazy on what sits on the other end",
+    "should_trigger": true
+  },
+  {
+    "query": "nightly at 2am, pull yesterday's rows from postgres, roll them up, write a csv to gcs. takes about 25 minutes to run. planning to put it in a cloud function on a scheduler trigger. sound ok?",
+    "should_trigger": true
+  },
+
+  {
+    "query": "i've got a django app with a Dockerfile that i want to get onto cloud run. it needs to talk to cloud sql over a private ip and serve static files. what's the deploy command look like and do i need a vpc connector",
+    "should_trigger": false
+  },
+  {
+    "query": "we're moving off aws. i have about 12 lambda functions in python behind api gateway, mostly triggered by s3 events and sqs. what's the migration path look like and how much of the handler code actually has to change",
+    "should_trigger": false
+  },
+  {
+    "query": "my fastapi service on gke keeps getting OOMKilled under load. hpa is set to scale on cpu at 70% but memory climbs and pods die before cpu ever gets there. how should i configure the hpa",
+    "should_trigger": false
+  },
+  {
+    "query": "need a macro in google sheets that reads the selected range, dedupes on the email column, and writes the result to a new tab. apps script is fine, it's a small sheet, maybe 2000 rows",
+    "should_trigger": false
+  },
+  {
+    "query": "this bigquery query costs us like $4 every time it runs and it runs hourly. it's a join across two partitioned tables and i think it's scanning everything. can you help me figure out why the partition pruning isn't kicking in",
+    "should_trigger": false
+  },
+  {
+    "query": "containerize this fastapi app and get it running on cloud run — it's a proper web service with about 20 routes, websocket support for the live dashboard, and it needs to hold connections open. python 3.12",
+    "should_trigger": false
+  },
+  {
+    "query": "trying to move a project from requirements.txt to a pyproject.toml with uv. i've got some dev-only deps (pytest, ruff) and i can't work out whether they go in dependency-groups or optional-dependencies",
+    "should_trigger": false
+  },
+  {
+    "query": "we have an azure functions app in python doing blob-triggered processing and the cold starts are killing us on the consumption plan. is premium plan worth it or should we look at container apps",
+    "should_trigger": false
+  },
+  {
+    "query": "set up cloud build so that when i push to main it builds the container, pushes to artifact registry, and rolls out a new revision with traffic splitting — 10% to the new one first. cloudbuild.yaml please",
+    "should_trigger": false
+  },
+  {
+    "query": "i've got a long-running python consumer on a gce vm that pulls from a pubsub subscription in a while loop. it keeps silently dying after a few hours and i think the ack deadline is expiring mid-batch. how do i keep the lease alive",
+    "should_trigger": false
+  }
+]

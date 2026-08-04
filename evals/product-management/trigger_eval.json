@@ -1,0 +1,22 @@
+[
+  {"query": "ok I need to get a PRD together for the new billing alerts feature before thursday's planning mtg. context: enterprise customers keep missing failed invoice payments, support has ~30 tickets on it this month", "should_trigger": true},
+  {"query": "help me draft q3 okrs for the platform team. main themes are api reliability and cutting onboarding time for new integrations", "should_trigger": true},
+  {"query": "before we commit to building the slack integration i want to write up the actual problem we think it solves and how we'd know if we're right", "should_trigger": true},
+  {"query": "the launch keeps stalling because nobody knows who decides on pricing page copy. set up a roles and responsibilities matrix for the website relaunch team", "should_trigger": true},
+  {"query": "sprint 22 just wrapped and we missed the deadline by a week again. write up a retrospective — participants were me, two engineers, and our designer", "should_trigger": true},
+  {"query": "we interviewed 8 school administrators last month, notes are in interviews.md. turn those into a user persona for the admin buyer", "should_trigger": true},
+  {"query": "my ceo wants a now/next/later roadmap for the mobile app by eod. in flight: auth revamp, offline mode, push notifications", "should_trigger": true},
+  {"query": "putting together a product strategy one pager for the data products org — it's going in the board deck next week", "should_trigger": true},
+  {"query": "break the checkout redesign into milestones with dates and owners. eng lead is Marcus, design is Sofia, GA target is early november", "should_trigger": true},
+  {"query": "review this feature list against my product principles — does it hold up on measurability and ownership? 1) revamp settings page 2) improve perf 3) add csv export", "should_trigger": true},
+  {"query": "draft the launch announcement email for the new reporting feature, should sound like me — warm but not salesy", "should_trigger": false},
+  {"query": "clean up this blog post i wrote about how we do product discovery at my company, keep my voice", "should_trigger": false},
+  {"query": "i want a full analysis engagement on this codebase — act as the orchestrator, break it into workstreams and delegate to subagents", "should_trigger": false},
+  {"query": "write a technical design doc for the caching layer — redis vs memcached tradeoffs, invalidation strategy, ttl policy", "should_trigger": false},
+  {"query": "can you update the jira tickets for sprint 23, move the done ones to closed and reassign the leftovers to next sprint", "should_trigger": false},
+  {"query": "what's the market size for b2b expense management tools in europe? do some research and give me sources", "should_trigger": false},
+  {"query": "update my resume to emphasize my product management experience at my last two companies, here's the current version", "should_trigger": false},
+  {"query": "explain the difference between scrum and kanban to our new intern, keep it simple", "should_trigger": false},
+  {"query": "give me a 5 bullet summary of this prd my counterpart wrote (prd-checkout-v3.md) before my 2pm", "should_trigger": false},
+  {"query": "our standup keeps running 40 minutes, suggest a better meeting format for a team of 12", "should_trigger": false}
+]

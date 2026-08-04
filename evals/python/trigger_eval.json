@@ -1,0 +1,22 @@
+[
+  {"query": "write me a quick script that pulls the last 30 days of merged PRs from the github api and dumps a csv — don't set up a whole project for this", "should_trigger": true},
+  {"query": "migrate this poetry project to uv, keep the dev and docs dependency groups intact", "should_trigger": true},
+  {"query": "we turned on mypy strict and got 400 errors. give me a sane gradual adoption plan for src/", "should_trigger": true},
+  {"query": "add a DRF endpoint for article comments with auth — django project, config/ layout, existing Article model", "should_trigger": true},
+  {"query": "build a fastapi service with /healthz and a paginated /items endpoint backed by postgres", "should_trigger": true},
+  {"query": "my flask app is one 900-line app.py — refactor it into blueprints with an app factory", "should_trigger": true},
+  {"query": "review this asyncio code, i'm using gather everywhere and sometimes exceptions just vanish", "should_trigger": true},
+  {"query": "write pytest tests for the parser module, fixtures should load the sample files in tests/data", "should_trigger": true},
+  {"query": "getting 'RuntimeWarning: coroutine was never awaited' when i run my script, traceback attached", "should_trigger": true},
+  {"query": "set up ruff and mypy in pyproject.toml for the team repo — sensible strictness, not everything at once", "should_trigger": true},
+  {"query": "build a dash app with a datatable that pages server-side from postgres", "should_trigger": false},
+  {"query": "security review this django file-upload view before we launch friday", "should_trigger": false},
+  {"query": "write a bash script that rotates our nginx logs nightly and gzips the old ones", "should_trigger": false},
+  {"query": "why is my rust build failing with 'borrowed value does not live long enough'", "should_trigger": false},
+  {"query": "make this postgres query faster — explain analyze output attached, orders table has 40M rows", "should_trigger": false},
+  {"query": "write a google apps script that auto-labels my gmail based on sender domain", "should_trigger": false},
+  {"query": "my node express server crashes on boot with ECONNREFUSED talking to redis", "should_trigger": false},
+  {"query": "comparing java streams and python generators for a blog post — what are the real differences?", "should_trigger": false},
+  {"query": "set up a cron job on the ubuntu box to run backup.sh nightly at 2am", "should_trigger": false},
+  {"query": "write a wordpress plugin that registers an events custom post type with an admin page", "should_trigger": false}
+]

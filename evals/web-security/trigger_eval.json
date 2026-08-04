@@ -1,0 +1,22 @@
+[
+  {"query": "review this django view for security before we ship — it takes a filename from the query string and returns that file from our reports dir", "should_trigger": true},
+  {"query": "add a CSP header to my flask app — we load js from our own cdn plus google fonts, nothing else should run", "should_trigger": true},
+  {"query": "is this fastapi endpoint sql-injectable? we build the query with an f-string from the search param, code in routes/search.py", "should_trigger": true},
+  {"query": "harden the session handling in my laravel app — remember-me tokens, cookie flags, regeneration after login, the works", "should_trigger": true},
+  {"query": "my dash app has a dropdown where users pick a csv and the callback reads that path server-side. is that safe?", "should_trigger": true},
+  {"query": "we store stripe customer ids and emails in postgres — what do we need for PII protection and what should never hit the logs?", "should_trigger": true},
+  {"query": "configure CORS on my fastapi backend so only app.example.com can call it, credentials included", "should_trigger": true},
+  {"query": "users upload profile photos in my wordpress code — validate it properly so nobody sneaks a php shell through", "should_trigger": true},
+  {"query": "what password rules should our django signup enforce in 2026? marketing wants uppercase+symbol requirements, i think that's outdated", "should_trigger": true},
+  {"query": "do a full security review of this PR — it adds a public REST endpoint gated by an api key in a header", "should_trigger": true},
+  {"query": "audit my claude code setup for compromised MCP servers and sketchy plugin updates", "should_trigger": false},
+  {"query": "how do i configure fail2ban to stop ssh brute force on my vps?", "should_trigger": false},
+  {"query": "draft a SOC 2 access-control policy document for our startup's audit next quarter", "should_trigger": false},
+  {"query": "audit my solidity smart contract for reentrancy before we deploy to mainnet", "should_trigger": false},
+  {"query": "which password manager should i roll out to the team, 1password or bitwarden?", "should_trigger": false},
+  {"query": "harden my personal firefox privacy settings — fingerprinting, telemetry, all of it", "should_trigger": false},
+  {"query": "decode this JWT for me and tell me what's in the payload: eyJhbGciOiJIUzI1NiJ9...", "should_trigger": false},
+  {"query": "set up code signing and notarization for my macos electron app", "should_trigger": false},
+  {"query": "this postgres query is slow — figure out the right index for the orders table", "should_trigger": false},
+  {"query": "set up wireguard and ufw rules on the ubuntu box so only the office ip reaches the admin port", "should_trigger": false}
+]

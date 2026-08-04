@@ -1,0 +1,75 @@
+{
+  "skill_name": "claude-cowork-builder",
+  "description": "Build full-featured Claude Cowork plugins the opinionated way \u2014 skills, agents, MCP connectors, and Live Artifacts packaged into an installable .plugin. Use when building, creating, scaffolding, or packaging a Cowork plugin, adding a Cowork integration or connector, wiring Google Drive into Cowork, converting a workflow into a Cowork plugin, or auditing a Cowork plugin. Triggers on \"Cowork plugin\", \"build a Cowork plugin\", \"create a Cowork plugin\", \"Cowork integration\", \"package a .plugin\", \"Cowork Google Drive\", \"knowledge-work plugin\". NOT for WordPress plugins (use wordpress-plugins) or generic non-Cowork Claude Code plugin questions.",
+  "results": [
+    {
+      "query": "build a Cowork plugin for my team",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "package this workflow as a .plugin for Cowork",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "add Google Drive to my Cowork plugin",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "scaffold a Cowork knowledge-work plugin",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "audit my Cowork plugin before I share it with the org",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "create a Claude Code plugin marketplace for my dotfiles repo",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "build a WordPress plugin for custom post types",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "write a Python CLI that renames files in bulk",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0
+  }
+}

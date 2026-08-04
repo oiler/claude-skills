@@ -1,0 +1,171 @@
+{
+  "skill_name": "product-management",
+  "description": "Generate clear, people-first product management artifacts and apply oiler's product operating principles. Use when writing or refining a PRD or product requirements document, problem statement, hypothesis, OKRs or objectives and key results, product strategy one-pager, roadmap, milestones or project plan, RACI or roles and responsibilities matrix, user persona, or retrospective/postmortem. Triggers on \"write a PRD\", \"product requirements\", \"define the problem\", \"frame a hypothesis\", \"draft OKRs\", \"product strategy\", \"roadmap\", \"milestones\", \"RACI\", \"roles and responsibilities\", \"user persona\", \"retro\", \"postmortem\", \"product brief\", \"product spec\", \"as a PM\", \"product management\". Produces a tailored draft immediately, then refines. Output is human-facing and concise; external prose (announcements, emails) routes to the writing-style skill instead.",
+  "results": [
+    {
+      "query": "help me draft q3 okrs for the platform team. main themes are api reliability and cutting onboarding time for new integrations",
+      "should_trigger": true,
+      "trigger_rate": 0.3333333333333333,
+      "triggers": 1,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "the launch keeps stalling because nobody knows who decides on pricing page copy. set up a roles and responsibilities matrix for the website relaunch team",
+      "should_trigger": true,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "ok I need to get a PRD together for the new billing alerts feature before thursday's planning mtg. context: enterprise customers keep missing failed invoice payments, support has ~30 tickets on it this month",
+      "should_trigger": true,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "before we commit to building the slack integration i want to write up the actual problem we think it solves and how we'd know if we're right",
+      "should_trigger": true,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "sprint 22 just wrapped and we missed the deadline by a week again. write up a retrospective \u2014 participants were me, two engineers, and our designer",
+      "should_trigger": true,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "my ceo wants a now/next/later roadmap for the mobile app by eod. in flight: auth revamp, offline mode, push notifications",
+      "should_trigger": true,
+      "trigger_rate": 0.3333333333333333,
+      "triggers": 1,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "putting together a product strategy one pager for the data products org \u2014 it's going in the board deck next week",
+      "should_trigger": true,
+      "trigger_rate": 0.3333333333333333,
+      "triggers": 1,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "we interviewed 8 school administrators last month, notes are in interviews.md. turn those into a user persona for the admin buyer",
+      "should_trigger": true,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "review this feature list against my product principles \u2014 does it hold up on measurability and ownership? 1) revamp settings page 2) improve perf 3) add csv export",
+      "should_trigger": true,
+      "trigger_rate": 0.3333333333333333,
+      "triggers": 1,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "break the checkout redesign into milestones with dates and owners. eng lead is Marcus, design is Sofia, GA target is early november",
+      "should_trigger": true,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": false
+    },
+    {
+      "query": "draft the launch announcement email for the new reporting feature, should sound like me \u2014 warm but not salesy",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "clean up this blog post i wrote about how we do product discovery at my company, keep my voice",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "can you update the jira tickets for sprint 23, move the done ones to closed and reassign the leftovers to next sprint",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "i want a full analysis engagement on this codebase \u2014 act as the orchestrator, break it into workstreams and delegate to subagents",
+      "should_trigger": false,
+      "trigger_rate": 0.3333333333333333,
+      "triggers": 1,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "update my resume to emphasize my product management experience at my last two companies, here's the current version",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "what's the market size for b2b expense management tools in europe? do some research and give me sources",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "explain the difference between scrum and kanban to our new intern, keep it simple",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "write a technical design doc for the caching layer \u2014 redis vs memcached tradeoffs, invalidation strategy, ttl policy",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "our standup keeps running 40 minutes, suggest a better meeting format for a team of 12",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    },
+    {
+      "query": "give me a 5 bullet summary of this prd my counterpart wrote (prd-checkout-v3.md) before my 2pm",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 20,
+    "passed": 10,
+    "failed": 10
+  }
+}
