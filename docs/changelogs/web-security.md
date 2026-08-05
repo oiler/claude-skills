@@ -1,5 +1,16 @@
 # web-security — Changelog
 
+## v1.2.1 — 2026-08-05
+
+Description-only release: the v1.2.0 NOT-for clause held in hand checks but leaked under instrumentation — the pair-arena eval (guardian-claude-code in the arena, harness 1.1.0 sibling support) measured 2 of 4 guardian-boundary negatives still triggering web-security (0.67 and 1.0, stable across zero-error runs).
+
+- **Strengthened the guardian routing clause.** Now names the surface forms the leaking queries actually use — "even when asked as a security review or audit", plugin updates, "what changed in my plugins", "is it safe to install/keep this" — instead of only the category nouns. Mini pair-arena iteration (9-query subset, 3 runs/query): all four boundary negatives clear (0.33/0/0.33/0.33, with real routing to guardian on three).
+- **Rejected overcorrection:** a candidate adding "always consult this skill before signing off on a security review of a PR" re-attracted two boundary queries to 0.67 — review-verb strength pulls the boundary class back. Not shipped.
+- **PR-review positives stay floor-limited in pair arenas** (0–0.33 with a sibling present vs 60% pooled single-skill; the model self-serves the review). Explicit "review this PR"/"review this diff" trigger phrases added, but measurement shows the collapse is arena behavior, not missing phrases. Recorded as a known advisory-floor item — positives are non-gating per the threshold decision.
+- Description 876 → ~1,090 chars (budget 1,536). Body content unchanged.
+
+Evidence: `evals/web-security/` — full pair-arena rerun (5 runs/query) + `preflight_1.2.1.json` verdict.
+
 ## v1.2.0 — 2026-07-12 (routing clause added 2026-08-04)
 
 ### Content

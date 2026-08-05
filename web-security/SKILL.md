@@ -1,8 +1,8 @@
 ---
 name: web-security
-description: Application-level security for web development. Use when writing, reviewing, or auditing code for security in WordPress, Laravel, Django, Flask, FastAPI, or Plotly Dash. Covers OWASP Top 10 2025, XSS prevention, SQL injection, command injection, path traversal, CSRF, security headers (CSP, HSTS, CORS), session and cookie security, JWT handling, authentication, password policy, file uploads, API security, PII protection, and secure configuration. Trigger on "security review", "secure this", "harden", "vulnerability", "XSS", "injection", "CSRF", "CORS", "CSP", "security headers", "session security", "JWT", "password", "auth", "path traversal", "command injection", "shell exec", or "OWASP". NOT for auditing Claude Code's own tooling — MCP servers, installed plugins/skills, hooks, or supply-chain checks of the dev environment itself; use guardian-claude-code for that.
+description: Application-level security for web development. Use when writing, reviewing, or auditing application code for security — including pull requests and diffs — in WordPress, Laravel, Django, Flask, FastAPI, or Plotly Dash. Covers OWASP Top 10 2025, XSS prevention, SQL injection, command injection, path traversal, CSRF, security headers (CSP, HSTS, CORS), session and cookie security, JWT handling, authentication, password policy, file uploads, API security, PII protection, and secure configuration. Trigger on "security review", "review this PR", "review this diff", "secure this", "harden", "vulnerability", "XSS", "injection", "CSRF", "CORS", "CSP", "security headers", "session security", "JWT", "password", "auth", "path traversal", "command injection", "shell exec", or "OWASP". NOT for Claude Code's own setup or tooling, even when asked as a security review or audit — MCP servers, installed plugins or skills, plugin updates and "what changed in my plugins", hooks, "is it safe to install/keep this", and dev-environment supply-chain checks all route to guardian-claude-code, not here.
 metadata:
-  version: 1.2.0
+  version: 1.2.1
   category: security
   tags: [security, owasp, web, wordpress, laravel, django, fastapi, dash]
 ---
