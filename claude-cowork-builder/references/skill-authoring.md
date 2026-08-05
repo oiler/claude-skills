@@ -83,6 +83,8 @@ Every **command** skill body follows this section order. This is the canonical s
 
 Don't reorder or drop these sections in a command skill — the command-skill template keys off them being present and in order.
 
+**A skill that spans several categories still gets exactly one `## With … connected` section.** The shape allows one, and splitting it into sibling `## With ~~chat connected` / `## With ~~email connected` headings breaks the order the template keys off. Title the section for the skill's primary category — the one the skill leans on hardest — and cover the others inside it, one additive branch each ("if `~~email` is also connected, …"). The heading names the lead category; the body carries the full set.
+
 ## The knowledge-skill body
 
 Knowledge skills are auto-triggered background material, not user-invoked actions, so they do **not** take the command body shape. Keep them lighter and free-form: a short `## Scope` (what this knowledge covers and when it applies) followed by `## Rules` (the domain facts, constraints, or procedure Claude should follow) — or whatever headings the knowledge actually needs. No `## Steps`, no `## Output Format`, no `## After`; a knowledge skill informs other skills, it doesn't produce standalone output. Set `user-invocable: false` so it stays out of the slash menu.

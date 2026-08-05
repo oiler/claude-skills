@@ -19,6 +19,8 @@ Confirm both decisions together, not independently — they're coupled (below), 
 *Private → individual → concrete config* hangs together.
 *Public → marketplace → `~~category` genericize + branding metadata + `marketplace.json` + `CHANGELOG`* hangs together.
 
+Read "concrete" as a permission, not a prohibition: a private plugin *may* hardcode real product names, and `~~category` tokens in skill bodies stay legitimate at every profile — they're the standalone/supercharged mechanism (`skill-authoring.md`), not a public-only artifact, and the validator treats them as such. The one token rule that holds everywhere is that `~~` never appears in `description` frontmatter, where it fails at any visibility.
+
 **"Going public" is the trigger to genericize.** A plugin doesn't drift into public with product names still hardcoded — the moment visibility flips to Public, every concrete tool name in skill bodies gets swapped for a `~~category` placeholder (see `connectors-and-mcp.md`), and the artifact set below expands to match. Don't scaffold public artifacts for a plugin that's staying private, and don't ship a public plugin with concrete product names still in the skill bodies.
 
 ## 3. Private artifacts
@@ -54,7 +56,7 @@ Minimal `plugin.json`:
 
 **Those four fields are a house floor, not the platform contract.** The manifest is optional entirely, and when present only `name` is required — everything else is optional. This builder emits all four because a plugin with no version and no author is unmaintainable, and the validator fails a manifest missing one; read that failure as "violates this builder's standard," not "violates the plugin spec."
 
-Other manifest fields worth knowing, all optional: `displayName` (yes, it belongs on `plugin.json` too, not only on a marketplace entry), `$schema`, `defaultEnabled`, `userConfig` (the documented way to ask the plugin owner for a token or account id — see `connectors-and-mcp.md` § Security), `channels`, `dependencies`, `workflows`, `outputStyles`, `lspServers`, `experimental.*`, and the component-path fields (`skills`, `commands`, `agents`, `hooks`, `mcpServers`) that let a component live somewhere other than its default directory. Use a component-path field only with a reason — the default layout is what every reader and every checklist assumes.
+Other manifest fields worth knowing, all optional: `displayName` (yes, it belongs on `plugin.json` too, not only on a marketplace entry), `$schema`, `defaultEnabled`, `userConfig` (the documented way to ask the plugin owner for a token or account id — every key under it needs a `title`, or the manifest fails validation outright; see `connectors-and-mcp.md` § Security), `channels`, `dependencies`, `workflows`, `outputStyles`, `lspServers`, `experimental.*`, and the component-path fields (`skills`, `commands`, `agents`, `hooks`, `mcpServers`) that let a component live somewhere other than its default directory. Use a component-path field only with a reason — the default layout is what every reader and every checklist assumes.
 
 Concrete tool names and config are allowed and expected — skill bodies can say "Google Drive," `.mcp.json` can point at a real endpoint, `CONNECTORS.md` can be skipped entirely if there's nothing to translate. No `marketplace.json`, no `CHANGELOG.md` requirement.
 
@@ -98,6 +100,7 @@ my-marketplace/                      ← the marketplace repo
 {
   "name": "my-marketplace",
   "owner": { "name": "oiler" },
+  "description": "One sentence: what this marketplace offers.",
   "plugins": [
     {
       "name": "my-plugin",
@@ -109,9 +112,11 @@ my-marketplace/                      ← the marketplace repo
 }
 ```
 
-`displayName` is what the Cowork UI shows; `description` here is the
+`displayName` is what the Cowork UI shows; the entry's `description` is the
 marketplace-listing copy and can match the plugin's own. A single-plugin
 marketplace is fine — the repo just holds one plugin subdirectory.
+
+**Four top-level fields, not three.** `name`, `owner`, and `plugins[]` are hard-required — omit one and `claude plugin validate` errors with or without `--strict`. Top-level `description` is a *warning* on its own, which `--strict` promotes to an error ("No marketplace description provided"), so a marketplace built without it passes a plain run and fails the strict run that §7 makes the default. Emit all four; the template does (verified against CLI 2.1.222, 2026-08-05). Nothing on a plugin *entry* is strict-gated — `displayName` and the entry `description` stay genuinely optional.
 
 **Name the marketplace carefully.** Sixteen marketplace names are reserved for Anthropic — including `knowledge-work-plugins`, `first-party-plugins`, and `anthropic-plugins` — and names that impersonate an official marketplace are blocked as well. A collision doesn't fail loudly at build time: the marketplace stops loading and is reported as registered from an untrusted source. Pick a name that is obviously yours.
 
@@ -121,7 +126,7 @@ marketplace is fine — the repo just holds one plugin subdirectory.
 
 **`metadata.pluginRoot`** is an optional top-level field for a marketplace whose plugins don't sit one directory down — a per-plugin marketplace living beside the plugin it lists sets `"pluginRoot": "."`.
 
-**Default for a private plugin that is its own repo — the self-marketplace.** A private plugin whose repo is *itself* a single-plugin marketplace: `.claude-plugin/marketplace.json` beside `plugin.json`, listing the plugin with `source: "./"`. This is the default because `/plugin marketplace add <repo>` is the only stable local-install path in Claude Code, and restructuring into a container repo would move the manifest a directory above the packaging root. "marketplace.json is never a per-plugin file" holds for every *container* marketplace; the self-marketplace is the one sanctioned exception, proven over eight production releases. If the plugin later goes public, migrate into a real container marketplace.
+**Default for a private plugin that is its own repo — the self-marketplace.** A private plugin whose repo is *itself* a single-plugin marketplace: `.claude-plugin/marketplace.json` beside `plugin.json`, carrying `name`, `owner`, `description`, and a `plugins[]` entry that lists the plugin with `source: "./"` — the same four top-level fields a strict run demands of any marketplace, self or container. This is the default because `/plugin marketplace add <repo>` is the only stable local-install path in Claude Code, and restructuring into a container repo would move the manifest a directory above the packaging root. "marketplace.json is never a per-plugin file" holds for every *container* marketplace; the self-marketplace is the one sanctioned exception, proven over eight production releases. If the plugin later goes public, migrate into a real container marketplace.
 
 The pattern has no name in the spec, but its mechanics are spec-sanctioned: a relative `source` *"must start with `./`"* and resolves against the marketplace root, and `"./"` is a documented marketplace-root source. Note the corollary — a per-plugin marketplace written as `"."` (no slash) is the deviant form even though Anthropic's own `brand-voice` uses it. Emit `"./"`.
 
@@ -150,7 +155,7 @@ On the Cowork side, uploading the file is not the only route: a marketplace can 
 
 The versioned artifact name doubles as a rollback / portable hand-off key — keep a build to reinstall a known-good commit or share the plugin out-of-band.
 
-Two default paths, by repo layout:
+Three default paths, by repo layout:
 
 **Plugin-is-its-own-repo (default): the shipped Makefile.** Copy `assets/templates/Makefile` to the repo root at scaffold time. `make plugin` builds `dist/<name>-<version>-<sha>.plugin` from git-tracked content via `git archive`; `make verify` asserts the bundle carries the manifest and at least one skill layer — `skills/<name>/SKILL.md`, `commands/<name>.md`, or a root `SKILL.md`, all three of which the spec treats as valid — and that the denylist leaked nothing. Reproducible, cannot leak untracked files (a `zip -r` of the working tree honors nothing in `.gitignore`), and immune to the stale-zip-update hazard by construction — a fresh archive every build. The versioned artifact name is the rollback key. Use `.gitattributes` `export-ignore` to drop docs/evals/tests from the bundle.
 
@@ -160,19 +165,31 @@ Two default paths, by repo layout:
 cd <plugin-dir> && zip -r /tmp/<name>.plugin . -x "*.DS_Store" && cp /tmp/<name>.plugin <outputs>/<name>.plugin
 ```
 
+**Plugin directory that is neither its own repo nor inside a marketplace repo: the same canonical zip command.** A plugin folder living inside some unrelated project, or sitting in a working folder with no git around it at all, is the third real case — it comes up whenever an existing plugin gets handed over as a directory rather than a clone. It has no repo for `git archive` to read, so the Makefile path doesn't apply; run the zip command above verbatim from the plugin directory. Don't reach for it by fitting the layout to the container-marketplace branch — name the case and pick this one.
+
+That path gives up what makes the Makefile the default: `zip -r` packages the working tree exactly as it stands, so untracked scratch files, editor backups, `.venv/`, and anything a `.gitignore` would have caught all ship. Sweep the directory before zipping, and prefer moving the plugin into its own repo if it's going to be packaged more than once.
+
 The `.plugin` filename is the plugin's `name` field from `plugin.json` (kebab-case) — `<name>.plugin`, not the directory name if they've diverged.
 
 Delete any stale `/tmp/<name>.plugin` from a previous run before zipping — `zip` updates an existing archive in place rather than replacing it, so a stale file can carry deleted entries into the "new" package.
 
 ## 7. Validation
 
-If the `claude` CLI is available, run it against the **plugin directory** — not the manifest file:
+If the `claude` CLI is available, run it against the **plugin directory**:
 
 ```bash
 claude plugin validate ./my-plugin --strict
 ```
 
-`--strict` promotes warnings to errors, which is what surfaces an unrecognized frontmatter field (an agent's `color`, say) instead of silently ignoring it. Run it strict by default and relax only when a warning is a recorded deviation.
+`--strict` promotes warnings to errors — that is what turns the missing marketplace `description` (§4) from advice into a failure. Run it strict by default and relax only when a warning is a recorded deviation.
+
+**Know which manifest the directory form picked.** Given a directory, the CLI resolves one manifest and says which in its first line of output. A marketplace manifest wins when one is present, so on a self-marketplace layout (§4) `claude plugin validate ./my-plugin --strict` reads `Validating marketplace manifest` and reports plugin-side problems only as they surface through the `plugins[]` entry, prefixed `plugins[0] plugin.json → …`. A clean pass there is a statement about the marketplace file. To get a verdict addressed to the plugin manifest itself, point at it:
+
+```bash
+claude plugin validate ./my-plugin/.claude-plugin/plugin.json --strict
+```
+
+On a self-marketplace, run both — they answer different questions.
 
 If the CLI isn't available, walk the manual structural checklist instead:
 

@@ -46,17 +46,10 @@ sync locations at once.
    `~~file storage` token in both skill bodies (and the CONNECTORS row) to
    match, per the four-places-in-sync rule in `connectors-and-mcp.md`.
 
-4. **Resolve the build-time endpoint decision.**
-   `mcp-fragment.json` ships as an **empty-url stub** —
-   `"url": ""` — because this recipe doesn't hardcode a specific Cowork
-   Google Drive connector URL. At build time, pick one:
-   - **Real URL known:** replace `""` with the current Cowork Google
-     Drive connector URL, and drop the `*` from the connectors row (the
-     server is live, not a placeholder).
-   - **Real URL not known:** leave the stub as-is and keep the `*`
-     footnote in `CONNECTORS.md`. This is not a broken state — the plugin
-     still packages and installs, and both starter skills already have a
-     standalone fallback that works with zero connector configured.
+4. **Resolve the build-time endpoint decision — which Drive is behind this plugin.**
+   `mcp-fragment.json` ships as an **empty-url stub** — `"url": ""` — and the fork is not "have we looked the URL up yet." For the native Cowork Google Drive connector there is no URL to look up: Drive is an Anthropic-managed native connector enabled by a toggle plus OAuth, not a remote MCP server with an addressable endpoint (researched 2026-08-05 across the support docs and the connector directory; nothing publishes one, and Anthropic's own `small-business` plugin ships the identical empty-url entry, as do its `google calendar` and `gmail` entries). Pick which of the two backings this plugin uses:
+   - **Native connector (the default, and what most plugins want):** leave the stub as-is and keep the `*` footnote in `CONNECTORS.md`. This is the finished state, not a gap — the plugin packages and installs, both starter skills already have a standalone fallback that works with zero connector configured, and the native surface is what an org can approve without token custody. Its narrower capability set is the tradeoff (see the production facts below).
+   - **A Google MCP server you run yourself (the power path):** only then is there a real endpoint. Replace `""` with that server's `https://` URL and drop the `*` from the connectors row, since the entry now points at a live server rather than standing in for one. This is the opt-in route when the plugin genuinely needs in-place writes the native connector can't do.
 
 ## Going public with this recipe
 

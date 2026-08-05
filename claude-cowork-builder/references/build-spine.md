@@ -32,6 +32,8 @@ component work starts, because they determine what Phase 4 emits.
 Public→marketplace→`~~category` genericize + branding metadata +
 `marketplace.json` + `CHANGELOG`.*
 
+"Concrete config" is a permission, not a prohibition: a private plugin may hardcode real product names, and `~~category` tokens in skill *bodies* stay legitimate at every visibility — they're the standalone/supercharged mechanism (`skill-authoring.md`), not a public-only artifact. Only `description` frontmatter must stay token-free, at any profile.
+
 "Going public" is the trigger to genericize — it's not a standalone toggle.
 Confirm both decisions together, not independently.
 

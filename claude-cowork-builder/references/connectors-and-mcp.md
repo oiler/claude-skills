@@ -11,7 +11,7 @@ Sources: `${VAR}` / `${user_config.KEY}` substitution, the supported `.mcp.json`
 
 Skills reference external tools by **category**, never by product name. A
 skill body never says "check Slack" or "pull from Google Drive" — it says
-`~~messaging` or `~~document store`. The category is the stable name; the
+`~~chat` or `~~cloud storage`. The category is the stable name; the
 product behind it can change without touching skill prose.
 
 Why category and not product:
@@ -203,7 +203,8 @@ The `~~category` a skill names may resolve at runtime to an **Anthropic-managed 
 
 - **Secrets go through environment variables, never literals.** `${SERVICE_TOKEN}`, `${SLACK_CLIENT_ID}` — every credential in `.mcp.json` is a `${VAR}` substitution. A literal API key or bearer token committed into `.mcp.json` is a Phase 5 audit failure, not a style nit.
 - **`userConfig` is the better ask for anything the plugin owner must supply.** A bare `${VAR}` assumes the owner already exported an env var and read the README. Declaring the value in the manifest's `userConfig` block instead makes Claude prompt for it when the plugin is enabled, substitute it as `${user_config.KEY}` into `.mcp.json` and hook commands, and export it as `CLAUDE_PLUGIN_OPTION_<KEY>`; marking it `sensitive: true` routes it to the OS keychain rather than a config file. Prefer it for tokens and account identifiers; keep raw `${VAR}` for values that genuinely come from the surrounding environment. Note the guardrail that comes with it: shell-form hook commands **reject** `${user_config.*}` substitution outright, so a value can never be interpolated into a shell string.
-- **HTTPS only for remote servers.** Every `http` and `sse` entry's `url` is `https://` — no plaintext remotes, no exceptions for "internal" or "trusted" endpoints.
+- **Every `userConfig` key carries a `title`.** Alongside `type`, `description`, and any `sensitive: true`, each key needs a short human-readable label — it's what the prompt shows the plugin owner instead of a bare `SERVICE_TOKEN`. It is not optional and not a strict-only nicety: `claude plugin validate` errors with `userConfig.<KEY>.title: Invalid input: expected string, received undefined` whether or not `--strict` is passed, so a `userConfig` block written without it fails the first validation run. A minimal key reads `{ "type": "string", "title": "Service API token", "description": "…", "sensitive": true }`.
+- **HTTPS only for remote servers.** Every `http` and `sse` entry's `url` is `https://` — no plaintext remotes, no exceptions for "internal" or "trusted" endpoints. The rule governs urls that have a value. An empty `url: ""` is the declared-but-unconfigured stub above, not a plaintext remote — it names a category the plugin intends to serve and points nowhere at all, which is why it carries the `*` footnote rather than a scheme. Anthropic's own plugins ship it, and for a native connector (§ Native connectors, above) it is the finished state, since there is no endpoint to fill in.
 - **Document every required env var in `README.md`.** If `.mcp.json` references `${SERVICE_TOKEN}`, the plugin's `README.md` says what it is, where the plugin owner gets it, and that it must be set before the connector will work. A plugin that ships a `${VAR}` reference with no corresponding README entry leaves the owner guessing what to configure.
 - **Remote sessions may not reach your remote server.** Remote-session egress goes through a mandatory allow-list proxy, and Enterprise defaults to no network (`cowork-runtime.md`). Treat "connector unreachable" as an expected runtime state, not an error — it's another reason the standalone path is mandatory.
 
