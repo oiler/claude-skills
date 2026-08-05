@@ -18,5 +18,10 @@
   {"query": "decode this JWT for me and tell me what's in the payload: eyJhbGciOiJIUzI1NiJ9...", "should_trigger": false},
   {"query": "set up code signing and notarization for my macos electron app", "should_trigger": false},
   {"query": "this postgres query is slow — figure out the right index for the orders table", "should_trigger": false},
-  {"query": "set up wireguard and ufw rules on the ubuntu box so only the office ip reaches the admin port", "should_trigger": false}
+  {"query": "set up wireguard and ufw rules on the ubuntu box so only the office ip reaches the admin port", "should_trigger": false},
+  {"query": "i just installed a few new MCP servers from github — can you check if any of them look sketchy or got updated recently?", "should_trigger": false},
+  {"query": "something feels off since yesterday's plugin update, review what changed in my claude code plugins and whether it's safe to keep them", "should_trigger": false},
+  {"query": "is it safe to install this claude skill from some random repo? do a supply chain check on it before i symlink it in", "should_trigger": false},
+  {"query": "hey can you look over PR #214 before i merge — it adds a webhook receiver endpoint that checks a shared secret in the query string, want a security pass on it", "should_trigger": true},
+  {"query": "review this diff for security issues, it's the new /api/v2/export route with bearer token auth and a user-supplied filename param for the download", "should_trigger": true}
 ]
