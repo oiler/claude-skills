@@ -1,0 +1,6 @@
+{
+  "name": "team-ops",
+  "version": "0.3.0",
+  "description": "Weekly team reporting and CRM housekeeping for a small team.",
+  "author": { "name": "oiler" }
+}
