@@ -8,8 +8,9 @@ Description-only release: the v1.2.0 NOT-for clause held in hand checks but leak
 - **Rejected overcorrection:** a candidate adding "always consult this skill before signing off on a security review of a PR" re-attracted two boundary queries to 0.67 — review-verb strength pulls the boundary class back. Not shipped.
 - **PR-review positives stay floor-limited in pair arenas** (0–0.33 with a sibling present vs 60% pooled single-skill; the model self-serves the review). Explicit "review this PR"/"review this diff" trigger phrases added, but measurement shows the collapse is arena behavior, not missing phrases. Recorded as a known advisory-floor item — positives are non-gating per the threshold decision.
 - Description 876 → ~1,090 chars (budget 1,536). Body content unchanged.
+- **Full-run outcome (25 queries, 5 runs/query, zero errors): 3 of 4 boundary negatives clear decisively (0.4/0.2/0.0, guardian routed 3-4/5); the fourth ("something feels off since yesterday's plugin update…") improved 1.0 → 0.6 but sits at the threshold — a genuine ~50/50 split, released under a recorded waiver** (`evals/web-security/waivers.json`: measured history, routing evidence, revisit at next description pass). Negatives otherwise 12/13 vs 11/13 prior — no regression.
 
-Evidence: `evals/web-security/` — full pair-arena rerun (5 runs/query) + `preflight_1.2.1.json` verdict.
+Evidence: `evals/web-security/` — full pair-arena rerun (5 runs/query) + `waivers.json` + `preflight_1.2.1.json` verdict.
 
 ## v1.2.0 — 2026-07-12 (routing clause added 2026-08-04)
 
