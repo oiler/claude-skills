@@ -1,11 +1,17 @@
 # web-security — Changelog
 
-## v1.2.0 — 2026-07-12
+## v1.2.0 — 2026-07-12 (routing clause added 2026-08-04)
 
 ### Content
 
 - Updated OWASP Top 10 from 2021 to 2025 (final edition, released January 2026) in the SKILL.md category map and description. Category changes verified against owasp.org: SSRF consolidated into A01 Broken Access Control; A06 Vulnerable Components expanded into the new A03 Software Supply Chain Failures (→ `security-testing.md`); new A10 Mishandling of Exceptional Conditions (→ `environment-config.md` + the "fail securely" core principle). Reference files were unaffected — they never cited the 2021 taxonomy directly.
 - Added Flask to the description's framework list. Flask coverage already existed in the references (Flask-Login, Flask CSP patterns via Dash); the description just never said so.
+- **2026-08-04: NOT-for routing clause** appended to the description — Claude Code's own tooling (MCP servers, plugins/skills, hooks, dev-environment supply chain) routes to `guardian-claude-code`. Cause: the 2026-08-04 trigger eval found web-security pulling a guardian-scope query 3/3. Verified by pair-arena hand checks (both descriptions present): all three boundary queries route to guardian or self-serve, zero web-security invocations. Note for future evals: a single-skill clean-room arena cannot measure a pair boundary — the boundary-class negatives fail there by construction because the named alternative is absent from the listing.
+
+### Eval (2026-08-04, rebuilt harness)
+
+- Fresh trigger-eval artifacts in this repo's `evals/web-security/` (the 2026-07-12 results were invalidated — stock-detector bug): a session-model run (20 queries × 3) and a pinned `--model opus` run (25 queries × 5, eval set extended with 3 boundary-class negatives + 2 PR-review positives). Pinned run: positives 12/12, no regressions, PR-review class pooled 60% (decision rule: no description change — the earlier 0/3 on "full security review of this PR" was clean-room variance, 3/5 when pinned); boundary-class negatives fail only in the single-skill arena (see routing note above); one timed-out run on a slow negative (4 valid runs carried its verdict).
+- First clean-room smoke report (`smoke-2026-08-04.md`): skill materially improved a Flask route review, both planted vulnerabilities caught; 10 documentation ambiguities recorded — notably, Flask is in the description but has no dedicated body section.
 
 ### Structural
 

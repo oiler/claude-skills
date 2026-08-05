@@ -1,0 +1,463 @@
+{
+  "skill_name": "web-security",
+  "description": "Application-level security for web development. Use when writing, reviewing, or auditing code for security in WordPress, Laravel, Django, Flask, FastAPI, or Plotly Dash. Covers OWASP Top 10 2025, XSS prevention, SQL injection, command injection, path traversal, CSRF, security headers (CSP, HSTS, CORS), session and cookie security, JWT handling, authentication, password policy, file uploads, API security, PII protection, and secure configuration. Trigger on \"security review\", \"secure this\", \"harden\", \"vulnerability\", \"XSS\", \"injection\", \"CSRF\", \"CORS\", \"CSP\", \"security headers\", \"session security\", \"JWT\", \"password\", \"auth\", \"path traversal\", \"command injection\", \"shell exec\", or \"OWASP\". NOT for auditing Claude Code's own tooling \u2014 MCP servers, installed plugins/skills, hooks, or supply-chain checks of the dev environment itself; use guardian-claude-code for that.",
+  "metadata": {
+    "harness_version": "1.0.0",
+    "upstream_fork_commit": "690f15c",
+    "skill_content_hash": "86711c68a736a0763ad37b0511a70deff0e926c122920671cbcb92ab468e2c64",
+    "eval_set_hash": "5b6166a4ac9fe8d3c191762051451a999503b2b8551b730d0537d724945555b3",
+    "model": "opus",
+    "timestamp": "2026-08-05T00:58:53+00:00",
+    "timeout": 300,
+    "runs_per_query": 5,
+    "trigger_threshold": 0.5,
+    "argv": [
+      "--eval-set",
+      "/Users/jrf1039/files/repo/claude-skills/evals/web-security/trigger_eval.json",
+      "--skill-path",
+      "/Users/jrf1039/files/repo/claude-skills/web-security",
+      "--model",
+      "opus",
+      "--runs-per-query",
+      "5",
+      "--num-workers",
+      "6",
+      "--verbose"
+    ],
+    "description_overridden": false
+  },
+  "results": [
+    {
+      "query": "review this django view for security before we ship \u2014 it takes a filename from the query string and returns that file from our reports dir",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "add a CSP header to my flask app \u2014 we load js from our own cdn plus google fonts, nothing else should run",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "is this fastapi endpoint sql-injectable? we build the query with an f-string from the search param, code in routes/search.py",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "harden the session handling in my laravel app \u2014 remember-me tokens, cookie flags, regeneration after login, the works",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "my dash app has a dropdown where users pick a csv and the callback reads that path server-side. is that safe?",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "we store stripe customer ids and emails in postgres \u2014 what do we need for PII protection and what should never hit the logs?",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "configure CORS on my fastapi backend so only app.example.com can call it, credentials included",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "users upload profile photos in my wordpress code \u2014 validate it properly so nobody sneaks a php shell through",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "what password rules should our django signup enforce in 2026? marketing wants uppercase+symbol requirements, i think that's outdated",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "do a full security review of this PR \u2014 it adds a public REST endpoint gated by an api key in a header",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 0.6,
+      "triggers": 3,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        19546,
+        23339,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "audit my claude code setup for compromised MCP servers and sketchy plugin updates",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.8,
+      "triggers": 4,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        38068
+      ],
+      "pass": false
+    },
+    {
+      "query": "how do i configure fail2ban to stop ssh brute force on my vps?",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        30582,
+        33928,
+        25683,
+        31797,
+        41772
+      ],
+      "pass": true
+    },
+    {
+      "query": "draft a SOC 2 access-control policy document for our startup's audit next quarter",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        150683,
+        205100,
+        130313,
+        157933,
+        115941
+      ],
+      "pass": true
+    },
+    {
+      "query": "audit my solidity smart contract for reentrancy before we deploy to mainnet",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        23712,
+        24813,
+        24931,
+        34810,
+        21035
+      ],
+      "pass": true
+    },
+    {
+      "query": "which password manager should i roll out to the team, 1password or bitwarden?",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        15136,
+        20306,
+        20160,
+        26903,
+        24640
+      ],
+      "pass": true
+    },
+    {
+      "query": "harden my personal firefox privacy settings \u2014 fingerprinting, telemetry, all of it",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 1,
+      "durations_ms": [
+        null,
+        172678,
+        229329,
+        210847,
+        209457
+      ],
+      "pass": true
+    },
+    {
+      "query": "decode this JWT for me and tell me what's in the payload: eyJhbGciOiJIUzI1NiJ9...",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        15688,
+        13603,
+        13147,
+        15310,
+        8908
+      ],
+      "pass": true
+    },
+    {
+      "query": "set up code signing and notarization for my macos electron app",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        95911,
+        62061,
+        94972,
+        108506,
+        145284
+      ],
+      "pass": true
+    },
+    {
+      "query": "this postgres query is slow \u2014 figure out the right index for the orders table",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        6885,
+        16496,
+        17133,
+        17648,
+        13146
+      ],
+      "pass": true
+    },
+    {
+      "query": "set up wireguard and ufw rules on the ubuntu box so only the office ip reaches the admin port",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        114383,
+        1916,
+        2178,
+        15978,
+        147709
+      ],
+      "pass": true
+    },
+    {
+      "query": "i just installed a few new MCP servers from github \u2014 can you check if any of them look sketchy or got updated recently?",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.6,
+      "triggers": 3,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        38658,
+        null,
+        null,
+        39705,
+        null
+      ],
+      "pass": false
+    },
+    {
+      "query": "something feels off since yesterday's plugin update, review what changed in my claude code plugins and whether it's safe to keep them",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": false
+    },
+    {
+      "query": "is it safe to install this claude skill from some random repo? do a supply chain check on it before i symlink it in",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": false
+    },
+    {
+      "query": "hey can you look over PR #214 before i merge \u2014 it adds a webhook receiver endpoint that checks a shared secret in the query string, want a security pass on it",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 0.6,
+      "triggers": 3,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        23100,
+        null,
+        38748,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "review this diff for security issues, it's the new /api/v2/export route with bearer token auth and a user-supplied filename param for the download",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 0.6,
+      "triggers": 3,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        24996,
+        null,
+        null,
+        null,
+        24157
+      ],
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 25,
+    "passed": 21,
+    "failed": 4,
+    "error_runs": 1,
+    "error_queries": 0
+  }
+}
