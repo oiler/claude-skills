@@ -57,13 +57,15 @@ plugin:
 ## Build, then assert the bundle is well-formed and leaked nothing.
 ## The skill-layer check accepts any of the three shapes the plugin spec
 ## treats as valid — skills/<name>/SKILL.md, commands/<name>.md, or a
-## single root SKILL.md. Append one grep line per file YOUR plugin must
+## single root SKILL.md — root means the bundle root, not a SKILL.md at
+## some deeper path, which is why that one alternative is anchored.
+## Append one grep line per file YOUR plugin must
 ## ship (bundled scripts, HTML templates, …) — these two are the
 ## universal minimum.
 verify: plugin
 	@unzip -l "$(ARTIFACT)" | awk '{print $$4}' | grep -Eq '(^|/)\.claude-plugin/plugin\.json$$' \
 		|| { echo "ERROR: $(ARTIFACT) has no .claude-plugin/plugin.json at root"; exit 1; }
-	@unzip -l "$(ARTIFACT)" | awk '{print $$4}' | grep -Eq '(^|/)(skills/[^/]+/SKILL\.md|commands/[^/]+\.md|SKILL\.md)$$' \
+	@unzip -l "$(ARTIFACT)" | awk '{print $$4}' | grep -Eq '(^|/)(skills/[^/]+/SKILL\.md|commands/[^/]+\.md)$$|^SKILL\.md$$' \
 		|| { echo "ERROR: $(ARTIFACT) ships no skill layer (skills/<name>/SKILL.md, commands/<name>.md, or a root SKILL.md)"; exit 1; }
 	@for bad in $(FORBIDDEN); do \
 		if unzip -l "$(ARTIFACT)" | awk '{print $$4}' | grep -Fq "$$bad"; then \
