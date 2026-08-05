@@ -13,7 +13,7 @@ description: >
 
 You are the concierge for this plugin. Understand what the user needs and get them to the right place — fast. You are not a skill that does work yourself. You route to the skills and commands that do.
 
-The router auto-triggers on open-ended asks; it carries **no `argument-hint`** and is not something the user invokes by name. A user who doesn't know which command to run won't type the router's slash name, so the description is the whole trigger surface — make it broad and pushy.
+<!-- authoring note, delete on fill: this router auto-triggers on open-ended asks — it carries no argument-hint and is not invoked by name. A user who doesn't know which command to run won't type the router's slash name, so the description above is the whole trigger surface; make it broad and pushy. Rationale: references/skill-authoring.md § Router skill -->
 
 | If the user wants to… | Route to |
 |---|---|

@@ -23,7 +23,7 @@ Why category and not product:
 - Standalone/supercharged fallback (see `skill-authoring.md`) reads cleanest
   when the "with connector" branch names a category, not a brand.
 
-**Prefer corpus vocabulary when one fits.** Anthropic's own plugins converge on a small set of category names — `~~project tracker`, `~~knowledge base`, `~~cloud storage`, `~~CRM`, `~~messaging`, `~~email` are the most-used. Reach for an existing token before coining a synonym. Category names are per-plugin, so a plugin-specific name is legitimate (this builder's Drive recipe ships `~~file storage`); just pick one name and hold it across all four sync locations. Tokens are routinely multi-word and may be acronym-cased (`~~CRM`, `~~HRIS`, `~~ATS`) — that is corpus-normal, not a violation.
+**Prefer corpus vocabulary when one fits.** Anthropic's own plugins converge on a small set of category names — counted at mirror `2099f2c`, the most-used are `~~chat` (77), `~~project tracker` (54), `~~email` (50), `~~knowledge base` (46), `~~cloud storage` (42), and `~~CRM` (18). Reach for one of those before coining a synonym, and check the count rather than guessing: plausible-sounding tokens like `~~messaging` and `~~document store` appear **zero** times in the corpus. Category names are per-plugin, so a plugin-specific name is still legitimate (this builder's Drive recipe ships `~~file storage`, and the illustrative tables below use names of their own); just pick one name deliberately and hold it across all four sync locations. Tokens are routinely multi-word and may be acronym-cased (`~~CRM`, `~~HRIS`, `~~ATS`) — that is corpus-normal, not a violation.
 
 **`~~` tokens live in skill bodies only — never in `description` frontmatter.**
 The description is the trigger surface, matched against what a user actually
@@ -67,9 +67,9 @@ categories to the plugin, keep the framing):
 ```markdown
 ## How tool references work
 
-Plugin files use `~~category` as a placeholder for whatever tool the user connects in that category. For example, `~~document store` might mean Google Drive, SharePoint, or any other document store with an MCP server.
+Plugin files use `~~category` as a placeholder for whatever tool the user connects in that category. For example, `~~cloud storage` might mean Google Drive, Dropbox, or any other storage service with an MCP server.
 
-Plugins are **tool-agnostic** — they describe workflows in terms of categories (document store, messaging, email, etc.) rather than specific products. The `.mcp.json` pre-configures specific MCP servers, but any MCP server in that category works.
+Plugins are **tool-agnostic** — they describe workflows in terms of categories (cloud storage, chat, email, etc.) rather than specific products. The `.mcp.json` pre-configures specific MCP servers, but any MCP server in that category works.
 ```
 
 That is the corpus's own two-paragraph preamble, and `assets/templates/CONNECTORS.md` reproduces it. Adapt the example and the category list to the plugin; keep both paragraphs.
@@ -97,10 +97,7 @@ knows exactly what to fill in.
 
 ## `.mcp.json` shapes
 
-`.mcp.json` lives at the plugin root, alongside `CONNECTORS.md`. It declares
-`mcpServers`, one entry per connector. Five shapes cover what this builder
-wires up — the four below plus the `oauth` block (Slack, further down).
-Reproduce them verbatim rather than improvising a new one.
+`.mcp.json` lives at the plugin root, alongside `CONNECTORS.md`. It declares `mcpServers`, one entry per connector. Five shapes cover what this builder wires up — the four below plus the `oauth` block (Slack, further down). Reproduce them verbatim rather than improvising a new one.
 
 **HTTP remote:**
 
@@ -136,11 +133,7 @@ Picking a shape:
 | `http` + `headers` (bearer) | Remote MCP server gated by a bearer token — the common case for anything requiring auth |
 | `http` + `oauth` | Remote MCP server behind an OAuth handshake — Slack is the corpus example; see § Slack — shared OAuth block |
 
-`type`, `url`, `command`, `args`, `headers`, and `oauth` are not the whole
-key set — `env` (environment variables for a stdio server) and
-`headersHelper` (a command that emits headers at connect time) are also
-supported. Use them when the connector genuinely needs them; don't add
-them decoratively.
+`type`, `url`, `command`, `args`, `headers`, and `oauth` are not the whole key set — `env` (environment variables for a stdio server) and `headersHelper` (a command that emits headers at connect time) are also supported. Use them when the connector genuinely needs them; don't add them decoratively.
 
 Never hardcode a secret into the `url` or `headers` value. `${SERVICE_TOKEN}`
 is an environment-variable substitution, not a literal string to fill in —
