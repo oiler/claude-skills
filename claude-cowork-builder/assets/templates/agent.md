@@ -9,7 +9,7 @@ description: >
   <commentary>Why this triggers the agent.</commentary>
   </example>
 model: sonnet
-color: cyan   # corpus convention, not a documented field — the runtime ignores it and `claude plugin validate --strict` flags it
+color: cyan   # corpus convention, not a documented field — the runtime ignores it, and no validator catches it either
 maxTurns: 15
 tools: [Read, Glob, Grep]
 ---

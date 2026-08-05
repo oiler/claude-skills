@@ -62,7 +62,7 @@ catches "this is actually just four Steps" before a needless agent ships.
 
 ## 3. Agent frontmatter fields
 
-The plugin spec's supported field set for an agent is `name`, `description`, `model`, `effort`, `maxTurns`, `tools`, `disallowedTools`, `skills`, `memory`, `background`, and `isolation`. `color` is **not** in it — it is a corpus habit (all five `brand-voice` agents carry it), tolerated because unrecognized fields are ignored, but `claude plugin validate --strict` will flag it.
+The plugin spec's supported field set for an agent is `name`, `description`, `model`, `effort`, `maxTurns`, `tools`, `disallowedTools`, `skills`, `memory`, `background`, and `isolation`. `color` is **not** in it — it is a corpus habit (all five `brand-voice` agents carry it), tolerated because unrecognized fields are ignored. Don't expect tooling to tell you: `claude plugin validate` reads manifests, not component frontmatter, so an agent file can carry `color` or an outright invented field and still pass `--strict` clean (probed against CLI 2.1.222, 2026-08-05). Frontmatter discipline on agents, skills, and commands is an audit-by-hand job — item 2 of the audit checklist buys you a manifest verdict, nothing about the files below it.
 
 This builder emits `name`, `description` (with `<example>` blocks), `model`, `color`, `maxTurns`, and `tools` — that is the house contract the `agent.md` template fills in, not the platform's. Reach for `effort` or `disallowedTools` when the job calls for them; both are supported and neither is in the template by default.
 
