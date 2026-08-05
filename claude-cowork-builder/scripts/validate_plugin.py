@@ -221,6 +221,11 @@ def check_distribution(root: Path, manifest: dict | None, profile: str,
         else:
             if not mkt.get("owner"):
                 report.fail(10, "marketplace-owner", "marketplace.json missing owner")
+            # Top-level description is only a warning to `claude plugin validate`,
+            # but --strict promotes it — and --strict is the run distribution.md §7
+            # mandates, so a marketplace without it fails the audit's own CLI step.
+            if not str(mkt.get("description") or "").strip():
+                report.fail(10, "marketplace-description", "marketplace.json missing top-level description — --strict promotes the warning to an error")
             entries = [e for e in (mkt.get("plugins") or []) if isinstance(e, dict)]
             selfed = [e for e in entries if e.get("source") == "./"]
             if not selfed:

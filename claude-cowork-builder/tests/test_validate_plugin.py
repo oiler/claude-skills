@@ -259,6 +259,18 @@ def test_self_marketplace_requires_source_dot(tmp_path):
     assert fails(report, "marketplace-source")
 
 
+def test_self_marketplace_requires_top_level_description(tmp_path):
+    # `claude plugin validate --strict` warns "No marketplace description provided"
+    # and --strict promotes it to an error, so a marketplace without it fails the
+    # strict run distribution.md §7 mandates. Verified against CLI 2.1.222.
+    mkt = {"name": "demo", "owner": {"name": "oiler"},
+           "plugins": [{"name": "demo-plugin", "source": "./"}]}
+    root = make_plugin(tmp_path, marketplace=mkt)
+    report = vp.Report()
+    vp.check_distribution(root, {"name": "demo-plugin"}, "self-marketplace", None, report)
+    assert fails(report, "marketplace-description")
+
+
 def test_self_marketplace_name_must_match(tmp_path):
     mkt = {"name": "demo", "owner": {"name": "oiler"},
            "plugins": [{"name": "other", "source": "./"}]}

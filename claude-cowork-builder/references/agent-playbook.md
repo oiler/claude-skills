@@ -83,7 +83,7 @@ in §4 as the one true sequence.
 | `name` | yes | kebab-case, matches the filename stem (`agents/content-generation.md` → `name: content-generation`) |
 | `description` | yes | block scalar (`>` or `\|`), third person, embeds 2–3 `<example>` blocks |
 | `model` | yes | cost-tuned — see below |
-| `color` | no — house convention | a distinct color per agent, for the operator's visual scan of `agents/`. Not a spec field; `--strict` validation flags it |
+| `color` | no — house convention | a distinct color per agent, for the operator's visual scan of `agents/`. Not a spec field, and nothing catches it — validation reads manifests, not component frontmatter (§3) |
 | `tools` | opt-in | present (pinned list) or absent (see §4) — never an empty list |
 | `disallowedTools` | no | the negative counterpart to `tools` — subtract from the full set instead of enumerating it (see §4) |
 | `maxTurns` | yes | integer turn budget, sized to the job (see below) |
