@@ -1,0 +1,8 @@
+[
+  {
+    "query": "something feels off since yesterday's plugin update, review what changed in my claude code plugins and whether it's safe to keep them",
+    "reason": "Residual ~50/50 boundary split after two v1.2.1 clause iterations: 1.0 (v1.2.0 pair run) -> 0.6 (v1.2.1, 5 runs, guardian routed 2/5). Plugin-update-review phrasing sits at the web-security/guardian threshold; further review-verb strengthening measurably re-attracts the other boundary queries (rejected candidate v2). Real-life routing additionally covered by machine CLAUDE.md guardian rules.",
+    "date": "2026-08-05",
+    "finding": "docs/changelogs/web-security.md v1.2.1 entry; revisit at web-security's next description pass"
+  }
+]

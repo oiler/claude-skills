@@ -1,0 +1,103 @@
+{
+  "skill": "web-security",
+  "repo": "/Users/jrf1039/files/repo/claude-skills",
+  "profile": "claude-code",
+  "change_class": "structural",
+  "candidate_version": "1.2.1",
+  "skill_content_hash": "fafc8eac699edd2a5fe573e43559eebde1b9dd4410a8d7c2f3688125c7122ae1",
+  "repo_commit": "1136940a23e882abd8acd2624726aa04eb68fcd6",
+  "preflight_version": "1.1.0",
+  "timestamp": "2026-08-05T15:51:51+00:00",
+  "argv": [
+    "web-security",
+    "--change-class",
+    "structural",
+    "--candidate-version",
+    "1.2.1",
+    "--out",
+    "/Users/jrf1039/files/repo/claude-skills/evals/web-security/preflight_1.2.1.json"
+  ],
+  "checks": [
+    {
+      "id": "structure",
+      "status": "pass",
+      "detail": "SKILL.md present, name matches, kebab-case"
+    },
+    {
+      "id": "profile",
+      "status": "pass",
+      "detail": "combined description budget 1094/1,536"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "invocation: trigger-eval trigger_eval_results_2026-08-05-pair-v121.json"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "clean-room: clean-room report smoke-2026-08-04.md"
+    },
+    {
+      "id": "validity",
+      "status": "pass",
+      "detail": "trigger_eval_results_2026-08-05-pair-v121.json: no errors, provenance complete"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "trigger artifact trigger_eval_results_2026-08-05-pair-v121.json bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "advisory",
+      "detail": "smoke-2026-08-04.md: legacy-unbound report accepted; frontmatter required on future reports"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "web-security/ is committed"
+    },
+    {
+      "id": "ceiling",
+      "status": "waived",
+      "detail": "waived: \"something feels off since yesterday's plugin update, review \" \u2014 Residual ~50/50 boundary split after two v1.2.1 clause iterations: 1.0 (v1.2.0 pair run) -> 0.6 (v1.2.1, 5 runs, guardian routed 2/5). Plugin-update-review phrasing sits at the web-security/guardian threshold; further review-verb strengthening measurably re-attracts the other boundary queries (rejected candidate v2). Real-life routing additionally covered by machine CLAUDE.md guardian rules."
+    },
+    {
+      "id": "ceiling",
+      "status": "pass",
+      "detail": "negatives 12/13 clean (1 waived)"
+    },
+    {
+      "id": "regression",
+      "status": "pass",
+      "detail": "shared negatives passing: 12 now vs 11 prior (intersection of 12)"
+    },
+    {
+      "id": "positives",
+      "status": "advisory",
+      "detail": "positives 9/12 (floor, non-gating)"
+    },
+    {
+      "id": "script-tests",
+      "status": "pass",
+      "detail": "no scripts/ \u2014 nothing to run"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "changelog entry for v1.2.1 present"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "tag web-security-v1.2.1 is free"
+    },
+    {
+      "id": "drift",
+      "status": "advisory",
+      "detail": "upstream unchanged since 690f15c"
+    }
+  ],
+  "overall": "pass"
+}
