@@ -2,7 +2,7 @@
 name: claude-cowork-builder
 metadata:
   version: 0.4.0
-description: Build full-featured Claude Cowork plugins the opinionated way — skills, agents, MCP connectors, and custom UI packaged into an installable .plugin. Use when building, creating, scaffolding, or packaging a Cowork plugin, adding a Cowork integration or connector, wiring Google Drive into Cowork, converting a workflow into a Cowork plugin, or auditing a Cowork plugin. Triggers on "Cowork plugin", "build a Cowork plugin", "create a Cowork plugin", "Cowork integration", "package a .plugin", "Cowork Google Drive", "knowledge-work plugin". NOT for WordPress plugins (use wordpress-plugins) or generic non-Cowork Claude Code plugin questions.
+description: 'Build full-featured Claude Cowork plugins the opinionated way — skills, agents, MCP connectors, and custom UI packaged into an installable .plugin. Use ONLY when the request explicitly asks for Cowork plugin work: building, creating, scaffolding, packaging, or auditing a Cowork plugin, adding a connector or integration to a Cowork plugin, or converting a named workflow into a Cowork plugin. Triggers on "Cowork plugin", "build a Cowork plugin", "package a .plugin for Cowork", "add a connector to my Cowork plugin", "audit my Cowork plugin". NOT for: general Cowork usage, setup, projects, or debugging (even when connectors or Google Drive are involved); Cowork workflow help that does not explicitly ask for a plugin — suggest this skill by name instead of triggering; WordPress plugins (use wordpress-plugins); Claude Code skills, plugins, or marketplaces outside Cowork.'
 ---
 
 # claude-cowork-builder
