@@ -1,5 +1,7 @@
 ---
 name: claude-cowork-builder
+metadata:
+  version: 0.4.0
 description: Build full-featured Claude Cowork plugins the opinionated way — skills, agents, MCP connectors, and custom UI packaged into an installable .plugin. Use when building, creating, scaffolding, or packaging a Cowork plugin, adding a Cowork integration or connector, wiring Google Drive into Cowork, converting a workflow into a Cowork plugin, or auditing a Cowork plugin. Triggers on "Cowork plugin", "build a Cowork plugin", "create a Cowork plugin", "Cowork integration", "package a .plugin", "Cowork Google Drive", "knowledge-work plugin". NOT for WordPress plugins (use wordpress-plugins) or generic non-Cowork Claude Code plugin questions.
 ---
 
@@ -28,7 +30,7 @@ Opinionated builder for Claude Cowork plugins. It encodes the Cowork plugin form
 │  OPTIONAL LAYERS                                                    │
 │   [ ] Agent           (playbook-gated; builder justifies + scopes)  │
 │   [ ] Custom UI       (static HTML deliverable / Live Artifact)     │
-│   [ ] MCP connector   (http / sse / stdio / bearer)                 │
+│   [ ] MCP connector   (http / sse / stdio / bearer / oauth)         │
 │                                                                     │
 │  SPECIALTY INTEGRATIONS                                             │
 │   [ ] Google Drive    ( curated, correct building block )           │
@@ -60,7 +62,7 @@ Full walkthrough of every phase: `references/build-spine.md`.
 | Deciding whether to add an agent | references/agent-playbook.md |
 | Choosing install/visibility & packaging | references/distribution.md |
 | Custom UI (static deliverable / authored artifact / Live Artifacts) | references/live-artifacts.md |
-| Runtime realities (sessions, platforms, scheduled tasks, computer use) | references/cowork-runtime.md |
+| Runtime realities (sessions, platforms, scheduled tasks, computer use, how plugins get installed) | references/cowork-runtime.md |
 | Pre-package check | run scripts/validate_plugin.py, then references/audit-checklist.md |
 | Adding Google Drive | integrations/google-drive/recipe.md |
 
@@ -75,5 +77,5 @@ Default lean: Private + Individual install; switch to Public → genericize + ad
 - Every command skill works with zero connectors — the user can paste, upload, or describe the input instead. The connected `~~category` path is additive, never required.
 - Cowork output hygiene: outputs go to the user's working folder — or surface as session deliverables when the session has none (remote/scheduled runs); no relative paths; no `open`/`xdg-open`; always tell the user the exact path — or file name — that was written.
 - What the plugin says to Cowork users stays nontechnical — no schema-speak, raw `~~` tokens, or plugin-internal file names in user-facing copy.
-- Reference the plugin root as `${CLAUDE_PLUGIN_ROOT}`, never a hardcoded or relative path — plugins install into locations the author doesn't control.
+- Reference the plugin root as `${CLAUDE_PLUGIN_ROOT}`, never a hardcoded or relative path — plugins install into locations the author doesn't control. `${CLAUDE_PLUGIN_ROOT}` changes on update, so durable plugin-owned state goes in `${CLAUDE_PLUGIN_DATA}` instead (`skill-authoring.md` § Where mutable state lives).
 - Agents are exceptional, not default: add one only when a playbook justifies it, and scope it as tightly as that playbook allows.

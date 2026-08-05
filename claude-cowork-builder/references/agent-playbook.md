@@ -1,5 +1,7 @@
 # Agent playbook — deciding whether to add an agent
 
+Sources: the agent frontmatter contract, the forbidden-field rule, and the scoped `@`-mention name come from https://code.claude.com/docs/en/plugins-reference (§ Agents, checked 2026-08-05); the observed shapes come from Anthropic's knowledge-work plugin corpus.
+
 Agents are the most expensive, least-used layer in a Cowork plugin. Across
 22 surveyed Anthropic-shipped Cowork plugins, exactly 1 ships an agent
 (`brand-voice`, five agents: `discover-brand`, `conversation-analysis`,
@@ -60,10 +62,11 @@ catches "this is actually just four Steps" before a needless agent ships.
 
 ## 3. Agent frontmatter fields
 
-Every Cowork agent's frontmatter carries these fields: `name`, `description`
-(with `<example>` blocks), `model`, `color`, `maxTurns`, and `tools`. This
-list is what the `agent.md` template fills in — treat the field set as
-the contract, not a suggestion.
+The plugin spec's supported field set for an agent is `name`, `description`, `model`, `effort`, `maxTurns`, `tools`, `disallowedTools`, `skills`, `memory`, `background`, and `isolation`. `color` is **not** in it — it is a corpus habit (all five `brand-voice` agents carry it), tolerated because unrecognized fields are ignored, but `claude plugin validate --strict` will flag it.
+
+This builder emits `name`, `description` (with `<example>` blocks), `model`, `color`, `maxTurns`, and `tools` — that is the house contract the `agent.md` template fills in, not the platform's. Reach for `effort` or `disallowedTools` when the job calls for them; both are supported and neither is in the template by default.
+
+**Forbidden on a plugin-shipped agent.** `hooks`, `mcpServers`, and `permissionMode` are not supported on plugin agents, for security reasons. An agent that needs one of those is not a plugin agent — redesign the component.
 
 Frontmatter is a YAML mapping, so field **position** is not semantically
 load-bearing. The real source files order these two different ways:
@@ -80,8 +83,9 @@ in §4 as the one true sequence.
 | `name` | yes | kebab-case, matches the filename stem (`agents/content-generation.md` → `name: content-generation`) |
 | `description` | yes | block scalar (`>` or `\|`), third person, embeds 2–3 `<example>` blocks |
 | `model` | yes | cost-tuned — see below |
-| `color` | yes | a distinct color per agent, for the operator's visual scan of `agents/` |
+| `color` | no — house convention | a distinct color per agent, for the operator's visual scan of `agents/`. Not a spec field; `--strict` validation flags it |
 | `tools` | opt-in | present (pinned list) or absent (see §4) — never an empty list |
+| `disallowedTools` | no | the negative counterpart to `tools` — subtract from the full set instead of enumerating it (see §4) |
 | `maxTurns` | yes | integer turn budget, sized to the job (see below) |
 
 **`description` block-scalar shape.** The description is prose first —
@@ -178,10 +182,12 @@ Absence must be explained inline. A reviewer scanning `agents/*.md` should
 never have to guess whether an unscoped agent was a deliberate call or an
 oversight.
 
+**`disallowedTools` — subtractive scoping.** When an agent genuinely needs the open connector set but must never do one specific thing (write files, run commands), pin `disallowedTools` instead of trying to enumerate an allow-list that can't be known at authoring time. It is the right shape for the broad-search case above: omit `tools`, keep the mandatory comment, and subtract the dangerous verbs explicitly.
+
 ## 5. Skill → agent delegation shape
 
 An agent is never invoked directly by the Cowork end user — it's dispatched
-by a skill, for the one heavy step that skill can't do inline. The skill
+by a skill, for the one heavy step that skill can't do inline. (Installed agents do appear in the `@`-mention typeahead, but under a **scoped** name — `my-plugin:content-generation`, not `content-generation` — so never write user-facing copy that tells someone to `@`-mention a bare agent name.) The skill
 stays the thin orchestrator: it owns the Trigger, the Inputs, the
 conversation with the user, and it hands off the expensive middle step to
 the agent by name, then resumes for Output Format and After.

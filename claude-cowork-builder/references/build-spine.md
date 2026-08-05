@@ -51,7 +51,7 @@ declines and why — not just what it includes.
 - Whether an agent is justified — only if the `agent-playbook.md` gate passes. Default is no agent.
 - Whether custom UI is needed — a static HTML deliverable (shipped + copied), an authored artifact from a sanitized payload (a prominent snapshot in the Artifacts view), or a Live Artifact (connector-refreshed); three surfaces, chosen per `live-artifacts.md` §3. Default is none.
 - Where mutable state lives, if the plugin remembers between runs — working folder vs. versioned snapshots in connected storage. This decision couples to schedulability; resolve it here per `skill-authoring.md` § Where mutable state lives.
-- Whether a router skill is needed — default heuristic: only when skill count ≥ 8.
+- Whether a router skill is needed — house default: only when skill count ≥ 8. The router layer itself is corpus-verified; the threshold is this builder's preference, not a measured one (`skill-authoring.md` § Router skill).
 
 **Output:** A component table, one row per component type considered —
 **including declined types**, each with a one-line reason:

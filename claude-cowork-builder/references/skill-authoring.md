@@ -22,6 +22,8 @@ Every skill you author is one of two shapes. Pick one; don't blend them.
 
 Once a plugin's skill count reaches roughly 8 or more, add a router skill: a dispatcher whose only job is an intent→skill routing table. It does no work itself — no generation, no file writes, no domain logic. It reads what the user is asking for, matches it to a row, and hands off to the matching skill.
 
+The *layer* is corpus-verified — Anthropic's `small-business` plugin ships `skills/smb-router/SKILL.md`, a concierge that routes and does no work. The *threshold of 8* is this builder's house default, not a number derived from the corpus; move it if a specific plugin argues for it. The corpus router is also **auto-triggering**, carrying only `name` and `description` with no `argument-hint` — that is the shape `assets/templates/router-SKILL.md` emits, because a user who doesn't know which command to run won't type the router's slash name either.
+
 ```markdown
 | When the user wants to… | Route to |
 |---|---|
@@ -152,6 +154,7 @@ Any plugin that remembers between runs — baselines, caches, "what I saw last t
 | **Config the user owns** (watch-lists, briefs, settings) | Plugin reads, never writes | Connected storage (their sheet/doc) or a working-folder file |
 | **Immutable outputs** (reports, exports) | Create once, never touch again | Connected storage or working folder — dated filenames |
 | **Mutable state** (baselines, memory, caches) | Overwritten every run | **The working folder.** Never through a native connector — create-only surfaces duplicate instead of overwriting (`connectors-and-mcp.md` § Native connectors — capability model) |
+| **Plugin-owned durable state** (installed dependencies, a cache the plugin itself manages) | Written by the plugin, must survive a plugin update | **`${CLAUDE_PLUGIN_DATA}`** — the documented home for state that outlives an update. `${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so anything written under it is lost. Documented on the Claude Code side; whether Cowork exposes it is a **Cowork gate** — verify in a live session before a plugin depends on it, and fall back to the working folder |
 
 Consequences to surface in the design, in writing:
 

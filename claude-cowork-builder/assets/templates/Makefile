@@ -1,11 +1,14 @@
 # Package this plugin as a portable .plugin bundle — a zip with the plugin
-# manifest (.claude-plugin/plugin.json) at the archive ROOT (the structure
-# Cowork's upload validator requires; a wrapper dir like
-# my-plugin/.claude-plugin/plugin.json fails validation). Two ways to install
-# the result: upload this .plugin in Claude Cowork, or — in Claude Code
-# desktop/CLI — skip the file and `/plugin marketplace add <repo>` straight
-# from the working tree. The versioned artifact also serves as a rollback /
-# portable hand-off snapshot. Built REPRODUCIBLY and LEAK-FREE from git-tracked
+# manifest (.claude-plugin/plugin.json) at the archive ROOT (a wrapper dir
+# like my-plugin/.claude-plugin/plugin.json fails validation). Anthropic
+# documents that a custom plugin file can be uploaded but specifies no
+# archive layout, so the root-manifest requirement is observed behavior, not
+# a documented format. Two ways to install the result: upload this .plugin
+# in Claude Cowork, or — in Claude Code desktop/CLI — skip the file and
+# `/plugin marketplace add <repo>` straight from the working tree. (Cowork
+# can also sync a marketplace from a GitHub repo or git URL — no file
+# needed; see references/distribution.md §6.) The versioned artifact also
+# serves as a rollback / portable hand-off snapshot. Built REPRODUCIBLY and LEAK-FREE from git-tracked
 # content via `git archive`, so a local `.venv`, `.DS_Store`, `__pycache__`, or
 # process scratch CANNOT slip in.
 #
@@ -52,13 +55,16 @@ plugin:
 	@echo "Built $(ARTIFACT)  (v$(VERSION), $(REF)=$(SHA), $$(du -h "$(ARTIFACT)" | cut -f1))"
 
 ## Build, then assert the bundle is well-formed and leaked nothing.
-## Append one grep line per file YOUR plugin must ship (bundled scripts,
-## HTML templates, …) — these two are the universal minimum.
+## The skill-layer check accepts any of the three shapes the plugin spec
+## treats as valid — skills/<name>/SKILL.md, commands/<name>.md, or a
+## single root SKILL.md. Append one grep line per file YOUR plugin must
+## ship (bundled scripts, HTML templates, …) — these two are the
+## universal minimum.
 verify: plugin
 	@unzip -l "$(ARTIFACT)" | awk '{print $$4}' | grep -Eq '(^|/)\.claude-plugin/plugin\.json$$' \
 		|| { echo "ERROR: $(ARTIFACT) has no .claude-plugin/plugin.json at root"; exit 1; }
-	@unzip -l "$(ARTIFACT)" | awk '{print $$4}' | grep -Eq '(^|/)skills/[^/]+/SKILL\.md$$' \
-		|| { echo "ERROR: $(ARTIFACT) ships no skills/<name>/SKILL.md"; exit 1; }
+	@unzip -l "$(ARTIFACT)" | awk '{print $$4}' | grep -Eq '(^|/)(skills/[^/]+/SKILL\.md|commands/[^/]+\.md|SKILL\.md)$$' \
+		|| { echo "ERROR: $(ARTIFACT) ships no skill layer (skills/<name>/SKILL.md, commands/<name>.md, or a root SKILL.md)"; exit 1; }
 	@for bad in $(FORBIDDEN); do \
 		if unzip -l "$(ARTIFACT)" | awk '{print $$4}' | grep -Fq "$$bad"; then \
 			echo "ERROR: forbidden path matching '$$bad' leaked into $(ARTIFACT)"; exit 1; \
