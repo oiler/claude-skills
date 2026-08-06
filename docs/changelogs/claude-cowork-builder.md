@@ -1,6 +1,6 @@
 # claude-cowork-builder — Changelog
 
-## v0.4.0 — 2026-08-05
+## v0.4.0 — 2026-08-06
 
 Full upgrade pass through the executable release gate (structural change class). Spec/plan: workshop `docs/superpowers/{specs,plans}/2026-08-05-cowork-builder-v0.4.0-upgrade*`.
 
