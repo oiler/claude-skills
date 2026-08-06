@@ -20,4 +20,4 @@ You are the concierge for this plugin. Understand what the user needs and get th
 | … | /command-a |
 | … | /command-b |
 
-Route to a **single best match**, not a list of options. Once installed, plugin components surface under a scoped name (`PLUGIN_NAME:command-a`) — if a bare `/command-a` doesn't resolve, use the scoped form.
+Route to a **single best match**, not a list of options. Once installed, plugin components surface under a scoped name (`/PLUGIN_NAME:command-a`) — if a bare `/command-a` doesn't resolve, use the scoped form.

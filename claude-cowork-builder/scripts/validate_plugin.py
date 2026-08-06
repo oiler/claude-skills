@@ -159,7 +159,7 @@ def check_claude_plugin_contents(root: Path, report: Report) -> None:
 # Corpus vocabulary (knowledge-work-plugins @ 2099f2c) is one or two
 # space-separated words, hyphens and slashes inside a word, acronyms uppercase:
 # ~~chat, ~~cloud storage, ~~CRM, ~~CI/CD, ~~e-signature. Two words is the
-# corpus ceiling across all 47 distinct CONNECTORS.md placeholders — matching
+# corpus ceiling across all 46 distinct CONNECTORS.md placeholders — matching
 # further would swallow the prose after a one-word token.
 TILDE_TOKEN = re.compile(r"~~[A-Za-z][A-Za-z0-9/-]*(?: [A-Za-z0-9/-]+)?")
 

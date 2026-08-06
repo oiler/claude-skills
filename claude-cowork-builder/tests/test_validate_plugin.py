@@ -180,7 +180,7 @@ def test_frontmatter_unclosed_fence():
 #
 # Spellings below are the real corpus vocabulary from the mirror
 # (knowledge-work-plugins @ 2099f2c), not invented ones. The four-column
-# `Placeholder` columns across its CONNECTORS.md files yield 47 distinct
+# `Placeholder` columns across its CONNECTORS.md files yield 46 distinct
 # tokens: one or two space-separated words, hyphens and slashes allowed,
 # acronyms uppercase.
 CORPUS_TOKENS = ["~~chat", "~~project tracker", "~~email", "~~knowledge base",
