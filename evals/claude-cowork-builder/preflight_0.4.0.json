@@ -1,0 +1,103 @@
+{
+  "skill": "claude-cowork-builder",
+  "repo": "/Users/jrf1039/files/repo/claude-skills",
+  "profile": "claude-code",
+  "change_class": "structural",
+  "candidate_version": "0.4.0",
+  "skill_content_hash": "a3c6f383c2842dcb8f813eb911af22be8cf2037a6b35556dc2713ab56fad5f4c",
+  "repo_commit": "6244d83430555a96f9e12aabc7f018cc0be248ab",
+  "preflight_version": "1.1.0",
+  "timestamp": "2026-08-06T11:42:19+00:00",
+  "argv": [
+    "claude-cowork-builder",
+    "--change-class",
+    "structural",
+    "--candidate-version",
+    "0.4.0",
+    "--out",
+    "/Users/jrf1039/files/repo/claude-skills/evals/claude-cowork-builder/preflight_0.4.0.json"
+  ],
+  "checks": [
+    {
+      "id": "structure",
+      "status": "pass",
+      "detail": "SKILL.md present, name matches, kebab-case"
+    },
+    {
+      "id": "profile",
+      "status": "pass",
+      "detail": "combined description budget 1009/1,536"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "invocation: trigger-eval trigger_eval_results_2026-08-05.json"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "clean-room: clean-room report smoke-report-2026-08-05.md"
+    },
+    {
+      "id": "validity",
+      "status": "pass",
+      "detail": "trigger_eval_results_2026-08-05.json: no errors, provenance complete"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "trigger artifact trigger_eval_results_2026-08-05.json bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report smoke-report-2026-08-05.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "claude-cowork-builder/ is committed"
+    },
+    {
+      "id": "ceiling",
+      "status": "pass",
+      "detail": "negatives 12/12 clean (0 waived)"
+    },
+    {
+      "id": "regression",
+      "status": "pass",
+      "detail": "shared negatives passing: 3 now vs 3 prior (intersection of 3)"
+    },
+    {
+      "id": "positives",
+      "status": "advisory",
+      "detail": "positives 10/10 (floor, non-gating)"
+    },
+    {
+      "id": "script-tests",
+      "status": "pass",
+      "detail": "tests suite passed"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "changelog entry for v0.4.0 present"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "tag claude-cowork-builder-v0.4.0 is free"
+    },
+    {
+      "id": "drift",
+      "status": "advisory",
+      "detail": "upstream unchanged since 690f15c"
+    },
+    {
+      "id": "library-status",
+      "status": "advisory",
+      "detail": "docs/library-status.md drifted \u2014 regenerate (PYTHONPATH=\"$HOME/files/projects/001-claude-skills-creator/tools/skill-evals\" python3 -m scripts.library_status)"
+    }
+  ],
+  "overall": "pass"
+}
