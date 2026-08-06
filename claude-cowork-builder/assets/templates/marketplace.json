@@ -1,6 +1,7 @@
 {
   "name": "MARKETPLACE_NAME",
   "owner": { "name": "OWNER_NAME" },
+  "description": "One sentence: what this marketplace offers.",
   "plugins": [
     {
       "name": "PLUGIN_NAME",

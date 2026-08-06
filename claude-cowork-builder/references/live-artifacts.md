@@ -3,7 +3,7 @@
 Two genuinely different surfaces get called "custom UI" in Cowork work, and they are easy to conflate (the original plugin-corpus survey did exactly that, under the name "Live Artifacts"). They share nothing operationally:
 
 - A **static HTML deliverable** is a file the plugin ships and copies into the user's working folder. Corpus-verified pattern — observed in official plugins.
-- A **Live Artifact** is a managed Cowork feature: a persistent, connector-refreshed page in the Artifacts view. Facts below are from Anthropic's support article ("Use live artifacts in Claude Cowork", https://support.claude.com/en/articles/14729249, checked 2026-07-22).
+- A **Live Artifact** is a managed Cowork feature: a persistent, connector-refreshed page in the Artifacts view. Facts below are from Anthropic's support article ("Use live artifacts in Claude Cowork", https://support.claude.com/en/articles/14729249, checked 2026-08-05).
 
 The default for a new component is still *neither* (`build-spine.md`, Phase 2). Pick a surface only when chat turns genuinely can't carry the interaction, then pick which surface using §3.
 
@@ -73,7 +73,7 @@ What the feature actually is, per the support article:
 - **Version history**: every iteration with Claude saves the previous version; users can compare and restore.
 - Created by **asking Claude during a Cowork task** ("build me a tracker that pulls from…") or via Artifacts view → New artifact → Create Cowork artifact.
 - **Constraints**: desktop-only (macOS/Windows/Linux beta), paid plans, stored locally per device (doesn't follow the user across devices). Team/Enterprise sharing opens the artifact with the **viewer's** connectors, not the author's.
-- **Security property that matters to plugin authors**: Live Artifacts *use connectors without asking* — no approval prompt, even in session modes that normally require one.
+- **Security property that matters to plugin authors**: the consent model is *approve once, silent thereafter*. Verbatim: *"Live artifacts can only use the connectors you approved during creation or update. However, artifacts don't ask for permission before using connectors, even if your session mode would normally require approval."* Both halves are load-bearing — the connector set is bounded by what the user approved at creation/update time, and within that set there is no per-use prompt. Quoting only the second half overstates the reach; quoting only the first understates the silence.
 
 **The plugin's role is prompt-level only.** There is no documented packaging surface for Live Artifacts: no manifest field, no file format, no `${CLAUDE_PLUGIN_ROOT}` mechanism, no way to ship one inside a `.plugin`. Do not invent one. The only path a plugin has is instructional — a skill's `## Steps` can direct Claude to create or update a Live Artifact during the Cowork task:
 
@@ -88,7 +88,7 @@ will iterate on layout in follow-ups.
 Rules when a skill does this:
 
 - **Name data sources by `~~category`**, same as everywhere else (`connectors-and-mcp.md`) — the live artifact will bind to whatever the user actually has connected.
-- **Disclose the refresh behavior truthfully in user-facing copy.** Connector-refreshed artifact: say in plain language that it keeps itself current from their connected tools — live artifacts read connectors without approval prompts, so silence quietly widens what the plugin touches. Static/authored snapshot: say it reflects the latest run and does **not** update on its own — never let the artifact's own copy claim "Live" when nothing refreshes. Either way this is an audit item (`audit-checklist.md` item 9).
+- **Disclose the refresh behavior truthfully in user-facing copy.** Connector-refreshed artifact: say in plain language that it keeps itself current from their connected tools — within the set they approved at creation, the artifact re-reads those connectors with no further prompt, so silence quietly widens what the plugin touches. Static/authored snapshot: say it reflects the latest run and does **not** update on its own — never let the artifact's own copy claim "Live" when nothing refreshes. Either way this is an audit item (`audit-checklist.md` item 9).
 - **The standalone floor still applies.** With zero connectors, the skill either builds the artifact from pasted/uploaded data (static content, no refresh) or falls back to a §1 static deliverable — it never hard-fails for want of a connector.
 - **Desktop/plan caveats are the user's reality, not yours to detect.** Don't try to sniff the environment; if artifact creation isn't available, Claude will surface that in-task, and the skill's fallback path covers it.
 

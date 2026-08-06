@@ -1,15 +1,17 @@
 # Connectors and MCP — wiring external tools
 
 This reference covers the `~~category` placeholder system, the `CONNECTORS.md`
-table format, and the four `.mcp.json` server shapes. Read it whenever Phase 2
+table format, and the five `.mcp.json` server shapes. Read it whenever Phase 2
 or Phase 3 of the build spine includes an MCP connector, or when adding an
 integration to an existing plugin (menu entry 2).
+
+Sources: `${VAR}` / `${user_config.KEY}` substitution, the supported `.mcp.json` keys, and MCP tool scope-renaming come from https://code.claude.com/docs/en/plugins-reference (checked 2026-08-05); shape frequencies and the `~~category` vocabulary come from Anthropic's knowledge-work plugin corpus.
 
 ## The `~~category` system
 
 Skills reference external tools by **category**, never by product name. A
 skill body never says "check Slack" or "pull from Google Drive" — it says
-`~~messaging` or `~~document store`. The category is the stable name; the
+`~~chat` or `~~cloud storage`. The category is the stable name; the
 product behind it can change without touching skill prose.
 
 Why category and not product:
@@ -20,6 +22,8 @@ Why category and not product:
   the skill can't assume which product is live.
 - Standalone/supercharged fallback (see `skill-authoring.md`) reads cleanest
   when the "with connector" branch names a category, not a brand.
+
+**Prefer corpus vocabulary when one fits.** Anthropic's own plugins converge on a small set of category names — counted at mirror `2099f2c`, the most-used are `~~chat` (77), `~~project tracker` (54), `~~email` (50), `~~knowledge base` (46), `~~cloud storage` (42), and `~~CRM` (18). Reach for one of those before coining a synonym, and check the count rather than guessing: plausible-sounding tokens like `~~messaging` and `~~document store` appear **zero** times in the corpus. Category names are per-plugin, so a plugin-specific name is still legitimate (this builder's Drive recipe ships `~~file storage`, and the illustrative tables below use names of their own); just pick one name deliberately and hold it across all four sync locations. Tokens are routinely multi-word and may be acronym-cased (`~~CRM`, `~~HRIS`, `~~ATS`) — that is corpus-normal, not a violation.
 
 **`~~` tokens live in skill bodies only — never in `description` frontmatter.**
 The description is the trigger surface, matched against what a user actually
@@ -63,12 +67,12 @@ categories to the plugin, keep the framing):
 ```markdown
 ## How tool references work
 
-Skills in this plugin refer to external tools by category, never by
-product name — you'll see placeholders like `~~document store` or
-`~~messaging` in skill bodies instead of a specific product. This table
-maps each placeholder to what's actually connected in `.mcp.json` for
-this plugin, and what else you could swap in instead.
+Plugin files use `~~category` as a placeholder for whatever tool the user connects in that category. For example, `~~cloud storage` might mean Google Drive, Dropbox, or any other storage service with an MCP server.
+
+Plugins are **tool-agnostic** — they describe workflows in terms of categories (cloud storage, chat, email, etc.) rather than specific products. The `.mcp.json` pre-configures specific MCP servers, but any MCP server in that category works.
 ```
+
+That is the corpus's own two-paragraph preamble, and `assets/templates/CONNECTORS.md` reproduces it. Adapt the example and the category list to the plugin; keep both paragraphs.
 
 Below the preamble, one table, four columns, one row per category:
 
@@ -93,9 +97,7 @@ knows exactly what to fill in.
 
 ## `.mcp.json` shapes
 
-`.mcp.json` lives at the plugin root, alongside `CONNECTORS.md`. It declares
-`mcpServers`, one entry per connector. Four shapes cover everything this
-builder wires up. Reproduce these verbatim — don't invent a fifth shape.
+`.mcp.json` lives at the plugin root, alongside `CONNECTORS.md`. It declares `mcpServers`, one entry per connector. Five shapes cover what this builder wires up — the four below plus the `oauth` block (Slack, further down). Reproduce them verbatim rather than improvising a new one.
 
 **HTTP remote:**
 
@@ -129,6 +131,9 @@ Picking a shape:
 | `sse` | Remote MCP server that streams over SSE instead of plain HTTP |
 | `command`/`npx` stdio | Server runs as a local process the plugin spawns — no remote URL at all. **Local sessions only:** local MCP servers don't run in remote sessions or scheduled tasks (`cowork-runtime.md`), so a stdio-only connector silently disappears there — pair it with a remote shape or make sure the standalone path carries the skill |
 | `http` + `headers` (bearer) | Remote MCP server gated by a bearer token — the common case for anything requiring auth |
+| `http` + `oauth` | Remote MCP server behind an OAuth handshake — Slack is the corpus example; see § Slack — shared OAuth block |
+
+`type`, `url`, `command`, `args`, `headers`, and `oauth` are not the whole key set — `env` (environment variables for a stdio server) and `headersHelper` (a command that emits headers at connect time) are also supported. Use them when the connector genuinely needs them; don't add them decoratively.
 
 Never hardcode a secret into the `url` or `headers` value. `${SERVICE_TOKEN}`
 is an environment-variable substitution, not a literal string to fill in —
@@ -197,6 +202,12 @@ The `~~category` a skill names may resolve at runtime to an **Anthropic-managed 
 ## Security
 
 - **Secrets go through environment variables, never literals.** `${SERVICE_TOKEN}`, `${SLACK_CLIENT_ID}` — every credential in `.mcp.json` is a `${VAR}` substitution. A literal API key or bearer token committed into `.mcp.json` is a Phase 5 audit failure, not a style nit.
-- **HTTPS only for remote servers.** Every `http` and `sse` entry's `url` is `https://` — no plaintext remotes, no exceptions for "internal" or "trusted" endpoints.
+- **`userConfig` is the better ask for anything the plugin owner must supply.** A bare `${VAR}` assumes the owner already exported an env var and read the README. Declaring the value in the manifest's `userConfig` block instead makes Claude prompt for it when the plugin is enabled, substitute it as `${user_config.KEY}` into `.mcp.json` and hook commands, and export it as `CLAUDE_PLUGIN_OPTION_<KEY>`; marking it `sensitive: true` routes it to the OS keychain rather than a config file. Prefer it for tokens and account identifiers; keep raw `${VAR}` for values that genuinely come from the surrounding environment. Note the guardrail that comes with it: shell-form hook commands **reject** `${user_config.*}` substitution outright, so a value can never be interpolated into a shell string.
+- **Every `userConfig` key carries a `title`.** Alongside `type`, `description`, and any `sensitive: true`, each key needs a short human-readable label — it's what the prompt shows the plugin owner instead of a bare `SERVICE_TOKEN`. It is not optional and not a strict-only nicety: `claude plugin validate` errors with `userConfig.<KEY>.title: Invalid input: expected string, received undefined` whether or not `--strict` is passed, so a `userConfig` block written without it fails the first validation run. A minimal key reads `{ "type": "string", "title": "Service API token", "description": "…", "sensitive": true }`.
+- **HTTPS only for remote servers.** Every `http` and `sse` entry's `url` is `https://` — no plaintext remotes, no exceptions for "internal" or "trusted" endpoints. The rule governs urls that have a value. An empty `url: ""` is the declared-but-unconfigured stub above, not a plaintext remote — it names a category the plugin intends to serve and points nowhere at all, which is why it carries the `*` footnote rather than a scheme. Anthropic's own plugins ship it, and for a native connector (§ Native connectors, above) it is the finished state, since there is no endpoint to fill in.
 - **Document every required env var in `README.md`.** If `.mcp.json` references `${SERVICE_TOKEN}`, the plugin's `README.md` says what it is, where the plugin owner gets it, and that it must be set before the connector will work. A plugin that ships a `${VAR}` reference with no corresponding README entry leaves the owner guessing what to configure.
 - **Remote sessions may not reach your remote server.** Remote-session egress goes through a mandatory allow-list proxy, and Enterprise defaults to no network (`cowork-runtime.md`). Treat "connector unreachable" as an expected runtime state, not an error — it's another reason the standalone path is mandatory.
+
+## Tool names are scope-renamed once installed
+
+A plugin's MCP tools do not surface under the bare name the server advertises. They are renamed to `mcp__plugin_<plugin>_<server>__<tool>` — plugin name and `.mcp.json` server key both baked in. This only matters when something names a tool explicitly (an agent's `tools:`/`disallowedTools:` list, a hook matcher, a skill body that pins a tool by name): the bare name will not match. Naming categories rather than tools, the default everywhere else in this builder, sidesteps the problem entirely.

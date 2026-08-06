@@ -1,0 +1,6 @@
+{
+  "name": "meeting-notes",
+  "version": "1.0.0",
+  "description": "Turns raw meeting notes in your working folder into structured summaries with action items.",
+  "author": { "name": "oiler" }
+}

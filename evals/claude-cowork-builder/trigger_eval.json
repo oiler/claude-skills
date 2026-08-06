@@ -1,34 +1,24 @@
 [
-  {
-    "query": "build a Cowork plugin for my team",
-    "should_trigger": true
-  },
-  {
-    "query": "package this workflow as a .plugin for Cowork",
-    "should_trigger": true
-  },
-  {
-    "query": "add Google Drive to my Cowork plugin",
-    "should_trigger": true
-  },
-  {
-    "query": "scaffold a Cowork knowledge-work plugin",
-    "should_trigger": true
-  },
-  {
-    "query": "audit my Cowork plugin before I share it with the org",
-    "should_trigger": true
-  },
-  {
-    "query": "build a WordPress plugin for custom post types",
-    "should_trigger": false
-  },
-  {
-    "query": "create a Claude Code plugin marketplace for my dotfiles repo",
-    "should_trigger": false
-  },
-  {
-    "query": "write a Python CLI that renames files in bulk",
-    "should_trigger": false
-  }
+  {"query": "build a Cowork plugin for my team", "should_trigger": true},
+  {"query": "package this workflow as a .plugin for Cowork", "should_trigger": true},
+  {"query": "add Google Drive to my Cowork plugin", "should_trigger": true},
+  {"query": "scaffold a Cowork knowledge-work plugin", "should_trigger": true},
+  {"query": "audit my Cowork plugin before I share it with the org", "should_trigger": true},
+  {"query": "ok i've got this weekly report thing i do in cowork every monday — pull numbers from our tracker, write a summary, email it out. can we turn that into a plugin my whole team can install", "should_trigger": true},
+  {"query": "my ops team uses claude cowork and wants a plugin that reads our runbook folder and answers on-call questions. where do i start", "should_trigger": true},
+  {"query": "wire our notion workspace into the cowork plugin we shipped last month as a connector", "should_trigger": true},
+  {"query": "how do i package my cowork plugin so coworkers can install it? last time the zip failed with some error about plugin.json", "should_trigger": true},
+  {"query": "review this cowork plugin folder before i upload it — make sure the mcp config and the skill descriptions are right", "should_trigger": true},
+  {"query": "i built a little workflow in claude cowork that drafts our weekly client update from files in the working folder — how do i turn it into something my teammates can install and use themselves", "should_trigger": false},
+  {"query": "we want to hand the whole sales team a one-click installable bundle of cowork skills — quota summaries, call-note cleanup, that kind of thing. set that up", "should_trigger": false},
+  {"query": "build a WordPress plugin for custom post types", "should_trigger": false, "boundary": "wordpress-plugins"},
+  {"query": "my wordpress plugin needs a settings page and a shortcode, scaffold it to VIP standards", "should_trigger": false, "boundary": "wordpress-plugins"},
+  {"query": "package my wordpress plugin for release — bump the version and update readme.txt", "should_trigger": false, "boundary": "wordpress-plugins"},
+  {"query": "audit my wordpress plugin for security before we deploy it to VIP", "should_trigger": false, "boundary": "wordpress-plugins"},
+  {"query": "create a Claude Code plugin marketplace for my dotfiles repo", "should_trigger": false},
+  {"query": "help me write a SKILL.md for a new claude code skill that formats sql queries", "should_trigger": false},
+  {"query": "add an MCP server to my claude desktop config so i can query postgres from chats", "should_trigger": false},
+  {"query": "our cowork session keeps timing out when it reads big google drive files, help me debug it", "should_trigger": false},
+  {"query": "set up a claude cowork project for my team and connect our google drive to it", "should_trigger": false},
+  {"query": "write a Python CLI that renames files in bulk", "should_trigger": false}
 ]

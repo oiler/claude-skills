@@ -1,0 +1,77 @@
+{
+  "skill_name": "claude-cowork-builder",
+  "evals": [
+    {
+      "eval_id": 0,
+      "eval_name": "new-plugin-build",
+      "prompt": "I run recruiting coordination and live in Claude Cowork. Every week I assemble a hiring-pipeline update: open roles, candidates per stage, blockers, and next steps per candidate. Build me a Cowork plugin my team can install that turns this into a repeatable weekly workflow. I'm not technical \u2014 it should just work once installed.",
+      "assertions": [
+        {
+          "text": "Manifest exists at exactly .claude-plugin/plugin.json with kebab-case name, semver version, non-empty description"
+        },
+        {
+          "text": "validate_plugin.py exits 0 on the produced plugin directory"
+        },
+        {
+          "text": "At least one skill directory contains a file named exactly SKILL.md"
+        },
+        {
+          "text": "A .plugin archive was produced and its root contains .claude-plugin/plugin.json (unzip -l proof, no wrapper dir)"
+        },
+        {
+          "text": "Every skill description is third person, trigger-phrase-rich, and ends with a Use when clause"
+        },
+        {
+          "text": "All user-facing plugin copy (README, skill bodies) is nontechnical \u2014 no git/scaffold/frontmatter jargon aimed at the end user"
+        }
+      ]
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "add-connector",
+      "prompt": "Here is an existing Cowork plugin at {INPUT_PLUGIN_PATH}. My team wants it to also pull agenda items from our CRM. Add a CRM connector to this plugin the right way \u2014 keep it installable for nontechnical teammates.",
+      "assertions": [
+        {
+          "text": ".mcp.json parses as JSON and the new server entry uses https:// or a documented ${VAR}/stub url"
+        },
+        {
+          "text": "The ~~category placeholder appears identically in the skill body, CONNECTORS.md Placeholder column, README connectors section, and .mcp.json server entry (4-way sync); introducing the token via heading rename or body prose are both acceptable \u2014 grade the sync on whatever token the run introduces"
+        },
+        {
+          "text": "No ~~ token appears in any skill description frontmatter"
+        },
+        {
+          "text": "An empty-url stub is marked with * and the footnote defined once, per audit item 6"
+        },
+        {
+          "text": "The skill's zero-connector path still works: ## Without connected sources section present and not gutted"
+        }
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "audit-package",
+      "prompt": "Audit this Cowork plugin at {INPUT_PLUGIN_PATH} before I share it with the org, fix what you find, and package it for upload.",
+      "assertions": [
+        {
+          "text": "The validator was run before manual audit work (validator-first Phase 5 order, per transcript.md)"
+        },
+        {
+          "text": "All 4 script-authority planted defects from imperfect-plugin.defects.md were found and fixed"
+        },
+        {
+          "text": "At least 3 of the 4 judgment-authority planted defects were found (items 3, 5, 9, 14)"
+        },
+        {
+          "text": "No packaging happened while known defects were unfixed (per transcript.md ordering); final .plugin has the manifest at archive root"
+        },
+        {
+          "text": "The planted Authorization literal is gone from .mcp.json in the fixed plugin (replaced by ${VAR} + README documentation)"
+        },
+        {
+          "text": "Graders: the fixture is a directory inside an eval tree, not a standalone repo \u2014 absence of marketplace.json is NOT a defect; the defects manifest's do-not-score exclusions (no CONNECTORS.md/banner; team-ops name vs directory) apply"
+        }
+      ]
+    }
+  ]
+}

@@ -28,8 +28,16 @@ KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 BRANDING = ("license", "homepage", "repository", "keywords")
 PROFILES = ("private-individual", "self-marketplace", "container-marketplace", "public")
-REQUIRED_FIELDS = ("name", "version", "description", "author")
+# REF-P: the manifest is optional, and when present `name` is its only required
+# field. The other three are this builder's floor (distribution.md §3) — a failure
+# on them means "violates the house standard", not "the plugin won't load".
+HOUSE_MANIFEST_FIELDS = ("version", "description", "author")
 ALLOWED_IN_CLAUDE_PLUGIN = {"plugin.json", "marketplace.json"}
+# REF-P: any of these may point a component at a path other than its default
+# directory, as a string or a list of strings. mcpServers also accepts an inline
+# object, which is a definition rather than a path.
+COMPONENT_PATH_FIELDS = ("skills", "commands", "agents", "hooks", "mcpServers",
+                         "lspServers", "outputStyles", "workflows")
 
 
 @dataclass
@@ -89,6 +97,18 @@ def skill_dirs(root: Path) -> list[Path]:
     return sorted(p for p in skills.iterdir() if p.is_dir())
 
 
+def command_files(root: Path) -> list[Path]:
+    commands = root / "commands"
+    if not commands.is_dir():
+        return []
+    return sorted(p for p in commands.iterdir() if p.is_file() and p.suffix == ".md")
+
+
+def root_skill_file(root: Path) -> Path | None:
+    """The single-file layout: SKILL.md at the plugin root exactly, not at any depth."""
+    return root / "SKILL.md" if has_exact(root, "SKILL.md") else None
+
+
 def check_manifest(root: Path, report: Report) -> dict | None:
     if has_exact(root, "plugin.json"):
         report.fail(2, "manifest-at-root", "plugin.json found at the plugin root — the manifest lives at .claude-plugin/plugin.json")
@@ -100,16 +120,31 @@ def check_manifest(root: Path, report: Report) -> dict | None:
     if err:
         report.fail(2, "manifest-parse", err)
         return None
-    for fname in REQUIRED_FIELDS:
+    if not manifest.get("name"):
+        report.fail(2, "manifest-field-name", "manifest missing 'name' — the one field the plugin spec requires")
+    for fname in HOUSE_MANIFEST_FIELDS:
         if not manifest.get(fname):
-            report.fail(2, f"manifest-field-{fname}", f"manifest missing required field {fname!r}")
+            report.fail(2, f"manifest-field-{fname}", f"manifest missing {fname!r} — house standard (distribution.md §3), not a spec violation")
     name = manifest.get("name", "")
     if name and not KEBAB.match(name):
         report.fail(2, "manifest-name-kebab", f"name {name!r} is not kebab-case")
     version = manifest.get("version", "")
     if version and not SEMVER.match(str(version)):
         report.fail(2, "manifest-version-semver", f"version {version!r} is not MAJOR.MINOR.PATCH")
+    check_component_paths(root, manifest, report)
     return manifest
+
+
+def check_component_paths(root: Path, manifest: dict, report: Report) -> None:
+    for fname in COMPONENT_PATH_FIELDS:
+        value = manifest.get(fname)
+        entries = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+        for entry in entries:
+            if not isinstance(entry, str):
+                continue
+            rel = entry.strip().removeprefix("${CLAUDE_PLUGIN_ROOT}").lstrip("/").removeprefix("./")
+            if not rel or not (root / rel).exists():
+                report.fail(2, "manifest-component-path", f"manifest field {fname!r} points at {entry!r}, which does not exist in the plugin tree")
 
 
 def check_claude_plugin_contents(root: Path, report: Report) -> None:
@@ -121,7 +156,12 @@ def check_claude_plugin_contents(root: Path, report: Report) -> None:
         report.fail(2, "claude-plugin-extras", f".claude-plugin/ holds only the manifests; found: {', '.join(extras)}")
 
 
-TILDE_TOKEN = re.compile(r"~~[a-z0-9-]+")
+# Corpus vocabulary (knowledge-work-plugins @ 2099f2c) is one or two
+# space-separated words, hyphens and slashes inside a word, acronyms uppercase:
+# ~~chat, ~~cloud storage, ~~CRM, ~~CI/CD, ~~e-signature. Two words is the
+# corpus ceiling across all 46 distinct CONNECTORS.md placeholders — matching
+# further would swallow the prose after a one-word token.
+TILDE_TOKEN = re.compile(r"~~[A-Za-z][A-Za-z0-9/-]*(?: [A-Za-z0-9/-]+)?")
 
 
 def infer_profile(root: Path, manifest: dict | None) -> tuple[str, str]:
@@ -139,11 +179,12 @@ def infer_profile(root: Path, manifest: dict | None) -> tuple[str, str]:
 
 
 def _skill_bodies(root: Path) -> str:
-    parts = []
-    for d in skill_dirs(root):
-        if has_exact(d, "SKILL.md"):
-            parts.append((d / "SKILL.md").read_text(encoding="utf-8"))
-    return "\n".join(parts)
+    paths = [d / "SKILL.md" for d in skill_dirs(root) if has_exact(d, "SKILL.md")]
+    paths.extend(command_files(root))
+    single = root_skill_file(root)
+    if single is not None:
+        paths.append(single)
+    return "\n".join(p.read_text(encoding="utf-8") for p in paths)
 
 
 def check_distribution(root: Path, manifest: dict | None, profile: str,
@@ -169,8 +210,10 @@ def check_distribution(root: Path, manifest: dict | None, profile: str,
                 report.fail(10, f"public-{fname.lower().removesuffix('.md')}", f"{fname} required at the plugin root for a public plugin")
         if not tokens:
             report.fail(10, "genericize", "public profile but no ~~category placeholders in skill bodies — going public is the trigger to genericize")
-    elif tokens:
-        report.fail(10, "coupling", f"~~ tokens in skill bodies ({', '.join(tokens)}) but profile {profile} is private — private plugins use concrete tool names")
+    # A private plugin carrying ~~ tokens in its skill BODIES is not a failure:
+    # tokenized bodies are the standalone+supercharged mechanism and every shipped
+    # artifact emits them by default. A ~~ token in description FRONTMATTER stays a
+    # failure everywhere — check_skills_layer, item 6.
     if profile in ("self-marketplace", "public") and (root / ".claude-plugin" / "marketplace.json").is_file():
         mkt, err = read_json(root / ".claude-plugin" / "marketplace.json")
         if err:
@@ -178,6 +221,11 @@ def check_distribution(root: Path, manifest: dict | None, profile: str,
         else:
             if not mkt.get("owner"):
                 report.fail(10, "marketplace-owner", "marketplace.json missing owner")
+            # Top-level description is only a warning to `claude plugin validate`,
+            # but --strict promotes it — and --strict is the run distribution.md §7
+            # mandates, so a marketplace without it fails the audit's own CLI step.
+            if not str(mkt.get("description") or "").strip():
+                report.fail(10, "marketplace-description", "marketplace.json missing top-level description — --strict promotes the warning to an error")
             entries = [e for e in (mkt.get("plugins") or []) if isinstance(e, dict)]
             selfed = [e for e in entries if e.get("source") == "./"]
             if not selfed:
@@ -194,11 +242,39 @@ def check_distribution(root: Path, manifest: dict | None, profile: str,
                 report.fail(10, "container-listing", f"container marketplace.json does not list ./{root.name}")
 
 
-def check_skills_layer(root: Path, report: Report) -> None:
-    dirs = skill_dirs(root)
-    if not dirs:
-        report.fail(1, "skills-missing", "no skills/ directory with skill subdirectories — skills are the primary layer of a Cowork plugin")
+def _check_skill_frontmatter(path: Path, label: str, expect_name: str | None, report: Report) -> None:
+    fm, err = parse_frontmatter(path.read_text(encoding="utf-8"))
+    if err:
+        report.fail(3, "frontmatter", f"{label}: {err}")
         return
+    fm_name = fm.get("name")
+    if expect_name is not None and fm_name is not None and fm_name != expect_name:
+        report.fail(1, "skill-name-match", f"{label}: frontmatter name {fm_name!r} != folder name")
+    desc = str(fm.get("description") or "").strip()
+    if not desc:
+        report.fail(3, "description-empty", f"{label}: description missing or empty")
+    elif TILDE_TOKEN.search(desc):
+        report.fail(6, "description-token", f"{label}: raw ~~ token in description frontmatter — descriptions use plain category language")
+
+
+def check_skills_layer(root: Path, report: Report) -> None:
+    """Three valid layouts (REF-P): skills/<name>/SKILL.md, commands/<name>.md,
+    or a single SKILL.md at the plugin root. Any one of them is a skill layer."""
+    dirs = skill_dirs(root)
+    commands = command_files(root)
+    single = root_skill_file(root)
+    if not dirs and not commands and single is None:
+        report.fail(1, "skills-missing", "no skill layer — a plugin ships skills/<name>/SKILL.md, commands/<name>.md, or a single SKILL.md at the plugin root")
+        return
+    if single is not None:
+        # No folder to match against — the root form's name is the plugin's own.
+        _check_skill_frontmatter(single, "SKILL.md", None, report)
+    for c in commands:
+        # Commands need no frontmatter at all, so only item 6's token rule applies.
+        fm, err = parse_frontmatter(c.read_text(encoding="utf-8"))
+        desc = str((fm or {}).get("description") or "") if err is None else ""
+        if TILDE_TOKEN.search(desc):
+            report.fail(6, "description-token", f"commands/{c.name}: raw ~~ token in description frontmatter — descriptions use plain category language")
     for d in dirs:
         if not KEBAB.match(d.name):
             report.fail(1, "skill-dir-kebab", f"{d.name}: skill directory name is not kebab-case")
@@ -208,18 +284,7 @@ def check_skills_layer(root: Path, report: Report) -> None:
             hint = f"found {near[0]!r} — the filename must be exactly SKILL.md" if near else "no SKILL.md present"
             report.fail(1, "skill-filename", f"{d.name}: {hint} (wrong filename fails silently at runtime)")
             continue
-        fm, err = parse_frontmatter((d / "SKILL.md").read_text(encoding="utf-8"))
-        if err:
-            report.fail(3, "frontmatter", f"{d.name}: {err}")
-            continue
-        fm_name = fm.get("name")
-        if fm_name is not None and fm_name != d.name:
-            report.fail(1, "skill-name-match", f"{d.name}: frontmatter name {fm_name!r} != folder name")
-        desc = str(fm.get("description") or "").strip()
-        if not desc:
-            report.fail(3, "description-empty", f"{d.name}: description missing or empty")
-        elif TILDE_TOKEN.search(desc):
-            report.fail(6, "description-token", f"{d.name}: raw ~~ token in description frontmatter — descriptions use plain category language")
+        _check_skill_frontmatter(d / "SKILL.md", d.name, d.name, report)
 
 
 HARDCODED = re.compile(r"(/Users/|/home/)")
@@ -238,6 +303,10 @@ def _markdown_files(root: Path) -> list[Path]:
     out = []
     for d in skill_dirs(root):
         out.extend(sorted(d.rglob("*.md")))
+    out.extend(command_files(root))
+    single = root_skill_file(root)
+    if single is not None:
+        out.append(single)
     agents = root / "agents"
     if agents.is_dir():
         out.extend(sorted(agents.rglob("*.md")))

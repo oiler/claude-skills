@@ -5,7 +5,8 @@ import validate_plugin as vp
 
 
 def make_plugin(tmp_path, *, name="demo-plugin", version="0.1.0", description="A demo.",
-                skills=("demo-skill",), manifest_extra=None, marketplace=None, readme=True):
+                skills=("demo-skill",), commands=(), root_skill=False,
+                manifest_extra=None, marketplace=None, readme=True):
     """Build a minimal valid plugin tree; kwargs poke holes in it."""
     root = tmp_path / "plug"
     (root / ".claude-plugin").mkdir(parents=True)
@@ -20,6 +21,15 @@ def make_plugin(tmp_path, *, name="demo-plugin", version="0.1.0", description="A
         d.mkdir(parents=True)
         (d / "SKILL.md").write_text(
             f"---\nname: {s}\ndescription: Demo skill for testing. Use when testing.\n---\n\n# {s}\n\nBody.\n",
+            encoding="utf-8")
+    for c in commands:
+        (root / "commands").mkdir(exist_ok=True)
+        (root / "commands" / f"{c}.md").write_text(
+            f"---\nname: {c}\ndescription: Demo command. Use when testing.\nargument-hint: \"[query]\"\n---\n\nBody.\n",
+            encoding="utf-8")
+    if root_skill:
+        (root / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: Demo single-skill plugin. Use when testing.\n---\n\nBody.\n",
             encoding="utf-8")
     if readme:
         (root / "README.md").write_text("# demo\n", encoding="utf-8")
@@ -73,6 +83,27 @@ def test_manifest_missing_required_fields(tmp_path):
     assert {"manifest-field-version", "manifest-field-description", "manifest-field-author"} <= missing
 
 
+def test_house_field_failure_says_house_standard(tmp_path):
+    """REF-P makes the manifest optional and `name` its only required field, so a
+    missing `author` is a house-standard failure, not "the plugin won't load"."""
+    root = make_plugin(tmp_path)
+    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "demo-plugin"}), encoding="utf-8")
+    report = vp.Report()
+    vp.check_manifest(root, report)
+    for check in ("manifest-field-version", "manifest-field-description", "manifest-field-author"):
+        assert "house standard" in fails(report, check)[0].detail, check
+
+
+def test_missing_name_is_reported_as_the_spec_requirement(tmp_path):
+    root = make_plugin(tmp_path)
+    (root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"version": "0.1.0", "description": "d", "author": {"name": "oiler"}}), encoding="utf-8")
+    report = vp.Report()
+    vp.check_manifest(root, report)
+    detail = fails(report, "manifest-field-name")[0].detail
+    assert "house standard" not in detail
+
+
 def test_manifest_name_not_kebab(tmp_path):
     root = make_plugin(tmp_path, name="Demo_Plugin")
     report = vp.Report()
@@ -85,6 +116,37 @@ def test_manifest_version_not_semver(tmp_path):
     report = vp.Report()
     vp.check_manifest(root, report)
     assert fails(report, "manifest-version-semver")
+
+
+def test_component_path_pointing_nowhere_fails(tmp_path):
+    """REF-P lets skills/commands/agents/hooks/... live at a custom path;
+    distribution.md §7 requires every referenced directory to actually exist."""
+    root = make_plugin(tmp_path, manifest_extra={"agents": "./custom-agents"})
+    report = vp.Report()
+    vp.check_manifest(root, report)
+    assert fails(report, "manifest-component-path")
+
+
+def test_component_path_that_exists_passes(tmp_path):
+    root = make_plugin(tmp_path, manifest_extra={"skills": ["./skills"]})
+    report = vp.Report()
+    vp.check_manifest(root, report)
+    assert report.failures == []
+
+
+def test_component_path_resolves_plugin_root_variable(tmp_path):
+    root = make_plugin(tmp_path, manifest_extra={"mcpServers": "${CLAUDE_PLUGIN_ROOT}/.mcp.json"})
+    (root / ".mcp.json").write_text("{}", encoding="utf-8")
+    report = vp.Report()
+    vp.check_manifest(root, report)
+    assert report.failures == []
+
+
+def test_inline_mcp_servers_object_is_not_a_path(tmp_path):
+    root = make_plugin(tmp_path, manifest_extra={"mcpServers": {"drive": {"type": "http", "url": ""}}})
+    report = vp.Report()
+    vp.check_manifest(root, report)
+    assert report.failures == []
 
 
 def test_claude_plugin_dir_holds_only_manifests(tmp_path):
@@ -112,6 +174,31 @@ def test_frontmatter_parses():
 def test_frontmatter_unclosed_fence():
     fm, err = vp.parse_frontmatter("---\nname: x\n")
     assert fm is None and "fence" in err
+
+
+# --- ~~category token vocabulary (item 6 / item 10) ---
+#
+# Spellings below are the real corpus vocabulary from the mirror
+# (knowledge-work-plugins @ 2099f2c), not invented ones. The four-column
+# `Placeholder` columns across its CONNECTORS.md files yield 46 distinct
+# tokens: one or two space-separated words, hyphens and slashes allowed,
+# acronyms uppercase.
+CORPUS_TOKENS = ["~~chat", "~~project tracker", "~~email", "~~knowledge base",
+                 "~~cloud storage", "~~CRM", "~~CI/CD", "~~e-signature"]
+
+
+def test_tilde_token_matches_corpus_vocabulary():
+    for token in CORPUS_TOKENS:
+        m = vp.TILDE_TOKEN.search(f"Search `{token}` for the file.")
+        assert m is not None and m.group(0) == token, token
+
+
+def test_tilde_token_capture_is_bounded_at_two_words():
+    """Bare in prose the second word is best-effort; two words is the ceiling,
+    so a token absorbs at most one following word, never the rest of the line."""
+    assert vp.TILDE_TOKEN.findall(
+        "Query ~~project tracker for open tickets assigned to me.") == ["~~project tracker"]
+    assert vp.TILDE_TOKEN.findall("Post to ~~chat when the run finishes.") == ["~~chat when"]
 
 
 # --- Task 2: profile inference + distribution (item 10) ---
@@ -172,6 +259,18 @@ def test_self_marketplace_requires_source_dot(tmp_path):
     assert fails(report, "marketplace-source")
 
 
+def test_self_marketplace_requires_top_level_description(tmp_path):
+    # `claude plugin validate --strict` warns "No marketplace description provided"
+    # and --strict promotes it to an error, so a marketplace without it fails the
+    # strict run distribution.md §7 mandates. Verified against CLI 2.1.222.
+    mkt = {"name": "demo", "owner": {"name": "oiler"},
+           "plugins": [{"name": "demo-plugin", "source": "./"}]}
+    root = make_plugin(tmp_path, marketplace=mkt)
+    report = vp.Report()
+    vp.check_distribution(root, {"name": "demo-plugin"}, "self-marketplace", None, report)
+    assert fails(report, "marketplace-description")
+
+
 def test_self_marketplace_name_must_match(tmp_path):
     mkt = {"name": "demo", "owner": {"name": "oiler"},
            "plugins": [{"name": "other", "source": "./"}]}
@@ -211,13 +310,29 @@ def test_public_with_marketplace_no_missing_failure(tmp_path):
     assert not fails(report, "public-marketplace-missing")
 
 
-def test_private_with_tilde_tokens_fails_coupling(tmp_path):
+def test_private_with_tilde_tokens_in_bodies_passes(tmp_path):
+    """Tokenized bodies are the standalone+supercharged mechanism, private or not.
+
+    The shipped artifacts all emit them by default — assets/templates/command-SKILL.md,
+    integrations/google-drive/recipe.md § "Why tokens even though private", and both
+    starter Drive skills — so the validator yields (survey V2).
+    """
     root = make_plugin(tmp_path)
     skill = root / "skills" / "demo-skill" / "SKILL.md"
-    skill.write_text(skill.read_text() + "\nUse ~~file-storage when connected.\n", encoding="utf-8")
+    skill.write_text(skill.read_text() + "\nSearch `~~file storage` when connected.\n", encoding="utf-8")
     report = vp.Report()
     vp.check_distribution(root, {"name": "demo-plugin"}, "private-individual", None, report)
-    assert fails(report, "coupling")
+    assert report.failures == []
+
+
+def test_private_tokenized_plugin_exits_clean(tmp_path):
+    """End to end: the default scaffold must not fail the default profile."""
+    root = make_plugin(tmp_path)
+    skill = root / "skills" / "demo-skill" / "SKILL.md"
+    skill.write_text(skill.read_text() + "\nSearch `~~file storage` when connected.\n", encoding="utf-8")
+    report = vp.run_checks(root, None)
+    assert report.profile == "private-individual"
+    assert report.failures == []
 
 
 def test_profile_override_mismatch_fails(tmp_path):
@@ -258,10 +373,92 @@ def test_container_listed_plugin_no_container_failure(tmp_path):
     assert not fails(report, "container-parse")
 
 
+def test_container_with_object_sources_still_finds_the_relative_entry(tmp_path):
+    """REF-M source objects: github / url / git-subdir / npm. The mirror uses two of
+    them 71 times, so a container listing mixes object and relative-path entries."""
+    container = tmp_path / "market"
+    (container / ".claude-plugin").mkdir(parents=True)
+    (container / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+        {"name": "m", "owner": {"name": "oiler"}, "plugins": [
+            {"name": "remote-one", "source": {"source": "github", "repo": "acme/one"}},
+            {"name": "remote-two", "source": {"source": "git-subdir", "url": "https://x/y.git", "path": "p"}},
+            {"name": "demo-plugin", "source": "./plug"}]}), encoding="utf-8")
+    root = make_plugin(container)
+    report = vp.Report()
+    vp.check_distribution(root, {"name": "demo-plugin"}, "container-marketplace", None, report)
+    assert not fails(report, "container-listing")
+    assert not fails(report, "container-parse")
+
+
+def test_container_with_only_object_sources_flags_unlisted(tmp_path):
+    container = tmp_path / "market"
+    (container / ".claude-plugin").mkdir(parents=True)
+    (container / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+        {"name": "m", "owner": {"name": "oiler"}, "plugins": [
+            {"name": "remote-one", "source": {"source": "npm", "package": "@acme/one"}}]}), encoding="utf-8")
+    root = make_plugin(container)
+    report = vp.Report()
+    vp.check_distribution(root, {"name": "demo-plugin"}, "container-marketplace", None, report)
+    assert fails(report, "container-listing")
+
+
+def test_self_marketplace_object_source_is_not_self(tmp_path):
+    mkt = {"name": "demo", "owner": {"name": "oiler"},
+           "plugins": [{"name": "demo-plugin", "source": {"source": "url", "url": "https://x/y.git"}}]}
+    root = make_plugin(tmp_path, marketplace=mkt)
+    report = vp.Report()
+    vp.check_distribution(root, {"name": "demo-plugin"}, "self-marketplace", None, report)
+    assert fails(report, "marketplace-source")
+
+
 # --- Task 3: skills layer (items 1, 3, 6) ---
 
-def test_no_skills_dir_fails(tmp_path):
+def test_no_skill_layer_at_all_fails(tmp_path):
     root = make_plugin(tmp_path, skills=())
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "skills-missing")
+
+
+def test_commands_only_plugin_is_a_valid_layer(tmp_path):
+    """REF-P: skills live in skills/ OR commands/ OR a single root SKILL.md."""
+    root = make_plugin(tmp_path, skills=(), commands=("do-thing",))
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert report.failures == []
+
+
+def test_root_skill_md_plugin_is_a_valid_layer(tmp_path):
+    root = make_plugin(tmp_path, skills=(), root_skill=True)
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert report.failures == []
+
+
+def test_skill_md_below_the_root_is_not_the_root_form(tmp_path):
+    """Root form means SKILL.md at the plugin root exactly, not at any depth."""
+    root = make_plugin(tmp_path, skills=())
+    (root / "docs").mkdir()
+    (root / "docs" / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: X. Use when testing.\n---\n\nBody.\n", encoding="utf-8")
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "skills-missing")
+
+
+def test_root_skill_md_description_is_checked(tmp_path):
+    root = make_plugin(tmp_path, skills=(), root_skill=True)
+    (root / "SKILL.md").write_text(
+        "---\nname: demo-plugin\ndescription: Reads ~~cloud storage. Use when testing.\n---\n\nBody.\n",
+        encoding="utf-8")
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "description-token")
+
+
+def test_empty_commands_dir_is_not_a_layer(tmp_path):
+    root = make_plugin(tmp_path, skills=())
+    (root / "commands").mkdir()
     report = vp.Report()
     vp.check_skills_layer(root, report)
     assert fails(report, "skills-missing")
@@ -324,7 +521,19 @@ def test_tilde_token_in_description_fails(tmp_path):
     root = make_plugin(tmp_path)
     d = root / "skills" / "demo-skill"
     (d / "SKILL.md").write_text(
-        "---\nname: demo-skill\ndescription: Reads ~~file-storage. Use when testing.\n---\n\nBody.\n",
+        "---\nname: demo-skill\ndescription: Reads ~~cloud storage. Use when testing.\n---\n\nBody.\n",
+        encoding="utf-8")
+    report = vp.Report()
+    vp.check_skills_layer(root, report)
+    assert fails(report, "description-token")
+
+
+def test_acronym_token_in_description_fails(tmp_path):
+    """~~CRM is real corpus vocabulary (18 uses in knowledge-work-plugins)."""
+    root = make_plugin(tmp_path)
+    d = root / "skills" / "demo-skill"
+    (d / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: Logs a ~~CRM note. Use when testing.\n---\n\nBody.\n",
         encoding="utf-8")
     report = vp.Report()
     vp.check_skills_layer(root, report)

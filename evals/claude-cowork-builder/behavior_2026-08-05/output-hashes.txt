@@ -1,0 +1,9 @@
+2788a690635a499032a276c3a7239c19358fae36917725802939782f6290399d  eval-0-new-plugin-build/old_skill/run-1/outputs/hiring-pipeline-0.1.0-74052ef.plugin
+2bd9be11fd73a845defca14206ce6db0669fc4527daf3793f1a88b06c12a783c  eval-0-new-plugin-build/with_skill/run-1/outputs/hiring-pipeline-weekly.plugin
+b9f4d8959bde9ffe433eec197a2eb515ef7ba5f46ee9c0da0bbeb519ecfe279a  eval-1-add-connector/old_skill/run-1/outputs/meeting-notes.plugin
+0010e2c804e805993d7f7fd6bf9546d9c0247c2b88da69bfc073225429c4416d  eval-1-add-connector/with_skill/run-1/outputs/meeting-notes-1.1.0-0ee673d.plugin
+30b8e2d98c8665ead417e9d6f849fe13cccccd9a951e59a2d29e8eaa7ba7e07e  eval-2-audit-package/old_skill/run-1/outputs/team-ops.plugin
+0bcbe863a10115124c40607fbee74369c03fac6d757502eff982ea34ce7d5071  eval-2-audit-package/with_skill/run-1/outputs/team-ops.plugin
+0010e2c804e805993d7f7fd6bf9546d9c0247c2b88da69bfc073225429c4416d  eval-1-add-connector/with_skill/run-1/outputs/meeting-notes/dist/meeting-notes-1.1.0-0ee673d.plugin
+2788a690635a499032a276c3a7239c19358fae36917725802939782f6290399d  eval-0-new-plugin-build/old_skill/run-1/outputs/hiring-pipeline/dist/hiring-pipeline-0.1.0-74052ef.plugin
+2bd9be11fd73a845defca14206ce6db0669fc4527daf3793f1a88b06c12a783c  eval-0-new-plugin-build/with_skill/run-1/outputs/hiring-pipeline-weekly/dist/hiring-pipeline-weekly-0.1.0-cd7948c.plugin

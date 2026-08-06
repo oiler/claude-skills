@@ -4,11 +4,7 @@ Drop-in recipe for wiring the `~~file storage` category into any Cowork
 plugin, backed by Google Drive. Use this from menu entry 2 (Add an
 integration) — it jumps straight to Phase 3/4, no re-charter needed.
 
-This recipe ships four things, all in this folder: `mcp-fragment.json` (the
-server entry), `connectors-row.md` (the CONNECTORS.md table row), and two
-starter skills (`skills/read-drive-file/`, `skills/find-in-drive/`) that
-give the plugin a working `~~file storage` command/knowledge pair on day
-one.
+This recipe ships three artifacts — four files, all in this folder: `mcp-fragment.json` (the server entry), `connectors-row.md` (the CONNECTORS.md table row), and two starter skills (`skills/read-drive-file/`, `skills/find-in-drive/`) that give the plugin a working `~~file storage` command/knowledge pair on day one.
 
 **From-scratch builds (menu entry 1):** the merge language below assumes an
 existing plugin. When the recipe rides along on a new scaffold, there's
@@ -50,17 +46,10 @@ sync locations at once.
    `~~file storage` token in both skill bodies (and the CONNECTORS row) to
    match, per the four-places-in-sync rule in `connectors-and-mcp.md`.
 
-4. **Resolve the build-time endpoint decision.**
-   `mcp-fragment.json` ships as an **empty-url stub** —
-   `"url": ""` — because this recipe doesn't hardcode a specific Cowork
-   Google Drive connector URL. At build time, pick one:
-   - **Real URL known:** replace `""` with the current Cowork Google
-     Drive connector URL, and drop the `*` from the connectors row (the
-     server is live, not a placeholder).
-   - **Real URL not known:** leave the stub as-is and keep the `*`
-     footnote in `CONNECTORS.md`. This is not a broken state — the plugin
-     still packages and installs, and both starter skills already have a
-     standalone fallback that works with zero connector configured.
+4. **Resolve the build-time endpoint decision — which Drive is behind this plugin.**
+   `mcp-fragment.json` ships as an **empty-url stub** — `"url": ""` — and the fork is not "have we looked the URL up yet." For the native Cowork Google Drive connector there is no URL to look up: Drive is an Anthropic-managed native connector enabled by a toggle plus OAuth, not a remote MCP server with an addressable endpoint (researched 2026-08-05 across the support docs and the connector directory; nothing publishes one, and Anthropic's own `small-business` plugin ships the identical empty-url entry, as do its `google calendar` and `gmail` entries). Pick which of the two backings this plugin uses:
+   - **Native connector (the default, and what most plugins want):** leave the stub as-is and keep the `*` footnote in `CONNECTORS.md`. This is the finished state, not a gap — the plugin packages and installs, both starter skills already have a standalone fallback that works with zero connector configured, and the native surface is what an org can approve without token custody. Its narrower capability set is the tradeoff (see the production facts below).
+   - **A Google MCP server you run yourself (the power path):** only then is there a real endpoint. Replace `""` with that server's `https://` URL and drop the `*` from the connectors row, since the entry now points at a live server rather than standing in for one. This is the opt-in route when the plugin genuinely needs in-place writes the native connector can't do.
 
 ## Going public with this recipe
 
@@ -81,10 +70,10 @@ paste the file/content directly into the chat. Confirm this fallback still
 reads cleanly after any renaming in step 3 — it's the floor every copy of
 this recipe must clear, connected or not.
 
-## Drive production facts (verified 2026-07)
+## Drive production facts (observed 2026-07, not re-verified since)
 
-Facts from running a Drive-backed plugin in real Cowork sessions — they bound what a consumer of this recipe can design:
+Facts from running a Drive-backed plugin in real Cowork sessions — no Anthropic document states or denies any of them, so treat each as a **Cowork gate** (`build-spine.md` Phase 3): re-verify in a live session and design the fallback for the narrower outcome. They bound what a consumer of this recipe can design:
 
 - **The native Drive connector is create-and-read only.** No file update, no delete, no Sheets cell writes. Follow the append-only design rule in `connectors-and-mcp.md` § Native connectors — capability model. A self-run Google MCP server (this recipe's route) is the opt-in power path for in-place writes — never a requirement.
-- **Workspace Shared Drives are unreachable through the native connector** — requests omit `supportsAllDrives` / `includeItemsFromAllDrives` / `corpora=allDrives`, so reads come back empty or 404 (anthropics/claude-code#53442). Until fixed, a team's shared home is a **My Drive folder shared with the team**. Accept a pasted folder URL agnostically so a Shared Drive URL "just works" once the connector supports it.
+- **Workspace Shared Drives are unreachable through the native connector** — requests omit `supportsAllDrives` / `includeItemsFromAllDrives` / `corpora=allDrives`, so reads come back empty or 404 (anthropics/claude-code#53442, still open as of 2026-08-05). Until fixed, a team's shared home is a **My Drive folder shared with the team**. Accept a pasted folder URL agnostically so a Shared Drive URL "just works" once the connector supports it.
 - **The Drive-for-Desktop sync trap:** if the user points their *working folder* at a locally-synced Google Drive folder, sync conflicts can replace files with stub JSON. Onboarding copy should steer the working folder to a plain local folder, not a synced one.

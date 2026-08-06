@@ -1,0 +1,429 @@
+{
+  "skill_name": "claude-cowork-builder",
+  "description": "Build full-featured Claude Cowork plugins the opinionated way \u2014 skills, agents, MCP connectors, and custom UI packaged into an installable .plugin. Use ONLY when the request explicitly asks for Cowork plugin work: building, creating, scaffolding, packaging, reviewing, or auditing a Cowork plugin, adding a connector or integration to a Cowork plugin, or converting a named workflow into a Cowork plugin. Triggers on \"Cowork plugin\", \"build a Cowork plugin\", \"package a .plugin for Cowork\", \"add a connector to my Cowork plugin\", \"audit my Cowork plugin\", \"review my Cowork plugin\". NOT for: any Cowork request that never says plugin \u2014 workflow help, making a workflow installable or shareable for teammates, installable bundles or collections of Cowork skills, setup, projects, or debugging (even when connectors or Google Drive are involved); for those, suggest this skill by name instead of triggering; WordPress plugins (use wordpress-plugins); Claude Code skills, plugins, or marketplaces outside Cowork.",
+  "metadata": {
+    "harness_version": "1.1.0",
+    "upstream_fork_commit": "690f15c",
+    "skill_content_hash": "a3c6f383c2842dcb8f813eb911af22be8cf2037a6b35556dc2713ab56fad5f4c",
+    "eval_set_hash": "c26aab42698ce38069279e6b98d972cb84aeb5d3c5525aa12430d0d931b19fe9",
+    "model": "opus",
+    "timestamp": "2026-08-06T01:25:19+00:00",
+    "timeout": 600,
+    "runs_per_query": 5,
+    "trigger_threshold": 0.5,
+    "argv": [
+      "--eval-set",
+      "/Users/jrf1039/files/repo/claude-skills-v040/evals/claude-cowork-builder/trigger_eval.json",
+      "--skill-path",
+      "/Users/jrf1039/files/repo/claude-skills-v040/claude-cowork-builder",
+      "--sibling",
+      "/Users/jrf1039/files/repo/claude-skills/wordpress-plugins",
+      "--model",
+      "opus",
+      "--runs-per-query",
+      "5",
+      "--timeout",
+      "600",
+      "--verbose"
+    ],
+    "siblings": [
+      "wordpress-plugins"
+    ],
+    "description_overridden": false
+  },
+  "results": [
+    {
+      "query": "build a Cowork plugin for my team",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "package this workflow as a .plugin for Cowork",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "add Google Drive to my Cowork plugin",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "scaffold a Cowork knowledge-work plugin",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "audit my Cowork plugin before I share it with the org",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "ok i've got this weekly report thing i do in cowork every monday \u2014 pull numbers from our tracker, write a summary, email it out. can we turn that into a plugin my whole team can install",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "my ops team uses claude cowork and wants a plugin that reads our runbook folder and answers on-call questions. where do i start",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "wire our notion workspace into the cowork plugin we shipped last month as a connector",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "how do i package my cowork plugin so coworkers can install it? last time the zip failed with some error about plugin.json",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "review this cowork plugin folder before i upload it \u2014 make sure the mcp config and the skill descriptions are right",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "i built a little workflow in claude cowork that drafts our weekly client update from files in the working folder \u2014 how do i turn it into something my teammates can install and use themselves",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        29253,
+        33351,
+        24367,
+        28600,
+        29298
+      ],
+      "pass": true
+    },
+    {
+      "query": "we want to hand the whole sales team a one-click installable bundle of cowork skills \u2014 quota summaries, call-note cleanup, that kind of thing. set that up",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        27516,
+        20902,
+        19955,
+        30950,
+        31301
+      ],
+      "pass": true
+    },
+    {
+      "query": "build a WordPress plugin for custom post types",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        125112,
+        147896,
+        109239,
+        173704,
+        191369
+      ],
+      "pass": true,
+      "routed": {
+        "wordpress-plugins-skill": 5
+      }
+    },
+    {
+      "query": "my wordpress plugin needs a settings page and a shortcode, scaffold it to VIP standards",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        188004,
+        246467,
+        223795,
+        281756,
+        161127
+      ],
+      "pass": true,
+      "routed": {
+        "wordpress-plugins-skill": 5
+      }
+    },
+    {
+      "query": "package my wordpress plugin for release \u2014 bump the version and update readme.txt",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        34501,
+        26809,
+        39240,
+        24728,
+        27106
+      ],
+      "pass": true,
+      "routed": {
+        "wordpress-plugins-skill": 1
+      }
+    },
+    {
+      "query": "audit my wordpress plugin for security before we deploy it to VIP",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        29759,
+        40139,
+        34200,
+        33347,
+        35707
+      ],
+      "pass": true,
+      "routed": {
+        "wordpress-plugins-skill": 5
+      }
+    },
+    {
+      "query": "create a Claude Code plugin marketplace for my dotfiles repo",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        164440,
+        96108,
+        61253,
+        165893,
+        189605
+      ],
+      "pass": true
+    },
+    {
+      "query": "help me write a SKILL.md for a new claude code skill that formats sql queries",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        74078,
+        89468,
+        72247,
+        69269,
+        83732
+      ],
+      "pass": true
+    },
+    {
+      "query": "add an MCP server to my claude desktop config so i can query postgres from chats",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        80709,
+        53613,
+        67068,
+        86927,
+        57138
+      ],
+      "pass": true
+    },
+    {
+      "query": "our cowork session keeps timing out when it reads big google drive files, help me debug it",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        56443,
+        49375,
+        51388,
+        67495,
+        45952
+      ],
+      "pass": true
+    },
+    {
+      "query": "set up a claude cowork project for my team and connect our google drive to it",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        2208,
+        16383,
+        28530,
+        34021,
+        12017
+      ],
+      "pass": true
+    },
+    {
+      "query": "write a Python CLI that renames files in bulk",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        134086,
+        77381,
+        85644,
+        66541,
+        291266
+      ],
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 22,
+    "passed": 22,
+    "failed": 0,
+    "error_runs": 0,
+    "error_queries": 0
+  }
+}

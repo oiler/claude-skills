@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "crm": {
+      "type": "http",
+      "url": "https://crm.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer EXAMPLE-NOT-A-SECRET-0000"
+      }
+    }
+  }
+}

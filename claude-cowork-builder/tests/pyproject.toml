@@ -1,0 +1,8 @@
+[project]
+name = "claude-cowork-builder-tests"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = ["pytest>=8.0", "pyyaml>=6.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["../scripts"]
