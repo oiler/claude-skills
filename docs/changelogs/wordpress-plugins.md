@@ -1,12 +1,16 @@
 # wordpress-plugins — Changelog
 
-## v0.2.0 — 2026-07-18
+## v0.2.0 — Unreleased
 
 ### Added — test harness, audit coverage, admin-UI reference
 
 - **The scaffolder now emits a runnable test harness.** `tests/bootstrap.php` (composer autoloader + `function_exists`-guarded recording stubs for `add_action`/`add_filter`/`__`/`esc_html__`, with a `wp_stub_reset()` helper) and `tests/PluginTest.php` (singleton smoke tests); `composer.json` gains a `test` script and `phpunit/phpunit ^10` (last major supporting the PHP 8.1 baseline). Previously `phpunit.xml.dist` referenced a bootstrap and test directory that were never written — every scaffold shipped a harness that errored on first run, unnoticed because it was never run once. A new scaffolder regression test cross-checks every path in the emitted phpunit config against the emitted file map so config and files can't drift again. Verified end-to-end: fresh scaffold → `composer install && composer test && composer lint`, all green.
 - **Audit checklist gains A7 — Test Harness Missing or Broken** (advisory): bootstrap path resolves, `tests/` non-empty, `composer test` exits 0.
 - **New `references/admin-ui.md`**: admin list-table columns (three-hook contract, the `manage_pages_columns` vs `manage_pages_custom_column` core asymmetry verified against `class-wp-posts-list-table.php`, native vs meta-backed sorting via `pre_get_posts`) and the Settings API (sanitize callbacks, nonce/capability discipline, the option-name prefixing rule `PrefixAllGlobals` does not enforce). SKILL.md routes Admin UI work there.
+
+### Changed
+
+- **Description now advertises the testing stack the skill actually documents**: `WP_Mock` (never covered by any reference) replaced by `Brain Monkey, PHPUnit`. Brain Monkey stays in that list because the probe-driven bootstrap fix below made the documented upgrade path real.
 
 ### Fixed — emitted config correctness
 
@@ -27,7 +31,13 @@ Found by a multi-expert review engagement (orko) and confirmed by independent ve
 
 The common thread: values were validated on the *derivation* path but trusted on the *explicit* path. Validation now happens at the boundary, in `validate_inputs()`, for both.
 
-Across the whole v0.2.0 entry — test-harness emission, the scaffolder-input fixes above, and the final whole-branch review pass that followed — the suite stands at 32 tests.
+### Fixed — reference accuracy (2026-08-05 recovery pass)
+
+- **The Settings API autoload note taught an argument that does not exist.** `admin-ui.md` said to pass `'autoload' => false` in the `register_setting()` args — but `register_setting()` never touches the database and accepts no such argument. The note now shows the real control point: initialize with `add_option( $name, $default, '', false )`, demote an existing row with `update_option( $name, $value, false )`.
+- **The Brain Monkey upgrade path is now empirically verified — and the documented claim was wrong.** The reference said the emitted bootstrap's `function_exists()` guards would step aside on their own once `brain/monkey:^2.6` was installed; a probe on a fresh scaffold refuted it. Brain Monkey loads its WordPress function definitions lazily inside `\Brain\Monkey\setUp()`, which PHPUnit runs per test — after the bootstrap — so the stubs were always defined first, Brain Monkey declined to redefine them, and expectation-style hook assertions silently never intercepted (Mockery `InvalidCountException`, called 0 times). The emitted `tests/bootstrap.php` now calls `\Brain\Monkey\setUp()` immediately after the autoloader when the package is installed, handing the function definitions to Brain Monkey so the existing guards do step aside; probe green on a clean scaffold with the negative control still failing as it must, and a new scaffolder regression test pins the emission order. Two prose corrections fell out of the same probe: Brain Monkey supplies no `__()`/`esc_html__()` — only the hook stubs step aside, the translation stubs are permanent and deleting them is fatal — and the `stubTranslationFunctions()` escape hatch is unreachable on the shipped bootstrap (Patchwork `DefinedTooEarly`), so the reference now documents that constraint instead of offering the hatch.
+- **Reference prose that had never been run against the toolchain it described.** A sweep of the skill's references re-checked confident claims about scaffolder and toolchain behavior by actually executing them: the audit checklist claimed `composer lint` flags a missing `@since` (no such sniff exists), several reference snippets failed the very ruleset the skill itself emits, and the documentation reference overclaimed what the scaffolder's docblocks contain. All corrected against real toolchain output.
+
+Across the whole v0.2.0 entry — test-harness emission, the scaffolder-input fixes above, the final whole-branch review pass that followed, and the recovery pass's Brain Monkey handoff guard — the suite stands at 33 tests.
 
 ## v0.1.0
 
