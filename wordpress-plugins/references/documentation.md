@@ -8,7 +8,9 @@ Release mechanics (semver, git tags, GitHub Releases, CHANGELOG.md) are owned by
 
 ## PHPDoc
 
-The `WordPress-Docs` PHPCS ruleset (included via `phpcs.xml.dist`) enforces that file, class, and function docblocks exist — a missing one is a lint error. It does not check their *contents* beyond structure, and WPCS ships no `@since` sniff at all, so everything below about `@since` is convention the linter cannot enforce for you. The scaffolder's stubs follow these conventions except for `@since`, which a 0.1.0 skeleton has no release history to record.
+The `WordPress-Docs` PHPCS ruleset (included via `phpcs.xml.dist`) enforces that file, class, and function docblocks exist — a missing one is a lint error — and it validates `@param` tags against the signature: a tag naming a parameter the method does not have is an error, and so is a parameter with no tag. It does not require `@return`, and WPCS ships no `@since` sniff at all, so `@since` is convention the linter cannot enforce for you.
+
+**The conventions below are for code you write, not a description of the skeleton.** The scaffolder emits `@package` on every file docblock and `@var` on the singleton property; it emits no `@since`, `@param`, or `@return` anywhere, and its method docblocks are summary-only (`/** Boot the plugin. */`) rather than the tag structure documented here. That skeleton lints clean only because every method in the emitted `src/Plugin.php` takes zero arguments, and because `tests/` — whose stubs do take arguments and document none of them — is excluded from phpcs entirely. Add a parameter to `register_hooks()` or write any new method with one, and phpcs will require a matching `@param` immediately.
 
 ### File-level docblock
 
