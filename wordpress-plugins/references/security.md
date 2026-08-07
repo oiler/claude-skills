@@ -61,7 +61,7 @@ if ( ! wp_verify_nonce( $nonce, 'my_plugin_action' ) ) {
 }
 ```
 
-Unslash and sanitize the token before passing it in, even though a nonce is opaque and a mangled one just fails the check anyway: VIPCS's `WordPress.Security.ValidatedSanitizedInput` warns on any raw superglobal read, and a warning you train yourself to ignore here is a warning you ignore on the next `$_POST` field that does matter.
+Unslash and sanitize the token before passing it in, even though a nonce is opaque and a mangled one just fails the check anyway: `WordPress.Security.ValidatedSanitizedInput.InputNotSanitized` flags an unsanitized superglobal read, and a flag you train yourself to ignore here is a flag you ignore on the next `$_POST` field that does matter. Its sibling code `WordPress.Security.ValidatedSanitizedInput.InputNotValidated` covers the separate mistake of reading an index without an `isset()` guard — see File Uploads below.
 
 ---
 
@@ -241,7 +241,8 @@ add_action( 'wp_ajax_my_plugin_upload', function (): void {
     current_user_can( 'upload_files' ) || wp_send_json_error( 'Unauthorized', 403 );
 
     // Check the index exists first — a request can omit the field entirely, and
-    // phpcs errors on an unguarded superglobal index under the VIP ruleset.
+    // WordPress.Security.ValidatedSanitizedInput.InputNotValidated flags an
+    // unguarded superglobal index.
     if ( ! isset( $_FILES['my_file'] ) ) {
         wp_send_json_error( 'No file uploaded.' );
     }
