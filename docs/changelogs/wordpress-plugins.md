@@ -1,6 +1,6 @@
 # wordpress-plugins — Changelog
 
-## v0.2.0 — Unreleased
+## v0.2.0 — 2026-08-07
 
 ### Added — test harness, audit coverage, admin-UI reference
 
