@@ -47,6 +47,9 @@ composer fix    # phpcbf — auto-fix what it can
     <!-- Exclude generated / third-party code. -->
     <exclude-pattern>*/vendor/*</exclude-pattern>
     <exclude-pattern>*/node_modules/*</exclude-pattern>
+    <!-- tests/bootstrap.php defines global WP function stubs (add_action, __, ...);
+         PrefixAllGlobals cannot be satisfied there, so the tests tree is excluded. -->
+    <exclude-pattern>*/tests/*</exclude-pattern>
 
     <!-- Target PHP 8.1+. -->
     <config name="testVersion" value="8.1-"/>
@@ -76,10 +79,10 @@ composer fix    # phpcbf — auto-fix what it can
 
 Key directives:
 
-- `<file>.</file>` + `exclude-pattern` — scans from project root, strips `vendor/` and `node_modules/`.
+- `<file>.</file>` + `exclude-pattern` — scans from project root, strips `vendor/`, `node_modules/`, and `tests/`. The `tests/` exclusion is deliberate: the emitted `tests/bootstrap.php` defines global WordPress function names on purpose, which `PrefixAllGlobals` would reject. Excluding the tree beats scattering suppression comments through a file whose entire job is the "violation".
 - `testVersion` — tells PHPCompatibility sniffs which PHP floor to enforce (8.1+).
 - `WordPress-VIP-Go` builds on `WordPressVIPMinimum` (curated WPCS subset, not the full standards); listing both is explicit and valid.
-- `WordPress-Docs` — enforces PHPDoc on classes and methods.
+- `WordPress-Docs` — enforces that file, class, and function docblocks exist. It does not check for `@since` (no WPCS sniff does) — see [`documentation.md`](documentation.md).
 
 ---
 

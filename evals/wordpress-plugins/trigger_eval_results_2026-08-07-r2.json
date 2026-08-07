@@ -1,0 +1,409 @@
+{
+  "skill_name": "wordpress-plugins",
+  "description": "Build, audit, secure, and scale WordPress plugins to VIP Coding Standards, with a deterministic scaffolder. Use for all WordPress plugin work: build a plugin, plugin development, WordPress VIP plugin, VIP coding standards, VIPCS, VIP compliant, audit my plugin, scaffold a plugin, composer autoload, PSR-4, plugin performance, object cache, transients, plugin security, nonces, escape output, prepared statements, readme.txt, plugin release, shortcodes, REST endpoints, register post type or taxonomy, enqueue scripts/styles, admin settings page, Options/Settings API, activation/deactivation/uninstall hooks, cron jobs, wp_schedule_event, multisite or network-activated plugin, phpcs, plugin unit tests, Brain Monkey, PHPUnit, plugin changelog, plugin versioning. NOT for: Gutenberg blocks or block editor components (use wordpress-blocks); theme code in functions.php or theme templates (use wordpress-themes); generic OWASP fundamentals unrelated to WordPress (use web-security); block themes or FSE (not covered).",
+  "metadata": {
+    "harness_version": "1.1.0",
+    "upstream_fork_commit": "690f15c",
+    "skill_content_hash": "9e4e828657d0866e39ee2f60cd2b0b3e3eec4d71618f2f525d73c63c6894e8c3",
+    "eval_set_hash": "6006edb6e155642d35f82e1806db18c5350f11799f7f2e829ebb549b38a6f510",
+    "model": "opus",
+    "timestamp": "2026-08-07T15:01:31+00:00",
+    "timeout": 600,
+    "runs_per_query": 5,
+    "trigger_threshold": 0.5,
+    "argv": [
+      "--eval-set",
+      "/Users/jrf1039/files/repo/claude-skills/.worktrees/wp-v020/evals/wordpress-plugins/trigger_eval.json",
+      "--skill-path",
+      "/Users/jrf1039/files/repo/claude-skills/.worktrees/wp-v020/wordpress-plugins",
+      "--sibling",
+      "/Users/jrf1039/files/repo/claude-skills/.worktrees/wp-v020/wordpress-themes",
+      "--sibling",
+      "/Users/jrf1039/files/repo/claude-skills/.worktrees/wp-v020/wordpress-blocks",
+      "--sibling",
+      "/Users/jrf1039/files/repo/claude-skills/.worktrees/wp-v020/web-security",
+      "--sibling",
+      "/Users/jrf1039/files/repo/claude-skills/.worktrees/wp-v020/git-tagging",
+      "--sibling",
+      "/Users/jrf1039/files/repo/claude-skills/.worktrees/wp-v020/sass",
+      "--model",
+      "opus",
+      "--runs-per-query",
+      "5",
+      "--num-workers",
+      "6",
+      "--timeout",
+      "600",
+      "--verbose"
+    ],
+    "siblings": [
+      "wordpress-themes",
+      "wordpress-blocks",
+      "web-security",
+      "git-tagging",
+      "css-specialist"
+    ],
+    "description_overridden": false
+  },
+  "results": [
+    {
+      "query": "i'm building a wp plugin for our events calendar \u2014 custom post type, admin settings page, and it has to pass VIP review. scaffold it out for me",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "audit wp-content/plugins/acme-analytics for VIP compliance before we open the PR to the vip repo",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "add a REST endpoint to my plugin that returns the 10 latest 'deal' posts as json, public read-only",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "vip reviewers flagged my plugin for uncached remote calls, the fetch happens in src/Feed.php \u2014 fix it properly",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 0.6,
+      "triggers": 3,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        33872,
+        33446
+      ],
+      "pass": true
+    },
+    {
+      "query": "set up phpcs with the vip coding standards in this plugin repo, we use composer",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "need a [countdown date=2026-09-01] shortcode in my plugin that renders a live countdown, make sure output is escaped right",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "write phpunit tests for the Settings class in my wordpress plugin, we mock wp functions with WP_Mock",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 0.6,
+      "triggers": 3,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        23779,
+        null,
+        83546,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "my plugin needs a weekly cron job that syncs products from the supplier api overnight",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 1.0,
+      "triggers": 5,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "pass": true
+    },
+    {
+      "query": "prepping v1.2.0 of the plugin \u2014 update readme.txt stable tag and the changelog section",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        20779,
+        19234,
+        25778,
+        16723,
+        16184
+      ],
+      "pass": false
+    },
+    {
+      "query": "is posts_per_page -1 ok here? it runs in our plugin on every archive page load",
+      "should_trigger": true,
+      "status": "ok",
+      "trigger_rate": 0.8,
+      "triggers": 4,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        null,
+        null,
+        null,
+        null,
+        25492
+      ],
+      "pass": true
+    },
+    {
+      "query": "add a custom image size and enqueue the new stylesheet from my theme's functions.php",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        52617,
+        42549,
+        40708,
+        44715,
+        68057
+      ],
+      "pass": true,
+      "routed": {
+        "wordpress-themes-skill": 5
+      }
+    },
+    {
+      "query": "build a gutenberg block with a MediaUpload image picker and a server-side render callback",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        190833,
+        180508,
+        297878,
+        202662,
+        228528
+      ],
+      "pass": true,
+      "routed": {
+        "wordpress-blocks-skill": 5
+      }
+    },
+    {
+      "query": "explain the OWASP top 10 2021 and which security headers i should set on my nginx server",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        71376,
+        66314,
+        65852,
+        67472,
+        67277
+      ],
+      "pass": true,
+      "routed": {
+        "web-security-skill": 5
+      }
+    },
+    {
+      "query": "tag v2.0.0 of my repo and create a github release with the changelog notes",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        24667,
+        25911,
+        25148,
+        24713,
+        41335
+      ],
+      "pass": true,
+      "routed": {
+        "git-tagging-skill": 3
+      }
+    },
+    {
+      "query": "refactor the wp admin page css into sass partials with BEM naming",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        17146,
+        26000,
+        21914,
+        22820,
+        27014
+      ],
+      "pass": true
+    },
+    {
+      "query": "debug this php fatal: Cannot redeclare function formatMoney() in my laravel app",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        33582,
+        36920,
+        25464,
+        30495,
+        24193
+      ],
+      "pass": true
+    },
+    {
+      "query": "how do i bulk-deactivate plugins across a multisite network with wp-cli?",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        18583,
+        24679,
+        19310,
+        28445,
+        19939
+      ],
+      "pass": true
+    },
+    {
+      "query": "create a block theme with theme.json design tokens and FSE templates",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        446363,
+        277333,
+        139873,
+        243712,
+        212756
+      ],
+      "pass": true
+    },
+    {
+      "query": "my woocommerce checkout is slow \u2014 which caching plugin should i install, wp rocket or w3 total cache?",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        38415,
+        25699,
+        28438,
+        41224,
+        32491
+      ],
+      "pass": true
+    },
+    {
+      "query": "write a python script that scaffolds a flask project structure with blueprints",
+      "should_trigger": false,
+      "status": "ok",
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 5,
+      "errors": 0,
+      "durations_ms": [
+        90299,
+        239784,
+        283537,
+        206922,
+        131593
+      ],
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 20,
+    "passed": 19,
+    "failed": 1,
+    "error_runs": 0,
+    "error_queries": 0
+  }
+}

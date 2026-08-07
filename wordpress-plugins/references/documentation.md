@@ -8,7 +8,9 @@ Release mechanics (semver, git tags, GitHub Releases, CHANGELOG.md) are owned by
 
 ## PHPDoc
 
-The `WordPress-Docs` PHPCS ruleset (included via `phpcs.xml.dist`) enforces PHPDoc on classes and methods. The examples below match what the scaffolder emits and what VIPCS expects.
+The `WordPress-Docs` PHPCS ruleset (included via `phpcs.xml.dist`) enforces that file, class, and function docblocks exist — a missing one is a lint error — and it validates `@param` tags against the signature: a tag naming a parameter the method does not have is an error, and so is a parameter with no tag. It does not require `@return`, and WPCS ships no `@since` sniff at all, so `@since` is convention the linter cannot enforce for you.
+
+**The conventions below are for code you write, not a description of the skeleton.** The scaffolder emits `@package` on every file docblock and `@var` on the singleton property; it emits no `@since`, `@param`, or `@return` anywhere, and its method docblocks are summary-only (`/** Boot the plugin. */`) rather than the tag structure documented here. That skeleton lints clean only because every method in the emitted `src/Plugin.php` takes zero arguments, and because `tests/` — whose stubs do take arguments and document none of them — is excluded from phpcs entirely. Add a parameter to `register_hooks()` or write any new method with one, and phpcs will require a matching `@param` immediately.
 
 ### File-level docblock
 
@@ -130,7 +132,7 @@ The scaffolder emits a `readme.txt` skeleton. The exact fields it produces:
 Contributors:      oiler
 Tags:              wordpress, vip
 Requires at least: 6.0
-Tested up to:      6.5
+Tested up to:      7.0
 Requires PHP:      8.1
 Stable tag:        0.1.0
 License:           GPL-2.0-or-later
@@ -205,16 +207,16 @@ Comment the **why**, not the what. If the name of the function or variable alrea
 **Skip it — the name explains it:**
 
 ```php
-// Flush rewrite rules.    ← useless; flush_rewrite_rules() says the same
-flush_rewrite_rules();
+// Register the admin page.
+add_menu_page( 'My Plugin', 'My Plugin', 'manage_options', 'my_plugin', 'render_admin_page' );
 ```
 
 **Keep it — the why isn't obvious:**
 
 ```php
-// Only flush on activation, not on every page load — each flush causes
-// a full database write.
-flush_rewrite_rules();
+// Priority 9 ensures we run before the default priority-10 'save_post' handlers,
+// allowing us to validate and cache post data before other plugins process it.
+add_action( 'save_post', 'validate_and_cache', 9 );
 ```
 
 ```php

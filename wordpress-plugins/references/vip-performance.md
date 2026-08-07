@@ -56,11 +56,39 @@ if ( false === $meta ) {
 
 ---
 
+## Option Autoload and `alloptions`
+
+Every row in `wp_options` carries an autoload flag. On each request WordPress runs a single query for all autoloaded options and caches the entire result as one serialized blob under the cache key `alloptions` in the `options` group (`wp_load_alloptions()`). Autoload therefore does not mean "make this option fast to read" — it means "add this option's full value to a payload every request pays for, including the requests that never read it."
+
+The failure mode is the blob, not any single row. Because `alloptions` is cached as one object, a single large or frequently rewritten option inflates and invalidates the whole thing: every autoloaded option is re-queried and re-unserialized on the next request. The usual causes are a big serialized settings array, a cached API response parked in an option instead of a transient, or a log that grows without a cap. The symptom is elevated latency sitewide rather than on the pages that touch the option, which is why this is hard to attribute to the plugin responsible.
+
+> **VIP-Platform:** The `alloptions` blob lives in the persistent object cache, so every cache miss fetches the whole blob across the network — the cost of a bloated blob scales with total request volume, not with how often your option is read.
+
+The discipline: autoload `false` for anything read only on a settings screen, in a cron job, or on one template. Set it where the row is written — `add_option( $name, $default, '', false )` on creation, `update_option( $name, $value, false )` to demote an existing row. `register_setting()` has no autoload argument and never writes the row, so it cannot control this; Settings API mechanics are in [admin-ui.md](admin-ui.md).
+
+WordPress 6.6 added a size-aware default: `add_option()`'s `$autoload` parameter now defaults to `null`, meaning "let core decide," and values above 150,000 bytes (filterable via `wp_max_autoloaded_option_size`) are stored as non-autoloaded. Treat that as a backstop against the worst case rather than as the control — it judges size only, and a 2 KB option read once a month is still worth demoting deliberately. WordPress 6.7 deprecated the legacy `'yes'`/`'no'` string values in favor of booleans.
+
+```php
+// New row — opt out of autoload for an option only the settings screen reads.
+add_option( 'my_plugin_options', $defaults, '', false ); // 3rd arg is the unused $deprecated slot; 4th is $autoload.
+
+// Existing row created with autoload on — demote it in a versioned upgrade routine.
+if ( version_compare( (string) get_option( 'my_plugin_version', '0' ), '2.0.0', '<' ) ) {
+    update_option( 'my_plugin_options', get_option( 'my_plugin_options' ), false );
+    update_option( 'my_plugin_version', '2.0.0' );
+}
+
+// Rarely-read cached payloads belong in a transient, not an autoloaded option.
+set_transient( 'my_plugin_feed_items', $data, HOUR_IN_SECONDS );
+```
+
+---
+
 ## Mandatory Remote-Call Caching
 
 Every `wp_remote_get`, `wp_remote_post`, and `wp_oembed_get` call **must** be wrapped in a cache layer (object cache or transient) with a sane TTL. Uncached remote calls block the PHP process for the full request duration on every page load and cause cascading timeouts under traffic.
 
-Always pass a `timeout` argument. Always use the WP HTTP API — never raw `curl_exec`.
+Always pass a `timeout` argument: the WP HTTP API defaults to 5 seconds, but a filter (`http_request_timeout`) or a different transport can move it, and an unset timeout means your page-load budget is set by somebody else's code. Always use the WP HTTP API rather than raw `curl_exec` — the API is what VIP's platform instruments, filters, and applies its outbound-request policy to, so a direct cURL call is invisible to the platform and unfilterable by other plugins.
 
 ```php
 function my_plugin_fetch_api_data( string $endpoint ): array|false {

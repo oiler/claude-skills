@@ -183,7 +183,9 @@ Advisories are quality and style issues — not platform-blocking on VIP, but ex
 
 ### A3 — Missing `@since` Tag
 
-**What to look for:** For each docblock that contains `@param` or `@return`, confirm a sibling `@since` line is present in the same docblock. A single `grep` cannot detect a missing tag across docblock lines — rely on `composer lint` with the `WordPress-Docs` standard, which flags this automatically. Review lint output rather than grep output for this item.
+**What to look for:** For each docblock that contains `@param` or `@return`, confirm a sibling `@since` line is present in the same docblock.
+
+**This one is manual — the linter will not find it.** A single `grep` cannot match a tag's absence across the lines of a docblock, and `composer lint` does not close the gap: `WordPress-Docs` enforces that file, class, and function docblocks *exist*, but WPCS ships no `@since` sniff, so a file carrying `@param`/`@return` and no `@since` anywhere lints clean. Read the docblocks.
 
 **Deep reference:** [`documentation.md`](documentation.md) → "`@since` discipline"
 
@@ -214,6 +216,24 @@ Advisories are quality and style issues — not platform-blocking on VIP, but ex
 **Why it matters:** Noise comments get stale, mislead future readers, and obscure the rare comment that explains *why*.
 
 **Deep reference:** [`documentation.md`](documentation.md) → "Inline Comments"
+
+---
+
+### A7 — Test Harness Missing or Broken
+
+**Check (all three, in order):**
+
+1. `phpunit.xml.dist` exists and its `bootstrap` attribute points at a file that exists on disk.
+2. `tests/` contains at least one `*Test.php` file.
+3. `composer.json` defines a `test` script and `composer test` exits 0.
+
+**What to look for:** A phpunit config referencing a bootstrap or test directory that isn't there; an empty `tests/` directory; a `composer.json` with `lint`/`fix` but no `test` script; a `composer test` that errors before running a single test.
+
+**Why it matters:** A harness that errors on first run is worse than no harness — the presence of `phpunit.xml.dist` reads as coverage to every future maintainer, so nobody notices the plugin has never executed a test. A missing harness also blocks TDD on every future change to the plugin.
+
+**Why advisory, not error:** a broken test setup cannot take down the VIP platform, so it doesn't belong in the E taxonomy. It is a single advisory (not three) because all three checks share one root cause and one fix.
+
+**Deep reference:** [`structure-and-scaffolding.md`](structure-and-scaffolding.md) → "Tests" (emitted harness layout, recording stubs, Brain Monkey upgrade path)
 
 ---
 
@@ -274,5 +294,6 @@ Overall: PASS / FAIL (Errors = 0 required to PASS)
 - **VIPCS ruleset, restricted functions, platform constraints** → [`vip-standards.md`](vip-standards.md)
 - **Security APIs** (nonces, capabilities, escaping, prepared statements, REST) → [`security.md`](security.md)
 - **Structure, PSR-4, plugin scaffolding** → [`structure-and-scaffolding.md`](structure-and-scaffolding.md)
+- **Admin list-table columns and settings pages** → [`admin-ui.md`](admin-ui.md) → "Audit signals" (wrong-hook registration, missing `edit-` on the sortable filter, unguarded `pre_get_posts`)
 - **PHPDoc, `readme.txt`, inline comments** → [`documentation.md`](documentation.md)
 - **Application-security fundamentals** (OWASP, XSS/CSRF/injection theory) → `web-security` skill

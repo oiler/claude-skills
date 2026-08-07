@@ -54,10 +54,14 @@ add_action( 'wp_ajax_my_plugin_action', function (): void {
 `wp_verify_nonce( $nonce, $action )` returns `false` on failure, `1` if the token is ≤12 hours old, `2` if it is 12–24 hours old.
 
 ```php
-if ( ! wp_verify_nonce( $_POST['nonce'] ?? '', 'my_plugin_action' ) ) {
+$nonce = isset( $_POST['nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['nonce'] ) ) : '';
+
+if ( ! wp_verify_nonce( $nonce, 'my_plugin_action' ) ) {
     wp_die( 'Nonce check failed.', '', [ 'response' => 403 ] );
 }
 ```
+
+Unslash and sanitize the token before passing it in, even though a nonce is opaque and a mangled one just fails the check anyway: `WordPress.Security.ValidatedSanitizedInput.InputNotSanitized` flags an unsanitized superglobal read, and a flag you train yourself to ignore here is a flag you ignore on the next `$_POST` field that does matter. Its sibling code `WordPress.Security.ValidatedSanitizedInput.InputNotValidated` covers the separate mistake of reading an index without an `isset()` guard — see File Uploads below.
 
 ---
 
@@ -184,7 +188,7 @@ $results = $wpdb->get_results(
 
 ### `%i` — identifier placeholder (WP 6.2+)
 
-Dynamic table or column names must use `%i`; do not use `%s` for identifiers.
+Dynamic table or column names must use `%i`. `%s` is the wrong tool: it wraps the value in single quotes, so `FROM 'wp_posts'` is a string literal where a table name belongs and the query is a syntax error. `%i` applies backtick identifier quoting and escapes embedded backticks, which is what makes a variable identifier safe.
 
 ```php
 $rows = $wpdb->get_results(
@@ -235,6 +239,13 @@ register_rest_route( 'my-plugin/v1', '/settings', [
 add_action( 'wp_ajax_my_plugin_upload', function (): void {
     check_ajax_referer( 'my_plugin_upload', 'nonce' );
     current_user_can( 'upload_files' ) || wp_send_json_error( 'Unauthorized', 403 );
+
+    // Check the index exists first — a request can omit the field entirely, and
+    // WordPress.Security.ValidatedSanitizedInput.InputNotValidated flags an
+    // unguarded superglobal index.
+    if ( ! isset( $_FILES['my_file'] ) ) {
+        wp_send_json_error( 'No file uploaded.' );
+    }
 
     // 'test_form' => false: nonce already verified above.
     $file = wp_handle_upload( $_FILES['my_file'], [ 'test_form' => false ] );
