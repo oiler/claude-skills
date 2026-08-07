@@ -1,0 +1,58 @@
+{
+  "evals": [
+    {
+      "eval_id": 0,
+      "eval_name": "scaffold-and-run-harness",
+      "prompt": "Use the wordpress-plugins skill to scaffold a plugin called 'Team Digest' into {workdir}, then install its dev dependencies and run its linter and its test suite. Report the exact commands you ran and their exit codes.",
+      "assertions": [
+        {
+          "text": "tests/bootstrap.php and tests/PluginTest.php exist in the scaffolded plugin"
+        },
+        {
+          "text": "composer.json contains a test script, phpunit/phpunit ^10 in require-dev, and config.allow-plugins for the phpcodesniffer installer"
+        },
+        {
+          "text": "composer test was run and exited 0"
+        },
+        {
+          "text": "composer lint was run and exited 0"
+        }
+      ]
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "a7-broken-harness-audit",
+      "prompt": "Audit the WordPress plugin at {workdir}/broken-fixture using the wordpress-plugins skill's audit workflow. List every finding with its checklist ID.",
+      "assertions": [
+        {
+          "text": "the audit reports the test harness as missing or broken (A7 for the candidate; any equivalent finding counts for the baseline)"
+        },
+        {
+          "text": "the harness finding cites at least one concrete detection: unresolvable phpunit bootstrap path, no *Test.php in tests/, or composer test absent/failing"
+        }
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "admin-settings-sortable-column",
+      "prompt": "Using the wordpress-plugins skill, extend the plugin at {workdir}/team-digest: add (a) an admin settings page storing an option 'td_digest_options' that is read only on that settings screen, and (b) a sortable 'Priority' column (backed by post meta 'td_priority') on the 'digest' custom post type.",
+      "assertions": [
+        {
+          "text": "register_setting is called with a sanitize_callback"
+        },
+        {
+          "text": "the option is initialized via add_option with autoload false, and no 'autoload' key is passed in register_setting args"
+        },
+        {
+          "text": "all three column hooks are registered: manage_digest_posts_columns, manage_digest_posts_custom_column, manage_edit-digest_sortable_columns"
+        },
+        {
+          "text": "meta-backed ordering is implemented in pre_get_posts guarded by is_admin and main-query checks"
+        },
+        {
+          "text": "column render output is escaped (esc_html/esc_attr/wp_kses_post)"
+        }
+      ]
+    }
+  ]
+}
