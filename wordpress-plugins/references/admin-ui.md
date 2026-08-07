@@ -172,7 +172,7 @@ Escape stored options on output like any other data — `esc_url( $options['api_
 
 ### VIP notes
 
-> **VIP-Platform only.** `register_setting()`'s underlying `add_option()` autoloads by default — every autoloaded option ships on every request via `alloptions`, which on VIP is a flagged performance concern once options grow. For options read only on your settings screen or in a cron job, store with `autoload => false` (pass `'autoload' => false` in the `register_setting` args on WP 6.6+, or `update_option( $name, $value, false )`). Bounding rules and the `alloptions` failure mode: [vip-performance.md](vip-performance.md).
+> **VIP-Platform only.** Options autoload by default — every autoloaded option ships on every request via `alloptions`, which on VIP is a flagged performance concern once options grow. `register_setting()` never touches the database and accepts no `autoload` argument — it only registers sanitize/REST metadata for an option name. Control autoload where the row is actually written: for an option read only on your settings screen or in a cron job, initialize it once with `add_option( 'my_plugin_options', $default, '', false )` (fourth argument `false` = do not autoload), then call `register_setting()` normally; demote an existing row with `update_option( 'my_plugin_options', $value, false )`. Bounding rules and the `alloptions` failure mode: [vip-performance.md](vip-performance.md).
 
 ---
 
