@@ -132,7 +132,7 @@ The scaffolder emits a `readme.txt` skeleton. The exact fields it produces:
 Contributors:      oiler
 Tags:              wordpress, vip
 Requires at least: 6.0
-Tested up to:      6.5
+Tested up to:      7.0
 Requires PHP:      8.1
 Stable tag:        0.1.0
 License:           GPL-2.0-or-later
