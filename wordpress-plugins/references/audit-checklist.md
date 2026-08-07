@@ -294,5 +294,6 @@ Overall: PASS / FAIL (Errors = 0 required to PASS)
 - **VIPCS ruleset, restricted functions, platform constraints** → [`vip-standards.md`](vip-standards.md)
 - **Security APIs** (nonces, capabilities, escaping, prepared statements, REST) → [`security.md`](security.md)
 - **Structure, PSR-4, plugin scaffolding** → [`structure-and-scaffolding.md`](structure-and-scaffolding.md)
+- **Admin list-table columns and settings pages** → [`admin-ui.md`](admin-ui.md) → "Audit signals" (wrong-hook registration, missing `edit-` on the sortable filter, unguarded `pre_get_posts`)
 - **PHPDoc, `readme.txt`, inline comments** → [`documentation.md`](documentation.md)
 - **Application-security fundamentals** (OWASP, XSS/CSRF/injection theory) → `web-security` skill

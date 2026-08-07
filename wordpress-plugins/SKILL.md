@@ -21,7 +21,7 @@ allowed-tools: Bash(uv run *) Bash(composer *) Bash(grep *) Read Write Edit
 
 ## WordPress Plugins skill
 
-Baseline: **WordPress 6.x**, **PHP 8.1+**, **VIP Coding Standards (2025) / VIPCS 3.0+**. All guidance enforces VIP-Platform constraints by default. Rules that apply only on VIP Platform (e.g., no direct DB writes outside designated APIs) are labelled **[VIP only]** so self-hosted developers are not misled.
+Baseline: **WordPress 6.x**, **PHP 8.1+**, **VIP Coding Standards (2025) / VIPCS 3.0+**. All guidance enforces VIP-Platform constraints by default. Rules that apply only on VIP Platform (e.g., no direct DB writes outside designated APIs) carry a **[VIP only]** tag in this file and a **VIP-Platform only** callout in the references, so self-hosted developers are not misled.
 
 Before proceeding, read the reference file that matches your mode (table below). The references contain the authoritative detail; this file routes you to the right one.
 
@@ -69,7 +69,7 @@ The scaffolder produces the main plugin file, PSR-4 `src/` layout, `composer.jso
 
 These apply to every task; no exceptions without an explicit label:
 
-- **VIP constraints by default.** Flag platform-only rules with **[VIP only]** rather than silently omitting them.
+- **VIP constraints by default.** Flag platform-only rules as VIP-only rather than silently omitting them — a self-hosted developer who cannot tell the difference either over-restricts or ignores the whole set.
 - **Cache every remote call.** Wrap `wp_remote_*` calls in transients or object-cache; never hit an external API on every page load.
 - **Bound every query.** All `WP_Query` / `get_posts` calls must set `posts_per_page` or equivalent. No unbounded loops over `get_posts()`.
 - **Escape at echo, not before.** Use `esc_html()`, `esc_attr()`, `esc_url()`, `wp_kses_post()` at the point of output.
