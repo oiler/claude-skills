@@ -1,0 +1,108 @@
+{
+  "skill": "wordpress-plugins",
+  "repo": "/Users/jrf1039/files/repo/claude-skills",
+  "profile": "claude-code",
+  "change_class": "structural",
+  "candidate_version": "0.2.0",
+  "skill_content_hash": "9e4e828657d0866e39ee2f60cd2b0b3e3eec4d71618f2f525d73c63c6894e8c3",
+  "repo_commit": "ee2dea84f6abbd642a8012b75befb328a6f53c39",
+  "preflight_version": "1.1.0",
+  "timestamp": "2026-08-07T15:25:21+00:00",
+  "argv": [
+    "wordpress-plugins",
+    "--change-class",
+    "structural",
+    "--candidate-version",
+    "0.2.0",
+    "--out",
+    "/Users/jrf1039/files/repo/claude-skills/evals/wordpress-plugins/preflight_0.2.0.json"
+  ],
+  "checks": [
+    {
+      "id": "structure",
+      "status": "pass",
+      "detail": "SKILL.md present, name matches, kebab-case"
+    },
+    {
+      "id": "profile",
+      "status": "pass",
+      "detail": "combined description budget 1017/1,536"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "invocation: trigger-eval trigger_eval_results_2026-08-07-r2.json"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "clean-room: clean-room report smoke_2026-08-07.md"
+    },
+    {
+      "id": "validity",
+      "status": "pass",
+      "detail": "trigger_eval_results_2026-08-07-r2.json: no errors, provenance complete"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "trigger artifact trigger_eval_results_2026-08-07-r2.json bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report smoke_2026-08-07.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "wordpress-plugins/ is committed"
+    },
+    {
+      "id": "ceiling",
+      "status": "pass",
+      "detail": "negatives 10/10 clean (0 waived)"
+    },
+    {
+      "id": "regression",
+      "status": "pass",
+      "detail": "shared negatives passing: 10 now vs 10 prior (intersection of 10)"
+    },
+    {
+      "id": "positives",
+      "status": "advisory",
+      "detail": "positives 9/10 (floor, non-gating)"
+    },
+    {
+      "id": "script-tests",
+      "status": "pass",
+      "detail": "scripts suite passed"
+    },
+    {
+      "id": "script-surface",
+      "status": "advisory",
+      "detail": "review by hand: scaffold_plugin.py:593 abs_path.write_text(content, encoding=\"utf-8\"); test_scaffold_plugin.py:6 import json, sys, subprocess, re; test_scaffold_plugin.py:80 result_first = subprocess.run(args_base, capture_output=True, text=Tru; test_scaffold_plugin.py:88 result_second = subprocess.run(args_base, capture_output=True, text=Tr; test_scaffold_plugin.py:277 sys.exit(subprocess.call([sys.executable, \"-m\", \"pytest\", __file__, \"-"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "changelog entry for v0.2.0 present"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "tag wordpress-plugins-v0.2.0 is free"
+    },
+    {
+      "id": "drift",
+      "status": "advisory",
+      "detail": "upstream unchanged since 690f15c"
+    },
+    {
+      "id": "library-status",
+      "status": "advisory",
+      "detail": "docs/library-status.md drifted \u2014 regenerate (PYTHONPATH=\"$HOME/files/projects/001-claude-skills-creator/tools/skill-evals\" python3 -m scripts.library_status)"
+    }
+  ],
+  "overall": "pass"
+}
