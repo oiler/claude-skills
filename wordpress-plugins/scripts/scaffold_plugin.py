@@ -411,7 +411,12 @@ require_once $autoload;
 $GLOBALS['wp_stub_calls'] = [];
 
 /**
- * Reset the recorded stub calls. Call from setUp() so tests stay independent.
+ * Reset the recorded stub calls.
+ *
+ * For tests that exercise code registering hooks on every call. Do NOT call this
+ * from a setUp() that also asserts on Plugin::instance(): the singleton registers
+ * its hooks once per PHP process, so a reset wipes that one recording before the
+ * assertion can read it.
  */
 function wp_stub_reset(): void {{
 \t$GLOBALS['wp_stub_calls'] = [];
