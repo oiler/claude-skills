@@ -193,7 +193,7 @@ and `WordPress-Docs` rulesets.
 
 The scaffolder emits a zero-dependency unit-test harness: `phpunit/phpunit ^10` (pinned because PHPUnit 10 is the last major supporting the PHP 8.1 baseline — 11 requires 8.2+), a bootstrap, and a smoke test. `composer test` runs it.
 
-**How the bootstrap works.** `tests/bootstrap.php` loads the composer autoloader, then defines recording stubs for the WordPress functions unit tests commonly touch (`add_action`, `add_filter`, `__`, `esc_html__`). Hook stubs record each call into `$GLOBALS['wp_stub_calls']`. A `\wp_stub_reset()` helper is defined for tests that want to clear the recorder between cases, but the emitted `PluginTest.php` does not call it — see below for why calling it from `setUp()` breaks the singleton-registration assertion. Every stub is wrapped in `function_exists()` so a heavier bootstrap can define the real functions first without conflict.
+**How the bootstrap works.** `tests/bootstrap.php` loads the composer autoloader, then defines recording stubs for the WordPress functions unit tests commonly touch (`add_action`, `add_filter`, `__`, `esc_html__`). Hook stubs record each call into `$GLOBALS['wp_stub_calls']`. A `\wp_stub_reset()` helper is defined for tests that want to clear the recorder between cases, but the emitted `PluginTest.php` does not call it — see below for why calling it from `setUp()` breaks the singleton-registration assertion. Every stub is wrapped in `function_exists()` so a heavier bootstrap can define the real functions first without conflict. One such definer is handled for you: the bootstrap calls `\Brain\Monkey\setUp()` before the stub block if Brain Monkey is installed, because Brain Monkey would otherwise define its functions too late to win — see "When the stubs stop being enough" below.
 
 Asserting hook registration against the recorder:
 
@@ -215,7 +215,13 @@ This test assumes `register_hooks()` already has an actual `add_action( 'init', 
 composer require --dev brain/monkey:^2.6
 ```
 
-Then have the bootstrap's `function_exists()` guards step aside naturally — Brain Monkey defines the real patchwork functions in `Brain\Monkey\setUp()`, and tests move to `Monkey\Actions\expectAdded( 'init' )` style assertions. For tests that need actual WordPress loaded (database, WP_Query), that is integration-test territory: `wp-phpunit` with a test database, out of scope for the scaffold.
+That is the whole upgrade — the emitted bootstrap already hands the WordPress function definitions over. It calls `\Brain\Monkey\setUp()` right after the autoloader whenever `Brain\Monkey\setUp` exists, so Brain Monkey defines `add_action()`/`add_filter()`/`__()` first and the stub block's `function_exists()` guards then step aside on their own. Tests move to `Monkey\Actions\expectAdded( 'init' )` style assertions and are otherwise ordinary PHPUnit.
+
+Do not delete that handoff. Brain Monkey only loads its hook functions inside `Brain\Monkey\setUp()`, which PHPUnit runs *per test* — after the bootstrap — and its own definitions are `function_exists()`-guarded too. Without the bootstrap-time call the stubs are defined first, Brain Monkey declines to redefine them, and `expectAdded()` never intercepts: the failure surfaces as `Mockery\Exception\InvalidCountException: ... should be called at least 1 times but called 0 times` on a test whose subject plainly did call the hook. Verified empirically against `brain/monkey` 2.7.0 (the `^2.6` resolution) on a fresh scaffold — failing without the handoff, passing with it.
+
+**Installing Brain Monkey retires the recording stubs.** Once Brain Monkey owns `add_action()`, `$GLOBALS['wp_stub_calls']` stays empty, so any `array_column( $GLOBALS['wp_stub_calls'], 1 )` assertion above silently stops seeing hooks and fails. Migrate those tests to `Monkey\Actions\expectAdded()` (or `Monkey\Actions\has()`) in the same change — this is a one-way upgrade, not an additive one. Note also that Mockery expectations do not count as PHPUnit assertions, so an expectation-only test is reported "risky"; add `Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration` to the test class to have them counted.
+
+For tests that need actual WordPress loaded (database, WP_Query), that is integration-test territory: `wp-phpunit` with a test database, out of scope for the scaffold.
 
 ---
 

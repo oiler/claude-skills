@@ -190,6 +190,18 @@ def test_bootstrap_stubs_are_guarded():
     assert "wp_stub_reset" in b
     assert "vendor/autoload.php" in b
 
+def test_bootstrap_hands_function_definitions_to_brain_monkey():
+    """Brain Monkey's add_action()/add_filter() are themselves function_exists()-guarded and
+    are only loaded inside Brain\\Monkey\\setUp(), which runs after this bootstrap. Without an
+    explicit handoff the bootstrap's stubs win the race and Monkey\\Actions\\expectAdded()
+    silently never intercepts (verified against brain/monkey 2.7.0). The handoff must sit
+    before the stub block so the existing function_exists() guards step aside."""
+    b = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/tests/bootstrap.php"]
+    assert "function_exists( 'Brain\\\\Monkey\\\\setUp' )" in b
+    assert "Brain\\Monkey\\setUp();" in b
+    assert b.index("Brain\\Monkey\\setUp();") < b.index("function_exists( 'add_action' )")
+
+
 def test_plugin_test_uses_namespace():
     t = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/tests/PluginTest.php"]
     assert "namespace My_Plugin\\Tests;" in t

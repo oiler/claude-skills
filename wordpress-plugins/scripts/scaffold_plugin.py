@@ -393,8 +393,8 @@ def _tests_bootstrap_php(name: str, namespace: str, text_domain: str, slug: str)
  *
  * The stubs let unit tests run without loading WordPress. Each hook stub records
  * its call into $GLOBALS['wp_stub_calls'] so tests can assert hook registration.
- * Every stub is guarded by function_exists() so an integration bootstrap
- * (wp-phpunit, Brain Monkey) can define the real functions first and coexist.
+ * Every stub is guarded by function_exists() so a real implementation loaded
+ * earlier (wp-phpunit, Brain Monkey) wins and the stub stands down.
  *
  * @package {namespace}
  */
@@ -407,6 +407,17 @@ if ( ! file_exists( $autoload ) ) {{
 \texit( 1 );
 }}
 require_once $autoload;
+
+// Hand the WordPress function definitions to Brain Monkey when it is installed. Its
+// add_action()/add_filter() are function_exists()-guarded too, and it only loads them
+// inside Brain\\Monkey\\setUp() -- which runs per test, i.e. after this bootstrap. Left
+// alone, the stubs below would be defined first, Brain Monkey would decline to redefine
+// them, and Monkey\\Actions\\expectAdded() would silently never intercept. Calling setUp()
+// here just require_once's Brain Monkey's function files (and Patchwork); it creates no
+// state, so it needs no matching tearDown().
+if ( function_exists( 'Brain\\\\Monkey\\\\setUp' ) ) {{
+\t\\Brain\\Monkey\\setUp();
+}}
 
 $GLOBALS['wp_stub_calls'] = [];
 
