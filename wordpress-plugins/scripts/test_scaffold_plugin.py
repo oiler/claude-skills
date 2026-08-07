@@ -195,10 +195,13 @@ def test_bootstrap_hands_function_definitions_to_brain_monkey():
     are only loaded inside Brain\\Monkey\\setUp(), which runs after this bootstrap. Without an
     explicit handoff the bootstrap's stubs win the race and Monkey\\Actions\\expectAdded()
     silently never intercepts (verified against brain/monkey 2.7.0). The handoff must sit
-    before the stub block so the existing function_exists() guards step aside."""
+    after the autoloader -- otherwise function_exists( 'Brain\\Monkey\\setUp' ) is always
+    false and the handoff dies silently -- and before the stub block so the existing
+    function_exists() guards step aside."""
     b = build_files("My Plugin", "My_Plugin", "my-plugin")["my-plugin/tests/bootstrap.php"]
     assert "function_exists( 'Brain\\\\Monkey\\\\setUp' )" in b
     assert "Brain\\Monkey\\setUp();" in b
+    assert b.index("require_once $autoload") < b.index("Brain\\Monkey\\setUp();")
     assert b.index("Brain\\Monkey\\setUp();") < b.index("function_exists( 'add_action' )")
 
 
