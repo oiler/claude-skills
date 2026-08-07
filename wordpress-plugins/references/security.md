@@ -192,7 +192,7 @@ $results = $wpdb->get_results(
 
 ### `%i` — identifier placeholder (WP 6.2+)
 
-Dynamic table or column names must use `%i`; do not use `%s` for identifiers.
+Dynamic table or column names must use `%i`. `%s` is the wrong tool: it wraps the value in single quotes, so `FROM 'wp_posts'` is a string literal where a table name belongs and the query is a syntax error. `%i` applies backtick identifier quoting and escapes embedded backticks, which is what makes a variable identifier safe.
 
 ```php
 $rows = $wpdb->get_results(

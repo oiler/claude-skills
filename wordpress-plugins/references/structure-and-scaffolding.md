@@ -96,8 +96,7 @@ declare(strict_types=1);
 namespace My_Plugin;
 ```
 
-`declare(strict_types=1)` must appear immediately after the plugin-header docblock (and before `namespace`).
-The `namespace` declaration must follow it. VIPCS enforces strict types on VIP.
+`declare(strict_types=1)` must appear immediately after the plugin-header docblock, before `namespace` and before any other statement — PHP requires the `strict_types` declaration to be the very first statement in the file and raises a fatal error otherwise. A docblock is a comment, not a statement, so the plugin header may precede it. VIPCS enforces strict types on VIP.
 
 ### `ABSPATH` guard
 

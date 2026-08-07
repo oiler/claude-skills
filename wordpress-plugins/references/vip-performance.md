@@ -60,7 +60,7 @@ if ( false === $meta ) {
 
 Every `wp_remote_get`, `wp_remote_post`, and `wp_oembed_get` call **must** be wrapped in a cache layer (object cache or transient) with a sane TTL. Uncached remote calls block the PHP process for the full request duration on every page load and cause cascading timeouts under traffic.
 
-Always pass a `timeout` argument. Always use the WP HTTP API — never raw `curl_exec`.
+Always pass a `timeout` argument: the WP HTTP API defaults to 5 seconds, but a filter (`http_request_timeout`) or a different transport can move it, and an unset timeout means your page-load budget is set by somebody else's code. Always use the WP HTTP API rather than raw `curl_exec` — the API is what VIP's platform instruments, filters, and applies its outbound-request policy to, so a direct cURL call is invisible to the platform and unfilterable by other plugins.
 
 ```php
 function my_plugin_fetch_api_data( string $endpoint ): array|false {
