@@ -55,11 +55,12 @@ my-plugin/
 ├── vendor/                # Committed on VIP Go (see VIP-Platform note); absent until
 │   └── autoload.php       #   `composer install` runs on non-VIP deploys
 └── tests/
-    └── bootstrap.php      # Add after scaffolding; PHPUnit looks here per phpunit.xml.dist
+    ├── bootstrap.php      # Autoloader + recording WP stubs (emitted by the scaffolder)
+    └── PluginTest.php     # Singleton smoke tests (emitted by the scaffolder)
 ```
 
-> `tests/bootstrap.php` is not emitted by the scaffolder — add it when writing the first
-> test. PHPUnit is configured to look for `*Test.php` files under `tests/`.
+> The test harness is emitted ready to run: `composer install && composer test` passes
+> on a fresh scaffold. See "Tests" below for what the stubs cover and when to upgrade.
 
 ---
 
@@ -189,6 +190,36 @@ and `WordPress-Docs` rulesets.
 
 ---
 
+## Tests
+
+The scaffolder emits a zero-dependency unit-test harness: `phpunit/phpunit ^10` (pinned because PHPUnit 10 is the last major supporting the PHP 8.1 baseline — 11 requires 8.2+), a bootstrap, and a smoke test. `composer test` runs it.
+
+**How the bootstrap works.** `tests/bootstrap.php` loads the composer autoloader, then defines recording stubs for the WordPress functions unit tests commonly touch (`add_action`, `add_filter`, `__`, `esc_html__`). Hook stubs record each call into `$GLOBALS['wp_stub_calls']`. A `\wp_stub_reset()` helper is defined for tests that want to clear the recorder between cases, but the emitted `PluginTest.php` does not call it — see below for why calling it from `setUp()` breaks the singleton-registration assertion. Every stub is wrapped in `function_exists()` so a heavier bootstrap can define the real functions first without conflict.
+
+Asserting hook registration against the recorder:
+
+```php
+public function test_registers_init_hook(): void {
+	Plugin::instance();
+	$hooks = array_column( $GLOBALS['wp_stub_calls'], 1 );
+	$this->assertContains( 'init', $hooks );
+}
+```
+
+This test assumes `register_hooks()` already has an actual `add_action( 'init', ... )` call in place — against the freshly scaffolded empty stub, the assertion fails because there's nothing to record. It also depends on the recorder still holding what was captured at boot: `Plugin::instance()` is a singleton, so `register_hooks()` runs exactly once per PHP process, on the first call to `instance()` anywhere in the suite — calling `instance()` again inside this test does not re-register anything. Don't call `wp_stub_reset()` in `PluginTest::setUp()` for this reason; a reset there wipes the one-time recording before this test can read it, and the emitted `PluginTest.php` does not call it. `wp_stub_reset()` stays available in `tests/bootstrap.php` for tests that exercise non-singleton code which registers hooks on each call — those can reset between cases safely.
+
+**`tests/` is excluded from phpcs** (see the emitted `phpcs.xml.dist`): the bootstrap defines global WordPress function names by design, which `PrefixAllGlobals` would reject — an exclusion, not a suppression comment, because the "violation" is the file's entire purpose.
+
+**When the stubs stop being enough.** The recording stubs verify *that* hooks were registered, not *how they behave*. Once `register_hooks()` wires real callbacks and you need expectation-style assertions (a filter was applied with specific arguments, a function was called once), upgrade to Brain Monkey:
+
+```bash
+composer require --dev brain/monkey:^2.6
+```
+
+Then have the bootstrap's `function_exists()` guards step aside naturally — Brain Monkey defines the real patchwork functions in `Brain\Monkey\setUp()`, and tests move to `Monkey\Actions\expectAdded( 'init' )` style assertions. For tests that need actual WordPress loaded (database, WP_Query), that is integration-test territory: `wp-phpunit` with a test database, out of scope for the scaffold.
+
+---
+
 ## VIP-Platform: Committed `vendor/`
 
 > **VIP-Platform only.** Self-hosters may skip this section and run `composer install` at
@@ -209,6 +240,8 @@ The scaffolder configures this correctly:
 **Consequence:** `composer update` must be followed by a commit of the updated `vendor/`
 before the change reaches production on VIP.
 
+**Dev dependencies stay out of the committed tree.** The committed `vendor/` is a production artifact — build it with `composer install --no-dev`. Dev dependencies (vipwpcs, phpcs, phpunit) exist only in local and CI installs; a plain `composer install` before committing would ship the entire linting and testing toolchain to production. The split matters more now that the dev tree includes PHPUnit: run `composer install` for daily work, and rebuild with `--no-dev` before committing `vendor/` for a VIP deploy.
+
 Reference: https://docs.wpvip.com/technical-references/vip-codebase/composer/
 
 ---
@@ -220,28 +253,36 @@ Reference: https://docs.wpvip.com/technical-references/vip-codebase/composer/
 ```php
 // In src/Plugin.php
 public static function activate(): void {
-    // Create custom tables, set default options, schedule cron events.
-    flush_rewrite_rules(); // Only here, on activation — never on every page load.
+    // TODO: create tables, set default options, schedule cron events.
 }
 ```
-
-`flush_rewrite_rules()` is correct on activation (and deactivation) because it rebuilds
-the rules once after the plugin registers its custom post types or rewrite rules. Calling
-it on every page load causes a full database write on every request — a performance
-violation that VIPCS will flag.
 
 ### Deactivation
 
 ```php
 public static function deactivate(): void {
-    // Unschedule cron events, remove transients, flush rewrites.
-    flush_rewrite_rules();
+    // TODO: unschedule cron events and clear transients. Leave persistent data
+    // in place; permanent cleanup belongs in uninstall.php.
 }
 ```
 
 Deactivation leaves data in place. It is the right place to clean up runtime state
 (scheduled events, transients) but not permanent data (options, tables) — that belongs
 in `uninstall.php`.
+
+Neither method calls `flush_rewrite_rules()`, even though older WordPress tutorials teach it as the standard activation step for a plugin that registers custom post types or rewrite rules — the function rebuilds the entire rewrite-rules array from scratch and writes it into a single `wp_options` row, so calling it is never a cheap operation, regardless of which hook triggers it.
+
+> **VIP-Platform only.** Rewrite rules are not flushed automatically as part of a VIP Go deploy. After a deploy that adds or changes rewrite rules, the new rules will not work until they are flushed manually, by one of two paths: running WP-CLI through VIP-CLI (`vip @<app-name>.<environment> -- wp rewrite flush`), or the lower-friction option, the Rewrite Rules Inspector — enabled by default in the VIP dashboard under Rewrite Rules → Flush Rules. This is why the scaffolder's `phpcs.xml.dist` ships `WordPressVIPMinimum`, which restricts `flush_rewrite_rules()` outright: the call regenerates the entire rewrite-rules array and writes it to a shared `wp_options` row. (Inference, not a documented VIP rationale — VIP has not published why the sniff restricts the call this way; VIPCS issue #701 is an open request asking for exactly that.) The scaffolder's own `activate()`/`deactivate()` output above satisfies that sniff by not calling the function at all.
+
+Reference: https://docs.wpvip.com/wordpress-skeleton/serve-static-content-wp/
+
+Self-hosted plugins are not bound by VIP's manual flush step, and calling `flush_rewrite_rules()` once on activation — after registering custom post types or rewrite rules — is standard, correct WordPress practice there. It will still trip the `WordPressVIPMinimum.Functions.RestrictedFunctions` sniff this scaffolder ships, though, so a self-hosted project that wants the call back should relax that specific sniff in its own `phpcs.xml.dist` rather than leave the resulting error standing:
+
+```xml
+<rule ref="WordPressVIPMinimum.Functions.RestrictedFunctions">
+    <exclude name="WordPressVIPMinimum.Functions.RestrictedFunctions.flush_rewrite_rules_flush_rewrite_rules"/>
+</rule>
+```
 
 ### Uninstall: `uninstall.php` over the uninstall hook
 

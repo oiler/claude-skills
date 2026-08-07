@@ -205,16 +205,16 @@ Comment the **why**, not the what. If the name of the function or variable alrea
 **Skip it — the name explains it:**
 
 ```php
-// Flush rewrite rules.    ← useless; flush_rewrite_rules() says the same
-flush_rewrite_rules();
+// Register the admin page.
+add_menu_page( 'My Plugin', 'My Plugin', 'manage_options', 'my_plugin', 'render_admin_page' );
 ```
 
 **Keep it — the why isn't obvious:**
 
 ```php
-// Only flush on activation, not on every page load — each flush causes
-// a full database write.
-flush_rewrite_rules();
+// Priority 9 ensures we run before the default priority-10 'save_post' handlers,
+// allowing us to validate and cache post data before other plugins process it.
+add_action( 'save_post', 'validate_and_cache', 9 );
 ```
 
 ```php

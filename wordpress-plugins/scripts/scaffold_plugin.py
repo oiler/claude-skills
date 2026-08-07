@@ -144,7 +144,13 @@ def _composer_json(name: str, namespace: str, text_domain: str, slug: str) -> st
         },
         "require-dev": {
             "automattic/vipwpcs": "*",
-            "dealerdirect/phpcodesniffer-composer-installer": "*"
+            "dealerdirect/phpcodesniffer-composer-installer": "*",
+            "phpunit/phpunit": "^10"
+        },
+        "config": {
+            "allow-plugins": {
+                "dealerdirect/phpcodesniffer-composer-installer": True
+            }
         },
         "autoload": {
             "psr-4": {
@@ -153,7 +159,8 @@ def _composer_json(name: str, namespace: str, text_domain: str, slug: str) -> st
         },
         "scripts": {
             "lint": "phpcs",
-            "fix": "phpcbf"
+            "fix": "phpcbf",
+            "test": "phpunit"
         }
     }
     return json.dumps(data, indent=4) + "\n"
@@ -174,6 +181,9 @@ def _phpcs_xml_dist(name: str, namespace: str, text_domain: str, slug: str) -> s
     <!-- Exclude generated / third-party code. -->
     <exclude-pattern>*/vendor/*</exclude-pattern>
     <exclude-pattern>*/node_modules/*</exclude-pattern>
+    <!-- tests/bootstrap.php defines global WP function stubs (add_action, __, ...);
+         PrefixAllGlobals cannot be satisfied there, so the tests tree is excluded. -->
+    <exclude-pattern>*/tests/*</exclude-pattern>
 
     <!-- Target PHP 8.1+. -->
     <config name="testVersion" value="8.1-"/>
@@ -205,12 +215,11 @@ def _phpcs_xml_dist(name: str, namespace: str, text_domain: str, slug: str) -> s
 def _phpunit_xml_dist(name: str, namespace: str, text_domain: str, slug: str) -> str:
     return """\
 <?xml version="1.0" encoding="UTF-8"?>
-<phpunit
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
     bootstrap="tests/bootstrap.php"
+    cacheDirectory=".phpunit.cache"
     colors="true"
-    convertErrorsToExceptions="true"
-    convertNoticesToExceptions="true"
-    convertWarningsToExceptions="true"
 >
     <testsuites>
         <testsuite name="unit">
@@ -239,7 +248,7 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {{
 }}
 
 // TODO: Remove plugin options, custom database tables, and scheduled events here.
-// Example: delete_option( '{text_domain}_settings' );
+// Example: delete_option( '{text_domain}_settings' ).
 """
 
 
@@ -298,6 +307,7 @@ node_modules/
 .DS_Store
 *.log
 .phpunit.result.cache
+.phpunit.cache/
 """
 
 
@@ -319,7 +329,11 @@ namespace {namespace};
  */
 class Plugin {{
 
-\t/** @var static|null Singleton instance. */
+\t/**
+\t * Singleton instance.
+\t *
+\t * @var static|null
+\t */
 \tprivate static ?self $instance = null;
 
 \t/**
@@ -347,8 +361,16 @@ class Plugin {{
 \t * Called by register_activation_hook() in the main plugin file.
 \t */
 \tpublic static function activate(): void {{
-\t\t// TODO: flush rewrite rules, create tables, set defaults.
-\t\tflush_rewrite_rules();
+\t\t// TODO: create tables, set default options, schedule cron events.
+\t\t//
+\t\t// Do not call flush_rewrite_rules() here. VIPCS restricts it: the call
+\t\t// regenerates the entire rewrite-rules array and writes it to a shared
+\t\t// wp_options row. On VIP, rewrite rules are not flushed automatically
+\t\t// at deploy — after a deploy that adds or changes them, they must be
+\t\t// flushed manually via VIP-CLI: vip @app.env -- wp rewrite flush. If
+\t\t// you register custom post types or rewrite rules and are NOT on VIP,
+\t\t// see references/structure-and-scaffolding.md for the self-hosted
+\t\t// approach.
 \t}}
 
 \t/**
@@ -356,8 +378,115 @@ class Plugin {{
 \t * Called by register_deactivation_hook() in the main plugin file.
 \t */
 \tpublic static function deactivate(): void {{
-\t\t// TODO: clean up scheduled events, temp data.
-\t\tflush_rewrite_rules();
+\t\t// TODO: unschedule cron events and clear transients. Leave persistent data
+\t\t// in place; permanent cleanup belongs in uninstall.php.
+\t}}
+}}
+"""
+
+
+def _tests_bootstrap_php(name: str, namespace: str, text_domain: str, slug: str) -> str:
+    return f"""\
+<?php
+/**
+ * PHPUnit bootstrap: composer autoloader + recording stubs for WordPress functions.
+ *
+ * The stubs let unit tests run without loading WordPress. Each hook stub records
+ * its call into $GLOBALS['wp_stub_calls'] so tests can assert hook registration.
+ * Every stub is guarded by function_exists() so an integration bootstrap
+ * (wp-phpunit, Brain Monkey) can define the real functions first and coexist.
+ *
+ * @package {namespace}
+ */
+
+declare(strict_types=1);
+
+$autoload = __DIR__ . '/../vendor/autoload.php';
+if ( ! file_exists( $autoload ) ) {{
+\tfwrite( STDERR, "tests/bootstrap.php: vendor/autoload.php not found. Run `composer install` first.\\n" );
+\texit( 1 );
+}}
+require_once $autoload;
+
+$GLOBALS['wp_stub_calls'] = [];
+
+/**
+ * Reset the recorded stub calls. Call from setUp() so tests stay independent.
+ */
+function wp_stub_reset(): void {{
+\t$GLOBALS['wp_stub_calls'] = [];
+}}
+
+if ( ! function_exists( 'add_action' ) ) {{
+\t/**
+\t * Recording stub for add_action().
+\t */
+\tfunction add_action( string $hook_name, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {{
+\t\t$GLOBALS['wp_stub_calls'][] = [ 'add_action', $hook_name, $priority, $accepted_args ];
+\t\treturn true;
+\t}}
+}}
+
+if ( ! function_exists( 'add_filter' ) ) {{
+\t/**
+\t * Recording stub for add_filter().
+\t */
+\tfunction add_filter( string $hook_name, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {{
+\t\t$GLOBALS['wp_stub_calls'][] = [ 'add_filter', $hook_name, $priority, $accepted_args ];
+\t\treturn true;
+\t}}
+}}
+
+if ( ! function_exists( '__' ) ) {{
+\t/**
+\t * Pass-through stub for __() — returns the untranslated string.
+\t */
+\tfunction __( string $text, string $domain = 'default' ): string {{
+\t\treturn $text;
+\t}}
+}}
+
+if ( ! function_exists( 'esc_html__' ) ) {{
+\t/**
+\t * Pass-through stub for esc_html__(). Real escaping is WordPress's job; unit
+\t * tests assert on logic, not on escaping output.
+\t */
+\tfunction esc_html__( string $text, string $domain = 'default' ): string {{
+\t\treturn $text;
+\t}}
+}}
+"""
+
+
+def _tests_plugin_test_php(name: str, namespace: str, text_domain: str, slug: str) -> str:
+    return f"""\
+<?php
+/**
+ * Smoke tests for the plugin singleton.
+ *
+ * @package {namespace}
+ */
+
+declare(strict_types=1);
+
+namespace {namespace}\\Tests;
+
+use PHPUnit\\Framework\\TestCase;
+use {namespace}\\Plugin;
+
+/**
+ * Boots the Plugin class against the recording stubs in tests/bootstrap.php.
+ */
+final class PluginTest extends TestCase {{
+
+\tpublic function test_instance_returns_singleton(): void {{
+\t\t$first  = Plugin::instance();
+\t\t$second = Plugin::instance();
+\t\t$this->assertSame( $first, $second );
+\t}}
+
+\tpublic function test_instance_boots_without_error(): void {{
+\t\t$this->assertInstanceOf( Plugin::class, Plugin::instance() );
 \t}}
 }}
 """
@@ -382,6 +511,8 @@ def build_files(name: str, namespace: str, text_domain: str) -> dict[str, str]:
         f"{slug}/.gitattributes": _gitattributes,
         f"{slug}/.gitignore": _gitignore,
         f"{slug}/src/Plugin.php": _src_plugin_php,
+        f"{slug}/tests/bootstrap.php": _tests_bootstrap_php,
+        f"{slug}/tests/PluginTest.php": _tests_plugin_test_php,
     }
 
     return {path: fn(name, namespace, text_domain, slug) for path, fn in builders.items()}

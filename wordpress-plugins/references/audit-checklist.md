@@ -217,6 +217,24 @@ Advisories are quality and style issues — not platform-blocking on VIP, but ex
 
 ---
 
+### A7 — Test Harness Missing or Broken
+
+**Check (all three, in order):**
+
+1. `phpunit.xml.dist` exists and its `bootstrap` attribute points at a file that exists on disk.
+2. `tests/` contains at least one `*Test.php` file.
+3. `composer.json` defines a `test` script and `composer test` exits 0.
+
+**What to look for:** A phpunit config referencing a bootstrap or test directory that isn't there; an empty `tests/` directory; a `composer.json` with `lint`/`fix` but no `test` script; a `composer test` that errors before running a single test.
+
+**Why it matters:** A harness that errors on first run is worse than no harness — the presence of `phpunit.xml.dist` reads as coverage to every future maintainer, so nobody notices the plugin has never executed a test. A missing harness also blocks TDD on every future change to the plugin.
+
+**Why advisory, not error:** a broken test setup cannot take down the VIP platform, so it doesn't belong in the E taxonomy. It is a single advisory (not three) because all three checks share one root cause and one fix.
+
+**Deep reference:** [`structure-and-scaffolding.md`](structure-and-scaffolding.md) → "Tests" (emitted harness layout, recording stubs, Brain Monkey upgrade path)
+
+---
+
 ## Report Template
 
 Fill this skeleton for each plugin audit. Remove sections with no findings.
