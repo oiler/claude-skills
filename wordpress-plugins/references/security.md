@@ -54,10 +54,18 @@ add_action( 'wp_ajax_my_plugin_action', function (): void {
 `wp_verify_nonce( $nonce, $action )` returns `false` on failure, `1` if the token is ≤12 hours old, `2` if it is 12–24 hours old.
 
 ```php
-if ( ! wp_verify_nonce( $_POST['nonce'] ?? '', 'my_plugin_action' ) ) {
+$nonce = isset( $_POST['nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['nonce'] ) ) : '';
+
+if ( ! wp_verify_nonce( $nonce, 'my_plugin_action' ) ) {
     wp_die( 'Nonce check failed.', '', [ 'response' => 403 ] );
 }
 ```
+
+Unslash and sanitize the token before passing it in, even though a nonce is
+opaque and a mangled one just fails the check: VIPCS's
+`WordPress.Security.ValidatedSanitizedInput` warns on any raw superglobal read,
+and a warning you learn to ignore here is a warning you ignore on the next
+`$_POST` field that does matter.
 
 ---
 
@@ -235,6 +243,12 @@ register_rest_route( 'my-plugin/v1', '/settings', [
 add_action( 'wp_ajax_my_plugin_upload', function (): void {
     check_ajax_referer( 'my_plugin_upload', 'nonce' );
     current_user_can( 'upload_files' ) || wp_send_json_error( 'Unauthorized', 403 );
+
+    // Check the index exists first — a request can omit the field entirely, and
+    // phpcs errors on an unguarded superglobal index under the VIP ruleset.
+    if ( ! isset( $_FILES['my_file'] ) ) {
+        wp_send_json_error( 'No file uploaded.' );
+    }
 
     // 'test_form' => false: nonce already verified above.
     $file = wp_handle_upload( $_FILES['my_file'], [ 'test_form' => false ] );
