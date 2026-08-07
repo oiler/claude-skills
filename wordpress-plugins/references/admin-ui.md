@@ -130,6 +130,8 @@ function sanitize_options( $input ): array {
 }
 ```
 
+**`register_setting()` takes no `autoload` argument — this is the trap in this section.** Its `$args` array accepts exactly `type`, `label`, `description`, `sanitize_callback`, `show_in_rest`, and `default`; `label` was WordPress 6.6's only addition to that list. Models and tutorials routinely invent an `'autoload' => false` key here and justify it with a WP 6.6 change that does not exist — there is no `autoload` key in any WordPress version. It fails silently rather than loudly: `register_setting()` only records sanitize and REST metadata against an option name and never writes to the database, so an unrecognized key is ignored with no notice, no error, and an option that still autoloads. Autoload is a property of the row, so set it where the row is written — `add_option( 'my_plugin_options', $default, '', false )` on first write (third argument is the unused `$deprecated` slot, fourth is `$autoload`), or `update_option( 'my_plugin_options', $value, false )` to demote a row that already exists. Register the setting normally alongside either call. Why autoload matters at scale: [vip-performance.md](vip-performance.md).
+
 **Prefix option names yourself.** VIPCS's `PrefixAllGlobals` sniff checks functions, classes, global variables, constants, and hook names — it does **not** check option names passed to `register_setting()`/`update_option()`. An unprefixed option name (`options`, `settings`, `api_key`) collides silently with other plugins in the shared `wp_options` table, and no linter will tell you. Prefix with the plugin slug (`my_plugin_options`) as a convention this file carries because phpcs can't.
 
 ### The settings page
@@ -172,7 +174,7 @@ Escape stored options on output like any other data — `esc_url( $options['api_
 
 ### VIP notes
 
-> **VIP-Platform only.** Options autoload by default — every autoloaded option ships on every request via `alloptions`, which on VIP is a flagged performance concern once options grow. `register_setting()` never touches the database and accepts no `autoload` argument — it only registers sanitize/REST metadata for an option name. Control autoload where the row is actually written: for an option read only on your settings screen or in a cron job, initialize it once with `add_option( 'my_plugin_options', $default, '', false )` (fourth argument `false` = do not autoload), then call `register_setting()` normally; demote an existing row with `update_option( 'my_plugin_options', $value, false )`. Bounding rules and the `alloptions` failure mode: [vip-performance.md](vip-performance.md).
+> **VIP-Platform only.** Autoloaded options ship on every request inside the `alloptions` blob, so a settings row that only this admin screen ever reads is overhead charged to every front-end request — a flagged performance concern on VIP once the blob grows. Opt out at write time using the `add_option`/`update_option` pattern above; the failure mode and the bounding rules are in [vip-performance.md](vip-performance.md).
 
 ---
 
