@@ -183,7 +183,9 @@ Advisories are quality and style issues — not platform-blocking on VIP, but ex
 
 ### A3 — Missing `@since` Tag
 
-**What to look for:** For each docblock that contains `@param` or `@return`, confirm a sibling `@since` line is present in the same docblock. A single `grep` cannot detect a missing tag across docblock lines — rely on `composer lint` with the `WordPress-Docs` standard, which flags this automatically. Review lint output rather than grep output for this item.
+**What to look for:** For each docblock that contains `@param` or `@return`, confirm a sibling `@since` line is present in the same docblock.
+
+**This one is manual — the linter will not find it.** A single `grep` cannot match a tag's absence across the lines of a docblock, and `composer lint` does not close the gap: `WordPress-Docs` enforces that file, class, and function docblocks *exist*, but WPCS ships no `@since` sniff, so a file carrying `@param`/`@return` and no `@since` anywhere lints clean. Read the docblocks.
 
 **Deep reference:** [`documentation.md`](documentation.md) → "`@since` discipline"
 

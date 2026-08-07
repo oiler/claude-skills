@@ -8,7 +8,7 @@ Release mechanics (semver, git tags, GitHub Releases, CHANGELOG.md) are owned by
 
 ## PHPDoc
 
-The `WordPress-Docs` PHPCS ruleset (included via `phpcs.xml.dist`) enforces PHPDoc on classes and methods. The examples below match what the scaffolder emits and what VIPCS expects.
+The `WordPress-Docs` PHPCS ruleset (included via `phpcs.xml.dist`) enforces that file, class, and function docblocks exist — a missing one is a lint error. It does not check their *contents* beyond structure, and WPCS ships no `@since` sniff at all, so everything below about `@since` is convention the linter cannot enforce for you. The scaffolder's stubs follow these conventions except for `@since`, which a 0.1.0 skeleton has no release history to record.
 
 ### File-level docblock
 
