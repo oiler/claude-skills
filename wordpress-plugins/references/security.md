@@ -61,11 +61,7 @@ if ( ! wp_verify_nonce( $nonce, 'my_plugin_action' ) ) {
 }
 ```
 
-Unslash and sanitize the token before passing it in, even though a nonce is
-opaque and a mangled one just fails the check: VIPCS's
-`WordPress.Security.ValidatedSanitizedInput` warns on any raw superglobal read,
-and a warning you learn to ignore here is a warning you ignore on the next
-`$_POST` field that does matter.
+Unslash and sanitize the token before passing it in, even though a nonce is opaque and a mangled one just fails the check anyway: VIPCS's `WordPress.Security.ValidatedSanitizedInput` warns on any raw superglobal read, and a warning you train yourself to ignore here is a warning you ignore on the next `$_POST` field that does matter.
 
 ---
 

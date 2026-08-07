@@ -82,7 +82,7 @@ Key directives:
 - `<file>.</file>` + `exclude-pattern` — scans from project root, strips `vendor/`, `node_modules/`, and `tests/`. The `tests/` exclusion is deliberate: the emitted `tests/bootstrap.php` defines global WordPress function names on purpose, which `PrefixAllGlobals` would reject. Excluding the tree beats scattering suppression comments through a file whose entire job is the "violation".
 - `testVersion` — tells PHPCompatibility sniffs which PHP floor to enforce (8.1+).
 - `WordPress-VIP-Go` builds on `WordPressVIPMinimum` (curated WPCS subset, not the full standards); listing both is explicit and valid.
-- `WordPress-Docs` — enforces PHPDoc on classes and methods.
+- `WordPress-Docs` — enforces that file, class, and function docblocks exist. It does not check for `@since` (no WPCS sniff does) — see [`documentation.md`](documentation.md).
 
 ---
 
