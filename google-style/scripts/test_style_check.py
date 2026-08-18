@@ -93,6 +93,55 @@ def test_mask_blanks_table_delimiter_rows():
     assert "| A | B |" in masked
 
 
+LEAK_CORPUS = [
+    "Prose.\n\n```py\nx=1\n```\n    simply utilize the file(s)\n",
+    "---\nname: x\n---\n    simply utilize the file(s)\n",
+    "Prose.\n\n    simply utilize the file(s)",
+    "Prose.\n\n```bash\nsimply utilize the file(s)\n",
+    "```\nok\n```\n\n```\nsimply utilize the file(s)\n",
+    "```html\n<!-- sample\n```\n\nReal prose: please simply utilize the file(s).\n\n<!-- end -->\n",
+]
+
+
+def test_mask_blanks_indented_blocks_after_other_masked_regions():
+    """A masked fence or front matter leaves a whitespace-only line, not a blank one."""
+    after_fence = segment.mask(LEAK_CORPUS[0])
+    assert "utilize" not in after_fence
+    assert "Prose." in after_fence
+
+    after_front_matter = segment.mask(LEAK_CORPUS[1])
+    assert "utilize" not in after_front_matter
+
+    at_eof = segment.mask(LEAK_CORPUS[2])
+    assert "utilize" not in at_eof
+
+
+def test_mask_blanks_an_unclosed_fence_to_end_of_file():
+    """A fence with no closing delimiter is still a code sample, not prose."""
+    single = segment.mask(LEAK_CORPUS[3])
+    assert "utilize" not in single
+    assert "Prose." in single
+
+    pair = segment.mask(LEAK_CORPUS[4])
+    assert "utilize" not in pair
+
+
+def test_mask_does_not_let_a_comment_inside_a_fence_swallow_prose():
+    """Over-masking is the silent failure: blanked prose is never checked at all."""
+    masked = segment.mask(LEAK_CORPUS[5])
+    assert "Real prose: please simply utilize the file(s)." in masked
+    assert "end" not in masked
+
+
+def test_mask_is_length_preserving_and_idempotent():
+    fixture = (HERE / "fixtures" / "fenced_code.md").read_text(encoding="utf-8")
+    for text in [*LEAK_CORPUS, fixture]:
+        once = segment.mask(text)
+        assert len(once) == len(text)
+        assert once.count("\n") == text.count("\n")
+        assert segment.mask(once) == once
+
+
 import style_check
 import rules
 
