@@ -138,6 +138,10 @@ REGRESSION_CORPUS = [
     "<!--\nnote\n```\n-->\nReal prose here.\n",
     "Text.\n\n    a()\n\n    b()\n\nProse.\n",
     "Text.\n\n    a()\n\n\nProse.\n",
+    "Intro.\n\n```text\nexample:\n    ```\ndone\n```\n\nTail prose must survive.\n",
+    "Intro.\n\n```text\n    ```\nmore body\n```\n\nTail prose must survive.\n",
+    "- item\n\n  ```py\n  x = 1\n  ```\n\nTail prose.\n",
+    "- item\n\n    ```py\n    x = 1\n    ```\n\nTail prose.\n",
 ]
 
 
@@ -167,6 +171,32 @@ def test_mask_does_not_run_an_indented_block_into_following_prose():
     masked = segment.mask(REGRESSION_CORPUS[3])
     assert "a()" not in masked
     assert "Prose." in masked
+
+
+def test_mask_does_not_close_a_fence_on_an_indented_fence_line_in_its_body():
+    """Showing a nested fence example inside a fence is routine Markdown documentation.
+
+    Closing early turns the real closer into an unclosed opener, and the to-EOF branch
+    then blanks the rest of the file.
+    """
+    trailing_body = segment.mask(REGRESSION_CORPUS[4])
+    assert "Tail prose must survive." in trailing_body
+    assert "done" not in trailing_body
+
+    leading_body = segment.mask(REGRESSION_CORPUS[5])
+    assert "Tail prose must survive." in leading_body
+    assert "more body" not in leading_body
+
+
+def test_mask_closes_a_fence_nested_in_a_list_item():
+    """Opener and closer share the list's indent — the case the closer must still handle."""
+    two_space = segment.mask(REGRESSION_CORPUS[6])
+    assert "x = 1" not in two_space
+    assert "Tail prose." in two_space
+
+    four_space = segment.mask(REGRESSION_CORPUS[7])
+    assert "x = 1" not in four_space
+    assert "Tail prose." in four_space
 
 
 def test_mask_preserves_length_and_is_stable_over_the_corpus():

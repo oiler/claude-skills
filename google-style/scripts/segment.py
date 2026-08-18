@@ -33,14 +33,16 @@ from __future__ import annotations
 import re
 
 # Front matter, HTML comment, or fence — whichever opens leftmost claims the region.
-# An unterminated fence runs to EOF: it is still a code sample. The fence closer
-# tolerates any indent because CommonMark lets it differ from the opener's; requiring
-# an exact match would send an ordinary document down the to-EOF branch and blank
-# every line after it.
+# An unterminated fence runs to EOF: it is still a code sample. The closer accepts
+# CommonMark's 0-3 spaces, or the opener's own indent for a fence nested in a list
+# item. Accepting *any* indent instead would let a fence line shown as an example
+# inside the body close the block early, which turns the real closer into an unclosed
+# opener and sends the rest of the file down the to-EOF branch.
 _BLOCK = re.compile(
     r"\A---\n.*?\n---[ \t]*(?:\n|\Z)"
     r"|<!--.*?-->"
-    r"|^[ \t]*(?P<fence>```|~~~)[^\n]*\n(?:.*?^[ \t]*(?P=fence)[^\n]*(?:\n|\Z)|.*\Z)",
+    r"|^(?P<ind>[ \t]*)(?P<fence>```|~~~)[^\n]*\n"
+    r"(?:.*?^(?:[ ]{0,3}|(?P=ind))(?P=fence)[^\n]*(?:\n|\Z)|.*\Z)",
     re.DOTALL | re.MULTILINE,
 )
 # Interior blank lines belong to an indented block, so they are matched only when
