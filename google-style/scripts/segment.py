@@ -14,13 +14,17 @@ A style checker that reads inside a code sample reports nonsense and, worse, tea
 the reader to ignore it. Masking is applied in order, and each pass runs against the
 already-masked buffer so a region blanked by an earlier pass cannot re-match.
 
-Order is load-bearing in both directions. Block-level passes run first, because an
-unterminated construct inside a code sample must not be allowed to consume the prose
-after it: `<!--` in an HTML sample would otherwise swallow everything up to the next
-`-->` anywhere in the file, and blanked prose is never checked at all. The
-block-level passes also run before `_INDENTED`, because a masked region leaves a
+Order is load-bearing. The block-level constructs — front matter, HTML comments, and
+fences — are matched by one alternation rather than three passes, because each of
+them can contain the opening delimiter of another. A `<!--` inside an HTML sample and
+a stray fence inside a comment are the same bug in mirror image, and no ordering of
+separate passes fixes both: whichever construct runs first wins, and the other one
+bleeds. Matching them together makes the rule positional instead — whichever
+construct *opens* first owns the region, and scanning resumes after its close.
+
+`_INDENTED` runs after that alternation, because a masked region leaves a
 whitespace-only line where a blank line used to be, and that is what marks the start
-of an indented block. Inline passes run last and deliberately do not create block
+of an indented block. The inline passes run last and deliberately do not create block
 boundaries — a paragraph line does not stop being a paragraph because it held a code
 span.
 """
@@ -28,17 +32,26 @@ from __future__ import annotations
 
 import re
 
-_FRONT_MATTER = re.compile(r"\A---\n.*?\n---[ \t]*(?:\n|\Z)", re.DOTALL)
-_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-# An unclosed fence runs to EOF: it is still a code sample, and the alternation is
-# ordered so a fence that does close never reaches the to-EOF branch.
-_FENCE = re.compile(
-    r"^([ \t]*)(```|~~~)[^\n]*\n(?:.*?^\1\2[^\n]*(?:\n|\Z)|.*\Z)",
+# Front matter, HTML comment, or fence — whichever opens leftmost claims the region.
+# An unterminated fence runs to EOF: it is still a code sample. The fence closer
+# tolerates any indent because CommonMark lets it differ from the opener's; requiring
+# an exact match would send an ordinary document down the to-EOF branch and blank
+# every line after it.
+_BLOCK = re.compile(
+    r"\A---\n.*?\n---[ \t]*(?:\n|\Z)"
+    r"|<!--.*?-->"
+    r"|^[ \t]*(?P<fence>```|~~~)[^\n]*\n(?:.*?^[ \t]*(?P=fence)[^\n]*(?:\n|\Z)|.*\Z)",
     re.DOTALL | re.MULTILINE,
 )
-# The leading boundary is consumed rather than looked behind — Python forbids a
-# variable-width lookbehind, and blanking a whitespace-only line leaves it unchanged.
-_INDENTED = re.compile(r"(?:\n[ \t]*\n|\A)(?:(?: {4}|\t)[^\n]*(?:\n|\Z))+")
+# Interior blank lines belong to an indented block, so they are matched only when
+# another indented line follows; a trailing run of blank lines ends the block instead
+# of bridging it into the prose underneath. The leading boundary is consumed rather
+# than looked behind — Python forbids a variable-width lookbehind, and blanking a
+# whitespace-only line leaves it unchanged.
+_INDENTED_LINE = r"(?: {4}|\t)[^\n]*(?:\n|\Z)"
+_INDENTED = re.compile(
+    rf"(?:\n[ \t]*\n|\A){_INDENTED_LINE}(?:(?:[ \t]*\n)+{_INDENTED_LINE})*"
+)
 _TABLE_DELIM = re.compile(r"^[ \t]*\|[ \t:|-]+\|[ \t]*$", re.MULTILINE)
 _LINK_DEF = re.compile(r"^\[[^\]]+\]:[^\n]*$", re.MULTILINE)
 _INLINE_CODE = re.compile(r"(``[^`]+``|`[^`\n]+`)")
@@ -49,7 +62,7 @@ _IMAGE_BANG = re.compile(r"!(?=\[)")
 _PATH_LIKE = re.compile(r"(?<![\w/])(?:~|\.{1,2})?/[\w./-]+")
 
 _PASSES = (
-    _FRONT_MATTER, _FENCE, _HTML_COMMENT, _INDENTED, _TABLE_DELIM, _LINK_DEF,
+    _BLOCK, _INDENTED, _TABLE_DELIM, _LINK_DEF,
     _INLINE_CODE, _ANGLE_URL, _LINK_TARGET, _BARE_URL, _IMAGE_BANG, _PATH_LIKE,
 )
 

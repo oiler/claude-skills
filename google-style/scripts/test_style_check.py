@@ -133,9 +133,52 @@ def test_mask_does_not_let_a_comment_inside_a_fence_swallow_prose():
     assert "end" not in masked
 
 
-def test_mask_is_length_preserving_and_idempotent():
+REGRESSION_CORPUS = [
+    "```py\nx=1\n  ```\n\nReal prose: please simply utilize the file(s).\n",
+    "<!--\nnote\n```\n-->\nReal prose here.\n",
+    "Text.\n\n    a()\n\n    b()\n\nProse.\n",
+    "Text.\n\n    a()\n\n\nProse.\n",
+]
+
+
+def test_mask_tolerates_a_closing_fence_at_a_different_indent():
+    """CommonMark lets the closer's indent differ from the opener's."""
+    masked = segment.mask(REGRESSION_CORPUS[0])
+    assert "Real prose: please simply utilize the file(s)." in masked
+    assert "x=1" not in masked
+
+
+def test_mask_does_not_let_a_fence_inside_a_comment_swallow_prose():
+    """Whichever block construct opens first owns the region."""
+    masked = segment.mask(REGRESSION_CORPUS[1])
+    assert "Real prose here." in masked
+    assert "note" not in masked
+
+
+def test_mask_keeps_interior_blank_lines_inside_an_indented_block():
+    masked = segment.mask(REGRESSION_CORPUS[2])
+    assert "a()" not in masked
+    assert "b()" not in masked
+    assert "Prose." in masked
+
+
+def test_mask_does_not_run_an_indented_block_into_following_prose():
+    """A trailing run of blank lines ends the block; it does not bridge to prose."""
+    masked = segment.mask(REGRESSION_CORPUS[3])
+    assert "a()" not in masked
+    assert "Prose." in masked
+
+
+def test_mask_preserves_length_and_is_stable_over_the_corpus():
+    """Length and newline preservation are invariants of mask().
+
+    Stability under a second pass is NOT an invariant — an inline pass can blank a
+    line to whitespace after _INDENTED has already run, creating a block boundary a
+    second pass would see. It holds for every input here, so the assertion stays as a
+    regression guard on this corpus rather than a promise about arbitrary input.
+    """
     fixture = (HERE / "fixtures" / "fenced_code.md").read_text(encoding="utf-8")
-    for text in [*LEAK_CORPUS, fixture]:
+    for text in [*LEAK_CORPUS, *REGRESSION_CORPUS, fixture]:
         once = segment.mask(text)
         assert len(once) == len(text)
         assert once.count("\n") == text.count("\n")
