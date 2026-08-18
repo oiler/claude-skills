@@ -304,3 +304,114 @@ def test_fenced_code_fixture_is_silent():
         FIXTURES / "fenced_code.md", rules.RULES,
     )
     assert findings == [], [f.rule for f in findings]
+
+
+def findings_for(text: str, rule_id: str) -> list[style_check.Finding]:
+    enabled = [r for r in rules.RULES if r.id == rule_id]
+    assert enabled, f"no rule with id {rule_id}"
+    return style_check.check_text(text, Path("t.md"), enabled)
+
+
+def test_headings_flags_title_case_and_trailing_period():
+    assert findings_for("## Setting Up Your Project\n", "headings")
+    assert findings_for("## Set up your project.\n", "headings")
+    assert not findings_for("## Set up your project\n", "headings")
+    assert not findings_for("## Deploy to Google Cloud\n", "headings")
+
+
+def test_oxford_comma_flags_two_comma_lists_only():
+    assert findings_for("Fetch, parse and render the page.\n", "oxford-comma")
+    assert not findings_for("Fetch, parse, and render the page.\n", "oxford-comma")
+    assert not findings_for("However, the parser and the renderer differ.\n", "oxford-comma")
+    assert not findings_for("If you are done, click Save and close the tab.\n", "oxford-comma")
+    assert not findings_for("Save the file, then commit and push.\n", "oxford-comma")
+
+
+def test_first_person_ignores_quoted_guidance():
+    assert findings_for("We recommend pinning the version.\n", "first-person")
+    assert not findings_for('The guide says "we recommend" here.\n', "first-person")
+    assert not findings_for("> we recommend pinning the version\n", "first-person")
+    # Two contractions must not pair into a phantom quote span that hides "we've".
+    assert findings_for("It's true that we've seen it.\n", "first-person")
+
+
+def test_future_covers_will_and_timeless():
+    assert findings_for("Support is coming soon.\n", "future")
+    assert findings_for("This is currently unsupported.\n", "future")
+    assert not findings_for("The command stops the job.\n", "future")
+
+
+def test_word_list_uses_the_data_file_severity():
+    avoid = findings_for("Utilize the whitelist.\n", "word-list")
+    assert {f.severity for f in avoid} == {"error"}
+    restricted = findings_for("Clone the repo first.\n", "word-list")
+    assert [f.severity for f in restricted] == ["warning"]
+
+
+def test_date_format_flags_ambiguous_numeric_dates():
+    assert findings_for("Released 03/04/25.\n", "date-format")
+    assert not findings_for("Released March 4, 2025.\n", "date-format")
+    assert not findings_for("Released 2025-03-04.\n", "date-format")
+
+
+def test_excessive_claims_flags_just_only_before_a_verb():
+    assert findings_for("Simply run the installer.\n", "excessive-claims")
+    assert findings_for("Just run the installer.\n", "excessive-claims")
+    assert not findings_for("The change is just under the limit.\n", "excessive-claims")
+
+
+def test_link_text_flags_undescriptive_text():
+    assert findings_for("See [click here](https://example.com).\n", "link-text")
+    assert not findings_for("See the [word list](https://example.com).\n", "link-text")
+
+
+def test_latin_splits_severity():
+    hard = findings_for("Use a client, e.g. curl.\n", "latin")
+    assert [f.severity for f in hard] == ["error"]
+    soft = findings_for("Compare A vs. B.\n", "latin")
+    assert [f.severity for f in soft] == ["warning"]
+
+
+def test_em_dash_errors_on_double_hyphen_and_warns_on_spacing():
+    hard = findings_for("The parser--the slow one--is next.\n", "em-dash")
+    assert [f.severity for f in hard] == ["error", "error"]
+    soft = findings_for("The parser — the slow one — is next.\n", "em-dash")
+    assert {f.severity for f in soft} == {"warning"}
+
+
+def test_spacing_flags_double_space_and_leading_space():
+    assert findings_for("Done.  Next step.\n", "spacing")
+    assert findings_for("Done , then go.\n", "spacing")
+    assert not findings_for("Done. Next step.\n", "spacing")
+
+
+def test_units_require_a_space():
+    assert findings_for("Allocate 512MB of memory.\n", "units")
+    assert not findings_for("Allocate 512 MB of memory.\n", "units")
+
+
+def test_gendered_and_ableist_terms():
+    assert findings_for("Ask the chairman or he/she who owns it.\n", "gendered")
+    assert findings_for("Run a sanity check on the crazy output.\n", "ableist")
+    assert not findings_for("Ask the person who owns it.\n", "gendered")
+
+
+def test_please_is_flagged_in_instructions():
+    assert findings_for("Please run the installer.\n", "please")
+
+
+def test_ly_hyphens_respects_exceptions():
+    assert findings_for("A newly-added feature.\n", "ly-hyphens")
+    assert not findings_for("A supply-chain risk.\n", "ly-hyphens")
+    assert not findings_for("An early-stage project.\n", "ly-hyphens")
+
+
+def test_periods_flags_acronym_periods():
+    assert findings_for("Servers in the U.S. only.\n", "periods")
+    assert not findings_for("Servers in the US only.\n", "periods")
+
+
+def test_am_pm_requires_space_and_capitals():
+    assert findings_for("Starts at 10am.\n", "am-pm")
+    assert findings_for("Starts at 10 a.m.\n", "am-pm")
+    assert not findings_for("Starts at 10 AM.\n", "am-pm")
