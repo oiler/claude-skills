@@ -47,3 +47,138 @@ def test_generated_reference_matches_the_data_file():
     assert REFERENCE.read_text(encoding="utf-8") == expected, (
         "references/word-list.md is stale — run `python3 scripts/gen_word_list.py`"
     )
+
+
+import segment
+
+
+def test_mask_preserves_length_and_newlines():
+    text = "A line\n\n```py\ncode\n```\nAfter\n"
+    masked = segment.mask(text)
+    assert len(masked) == len(text)
+    assert masked.count("\n") == text.count("\n")
+
+
+def test_mask_blanks_fenced_code_but_keeps_prose():
+    text = "Prose here.\n\n```python\nsimply utilize the thing\n```\n\nMore prose.\n"
+    masked = segment.mask(text)
+    assert "utilize" not in masked
+    assert "Prose here." in masked
+    assert "More prose." in masked
+
+
+def test_mask_blanks_inline_code_and_urls():
+    masked = segment.mask("Run `git checkout master` and see https://example.com/utilize now.\n")
+    assert "checkout" not in masked
+    assert "utilize" not in masked
+    assert "Run" in masked and "and see" in masked
+
+
+def test_mask_blanks_front_matter():
+    masked = segment.mask("---\nname: utilize\n---\n\nBody text.\n")
+    assert "utilize" not in masked
+    assert "Body text." in masked
+
+
+def test_mask_blanks_link_targets_but_keeps_link_text():
+    masked = segment.mask("See the [word list](https://example.com/utilize) page.\n")
+    assert "utilize" not in masked
+    assert "word list" in masked
+
+
+def test_mask_blanks_table_delimiter_rows():
+    """Delimiter rows are full of hyphens and would trip the em-dash rule."""
+    masked = segment.mask("| A | B |\n|---|---|\n| 1 | 2 |\n")
+    assert "---" not in masked
+    assert "| A | B |" in masked
+
+
+import style_check
+import rules
+
+FIXTURES = HERE / "fixtures"
+
+
+def run_cli(*args) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(HERE / "style_check.py"), *args],
+        capture_output=True, text=True,
+    )
+
+
+def test_registry_ids_are_unique_and_sorted():
+    ids = [r.id for r in rules.RULES]
+    assert ids == sorted(ids)
+    assert len(ids) == len(set(ids))
+
+
+def test_every_rule_names_a_source_page():
+    for rule in rules.RULES:
+        assert rule.page, f"{rule.id} has no source page"
+        assert rule.severity in {"error", "warning"}
+
+
+def test_finding_reports_true_line_and_column():
+    text = "First line.\n\nThe file(s) are ready.\n"
+    findings = style_check.check_text(text, Path("x.md"), rules.RULES)
+    plural = [f for f in findings if f.rule == "optional-plurals"]
+    assert len(plural) == 1
+    assert plural[0].line == 3
+    assert plural[0].col == 5
+
+
+def test_no_findings_inside_fenced_code():
+    text = "Clean prose.\n\n```text\nthe file(s) are ready\n```\n"
+    assert style_check.check_text(text, Path("x.md"), rules.RULES) == []
+
+
+def test_cli_exits_zero_on_clean_input(tmp_path):
+    doc = tmp_path / "clean.md"
+    doc.write_text("This page explains the setup.\n", encoding="utf-8")
+    result = run_cli(str(doc))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_cli_exits_one_on_error_finding(tmp_path):
+    doc = tmp_path / "dirty.md"
+    doc.write_text("Delete the file(s) you no longer need.\n", encoding="utf-8")
+    result = run_cli(str(doc))
+    assert result.returncode == 1
+    assert "optional-plurals" in result.stdout
+
+
+def test_cli_json_output_is_parseable(tmp_path):
+    doc = tmp_path / "dirty.md"
+    doc.write_text("Delete the file(s) you no longer need.\n", encoding="utf-8")
+    result = run_cli(str(doc), "--json")
+    payload = json.loads(result.stdout)
+    assert payload[0]["rule"] == "optional-plurals"
+    assert set(payload[0]) == {"path", "line", "col", "rule", "severity", "message", "fix"}
+
+
+def test_cli_exits_two_on_missing_path():
+    result = run_cli("no/such/file.md")
+    assert result.returncode == 2
+
+
+def test_only_and_skip_filter_the_registry(tmp_path):
+    doc = tmp_path / "dirty.md"
+    doc.write_text("Delete the file(s) you no longer need.\n", encoding="utf-8")
+    assert run_cli(str(doc), "--skip", "optional-plurals").returncode == 0
+    assert run_cli(str(doc), "--only", "optional-plurals").returncode == 1
+
+
+def test_list_rules_prints_every_rule():
+    result = run_cli("--list-rules")
+    assert result.returncode == 0
+    for rule in rules.RULES:
+        assert rule.id in result.stdout
+
+
+def test_fenced_code_fixture_is_silent():
+    """Every banned term in the library, inside fences. Must stay at zero findings."""
+    findings = style_check.check_text(
+        (FIXTURES / "fenced_code.md").read_text(encoding="utf-8"),
+        FIXTURES / "fenced_code.md", rules.RULES,
+    )
+    assert findings == [], [f.rule for f in findings]
