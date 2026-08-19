@@ -4,10 +4,10 @@
   "metadata": {
     "harness_version": "1.1.0",
     "upstream_fork_commit": "690f15c",
-    "skill_content_hash": "c5326b8384ed6b37edbd079e4a142c23d1c12fadab57505e7e77448daaccac51",
+    "skill_content_hash": "1cc583e5ea1c768f44878bdb6844231973a851934b1026556aa7509b1c2d9ec0",
     "eval_set_hash": "35f7b7a0093d40e2473e45d17fa6e78d8fded7792ca902efd8118472c79f5c9b",
     "model": "opus",
-    "timestamp": "2026-08-19T02:56:45+00:00",
+    "timestamp": "2026-08-19T03:06:32+00:00",
     "timeout": 300,
     "runs_per_query": 3,
     "trigger_threshold": 0.5,
@@ -159,31 +159,31 @@
       "query": "turn my notes into a tutorial for setting up the eval harness from a clean checkout",
       "should_trigger": true,
       "status": "ok",
-      "trigger_rate": 0.3333333333333333,
-      "triggers": 1,
+      "trigger_rate": 1.0,
+      "triggers": 3,
       "runs": 3,
       "errors": 0,
       "durations_ms": [
         null,
-        17091,
-        16440
+        null,
+        null
       ],
-      "pass": false
+      "pass": true
     },
     {
       "query": "explain how the masking pass works and summarize the tradeoffs for me",
       "should_trigger": true,
       "status": "ok",
-      "trigger_rate": 0.0,
-      "triggers": 0,
+      "trigger_rate": 0.6666666666666666,
+      "triggers": 2,
       "runs": 3,
       "errors": 0,
       "durations_ms": [
-        18589,
-        21022,
-        18728
+        null,
+        null,
+        16858
       ],
-      "pass": false
+      "pass": true
     },
     {
       "query": "write a cover letter for the staff PM role at Vercel \u2014 I've got the fintech background and eight years shipping developer tools",
@@ -194,9 +194,9 @@
       "runs": 3,
       "errors": 0,
       "durations_ms": [
-        33075,
-        41680,
-        37613
+        30423,
+        40863,
+        35890
       ],
       "pass": true,
       "routed": {
@@ -212,9 +212,9 @@
       "runs": 3,
       "errors": 0,
       "durations_ms": [
-        22840,
-        22452,
-        23071
+        22138,
+        23147,
+        18826
       ],
       "pass": true,
       "routed": {
@@ -230,9 +230,9 @@
       "runs": 3,
       "errors": 0,
       "durations_ms": [
-        12331,
-        13402,
-        11254
+        14611,
+        26288,
+        13782
       ],
       "pass": true
     },
@@ -245,9 +245,9 @@
       "runs": 3,
       "errors": 0,
       "durations_ms": [
-        30560,
-        27501,
-        29924
+        30226,
+        29182,
+        28534
       ],
       "pass": true,
       "routed": {
@@ -263,9 +263,9 @@
       "runs": 3,
       "errors": 0,
       "durations_ms": [
-        10055,
-        9859,
-        9836
+        10623,
+        11148,
+        8503
       ],
       "pass": true
     },
@@ -278,9 +278,9 @@
       "runs": 3,
       "errors": 0,
       "durations_ms": [
-        15043,
-        18471,
-        18114
+        21737,
+        15014,
+        20093
       ],
       "pass": true,
       "routed": {
@@ -296,9 +296,9 @@
       "runs": 3,
       "errors": 0,
       "durations_ms": [
-        6770,
-        10895,
-        11377
+        7084,
+        7616,
+        8489
       ],
       "pass": true
     },
@@ -311,9 +311,9 @@
       "runs": 3,
       "errors": 0,
       "durations_ms": [
-        12363,
-        12346,
-        12077
+        14204,
+        14026,
+        11450
       ],
       "pass": true
     },
@@ -341,17 +341,17 @@
       "runs": 3,
       "errors": 0,
       "durations_ms": [
-        15669,
-        16141,
-        15608
+        16796,
+        14668,
+        20753
       ],
       "pass": true
     }
   ],
   "summary": {
     "total": 20,
-    "passed": 17,
-    "failed": 3,
+    "passed": 19,
+    "failed": 1,
     "error_runs": 0,
     "error_queries": 0
   }
