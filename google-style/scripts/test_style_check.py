@@ -453,3 +453,15 @@ def test_spacing_still_reports_a_real_space_before_a_comma_after_inline_code():
     assert findings_for("A `b` , c\n", "spacing")
     assert findings_for("Use `--force` , then go.\n", "spacing")
     assert not findings_for("Use `--force`, then go.\n", "spacing")
+
+
+def test_oxford_comma_skips_relative_pronoun_and_negation_clause_openers():
+    """Both shapes are from the real corpus: a genuine list item essentially
+    never opens with a relative pronoun or a bare negation."""
+    assert not findings_for(
+        "Changelogs live in the public repo, never inside the skill folder "
+        "and never as a sibling.\n", "oxford-comma")
+    assert not findings_for(
+        "See the reference, which carries this figure and the matching setting.\n",
+        "oxford-comma")
+    assert findings_for("Fetch, parse and render the page.\n", "oxford-comma")

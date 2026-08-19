@@ -106,15 +106,24 @@ def _headings(ctx: Ctx) -> Iterator[Raw]:
 _SERIAL = re.compile(r",[ \t]+(?P<mid>[^,\n]{1,40}?)[ \t]+(?P<conj>and|or)[ \t]+", re.IGNORECASE)
 
 # Oxford-specific, so it lives here rather than in vocab.json, whose keys each
-# document one rule's suppressors. Two shapes of correctly punctuated prose:
-# "and"/"or" catch the rule re-matching across its own serial comma ("Fetch,
-# parse, and render the page and exit"), and the auxiliaries catch a clause
-# continuation ("…only, must not start or end with a hyphen") where the
-# conjunction joins verbs, not list items.
+# document one rule's suppressors. Shapes of correctly punctuated prose that the
+# pattern would otherwise read as a list: "and"/"or" catch the rule re-matching
+# across its own serial comma ("Fetch, parse, and render the page and exit"), the
+# auxiliaries catch a clause continuation ("…only, must not start or end with a
+# hyphen"), and the relative pronouns and negations catch a modifying clause
+# ("…§1, which carries this figure and the setting"; "…, never inside the folder
+# and never as a sibling"). Each is one-directional: a genuine list item
+# essentially never opens with one of these words.
+#
+# Known blind spot, deliberately not chased: an and/or inside a single list item
+# after a clause comma can still match ("…1-64 chars, lowercase a-z/0-9 and
+# hyphens only"). Rewording the prose is cheaper than a suppressor that can eat
+# real lists.
 _OXFORD_MID_SKIP = frozenset({
     "and", "or",
     "must", "should", "can", "cannot", "may", "might", "will", "would", "shall",
     "do", "does", "did", "is", "are", "was", "were", "has", "have", "had",
+    "which", "who", "that", "never", "not", "no",
 })
 
 
