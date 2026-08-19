@@ -593,3 +593,36 @@ def test_passive_skips_a_span_bridged_by_inline_code():
     assert not findings_for("The result was `foo` written.\n", "passive")
     assert findings_for("The file was created by the installer.\n", "passive")
     assert not findings_for("The field is required.\n", "passive")
+
+
+def test_every_rule_has_a_fixture_that_triggers_it():
+    missing, silent = [], []
+    for rule in rules.RULES:
+        path = FIXTURES / f"{rule.id}.md"
+        if not path.exists():
+            missing.append(rule.id)
+            continue
+        hits = style_check.check_text(path.read_text(encoding="utf-8"), path, [rule])
+        if not hits:
+            silent.append(rule.id)
+    assert not missing, f"no fixture for: {missing}"
+    assert not silent, f"fixture does not trigger its rule: {silent}"
+
+
+def test_every_fixture_cites_the_page_it_violates():
+    for rule in rules.RULES:
+        text = (FIXTURES / f"{rule.id}.md").read_text(encoding="utf-8")
+        assert f"Source: https://developers.google.com/style/{rule.page}" in text, rule.id
+
+
+def test_clean_readme_fixture_has_no_errors():
+    path = FIXTURES / "clean_readme.md"
+    errors = [f for f in style_check.check_text(path.read_text(encoding="utf-8"), path, rules.RULES)
+              if f.severity == "error"]
+    assert errors == [], [(f.rule, f.line, f.message) for f in errors]
+
+
+def test_warnings_do_not_gate_without_strict():
+    path = FIXTURES / "warnings_only.md"
+    assert run_cli(str(path)).returncode == 0
+    assert run_cli(str(path), "--strict").returncode == 1
