@@ -63,9 +63,9 @@ Explain a placeholder the first time it appears, and again later only where the 
 | Recommended | Not recommended |
 |---|---|
 | ``*`PROJECT_ID`*`` | `project-id` |
-| `INSTANCE_NAME` | `YOUR_INSTANCE_NAME` |
-| `Replace BUILD_ID with the ID of the build that you copied.` | `Replace the placeholder with your own value.` |
-| `LOCATION: the location of the reservation` | `LOCATION: The location of the reservation.` |
+| ``*`INSTANCE_NAME`*`` | `YOUR_INSTANCE_NAME` |
+| Replace ``*`BUILD_ID`*`` with the ID of the build that you copied. | Replace the placeholder with your own value. |
+| ``*`LOCATION`*``: the location of the reservation | ``*`LOCATION`*``: The location of the reservation. |
 
 ## UI elements and interaction
 

@@ -109,6 +109,8 @@ _SERIAL = re.compile(r",[ \t]+(?P<mid>[^,\n]{1,40}?)[ \t]+(?P<conj>and|or)[ \t]+
 # document one rule's suppressors. Shapes of correctly punctuated prose that the
 # pattern would otherwise read as a list: "and"/"or" catch the rule re-matching
 # across its own serial comma ("Fetch, parse, and render the page and exit"), the
+# coordinating conjunctions catch a result or contrast clause whose own parts the
+# and/or joins ("It reads the file, so the tool counts columns and fields"), the
 # auxiliaries catch a clause continuation ("…only, must not start or end with a
 # hyphen"), and the relative pronouns and negations catch a modifying clause
 # ("…§1, which carries this figure and the setting"; "…, never inside the folder
@@ -121,6 +123,7 @@ _SERIAL = re.compile(r",[ \t]+(?P<mid>[^,\n]{1,40}?)[ \t]+(?P<conj>and|or)[ \t]+
 # real lists.
 _OXFORD_MID_SKIP = frozenset({
     "and", "or",
+    "so", "but", "yet",
     "must", "should", "can", "cannot", "may", "might", "will", "would", "shall",
     "do", "does", "did", "is", "are", "was", "were", "has", "have", "had",
     "which", "who", "that", "never", "not", "no",

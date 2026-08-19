@@ -109,10 +109,10 @@ The loop:
 
 1. Write the file.
 2. Run the checker on it.
-3. Fix every error. An error has one right answer, so there's no judgment to exercise.
+3. Fix every error. Most have one right repair, and the suggested fix is it. Read the fix against the sentence before you apply it, because a fix that would produce wrong prose marks a blind spot in the rule rather than a fault in the sentence: reword until the pattern stops matching, and never paste a repair that breaks the guide the rule exists to enforce.
 4. Rerun. Repeat until the run exits 0.
 5. Read the warnings and decide each one. A warning is a question, not a verdict: passive voice is sometimes the right construction, an uncontracted negation is sometimes the clearer one, and oiler's spaced em dashes are house style that the checker flags and `CLAUDE.md` protects.
 
 Run the loop again after any later edit to the file, including a reviewer's edit. An edit breaks the contract exactly as authoring can: someone rewording a sentence introduces `currently` or a Title Case heading as readily as a first draft does. The passing run belongs to the file's current bytes, not to the file's name.
 
-Three flags help when you're working on part of the problem. `--only` and `--skip` take comma-separated rule ids. `--json` emits findings as JSON for tooling. `--list-rules` prints every rule with its severity and its source page; read it before you name a rule in prose, because the severity is part of what naming the rule claims.
+Three flags help when you're working on part of the problem. `--only` and `--skip` take comma-separated rule ids. Reach for `--skip` to isolate one rule while you work, never to settle a blind spot: it drops that rule across every file in the run, so it buries the rule's real findings along with the false one, and rewording the sentence costs less than that. `--json` emits findings as JSON for tooling. `--list-rules` prints every rule with its severity and its source page; read it before you name a rule in prose, because the severity is part of what naming the rule claims.

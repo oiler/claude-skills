@@ -464,6 +464,17 @@ def test_oxford_comma_still_fires_when_the_code_span_precedes_the_comma():
                         "oxford-comma")
 
 
+def test_oxford_comma_skips_a_clause_opening_with_a_coordinating_conjunction():
+    """", so …" and ", but …" open a result or contrast clause, not a list item.
+    The and/or inside such a clause joins that clause's own parts."""
+    assert not findings_for(
+        "It reads the file, so the tool counts columns and fields.\n", "oxford-comma")
+    assert not findings_for("X is fast, but Y and Z are faster.\n", "oxford-comma")
+    assert not findings_for(
+        "The run is short, yet the parser and the renderer both log.\n", "oxford-comma")
+    assert findings_for("Fetch, parse and render the page.\n", "oxford-comma")
+
+
 def test_ly_hyphens_allows_adjectival_ly_words():
     """daily-use is a compound modifier, not an adverb wearing a stray hyphen."""
     assert not findings_for("A daily-use skill.\n", "ly-hyphens")
