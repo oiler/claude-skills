@@ -647,3 +647,16 @@ def test_warnings_do_not_gate_without_strict():
     path = FIXTURES / "warnings_only.md"
     assert run_cli(str(path)).returncode == 0
     assert run_cli(str(path), "--strict").returncode == 1
+
+
+def test_oxford_suppressors_scan_from_the_sentence_not_the_line():
+    """This repo never hard-wraps, so a paragraph is one line and every
+    sentence after the first would otherwise lose both suppressors."""
+    assert not findings_for(
+        "Do it now. If you are done, click Save and close the tab.\n",
+        "oxford-comma")
+    assert not findings_for(
+        "Read the file. However, the parser and the renderer differ.\n",
+        "oxford-comma")
+    assert findings_for(
+        "First sentence. Fetch, parse and render the page.\n", "oxford-comma")

@@ -127,6 +127,22 @@ _OXFORD_MID_SKIP = frozenset({
 })
 
 
+# Both oxford suppressors read the text before the comma, so they need the
+# current sentence, not the current line. Prose here is never hard-wrapped, so a
+# line is a whole paragraph: scanning from the line start would hand every
+# sentence after the first a run-on prefix and silently disable both
+# suppressors. Closing quotes and brackets ride along after the stop.
+_SENTENCE_END = re.compile(r"[.!?][\"'’”)\]]*[ \t]")
+
+
+def _sentence_start(text: str, pos: int) -> int:
+    """Offset of the sentence containing `pos`, or of its line, whichever is later."""
+    start = text.rfind("\n", 0, pos) + 1
+    for m in _SENTENCE_END.finditer(text, start, pos):
+        start = m.end()
+    return start
+
+
 def _is_introductory(clause: str) -> bool:
     words = _WORD.findall(clause)
     if not words:
@@ -137,7 +153,7 @@ def _is_introductory(clause: str) -> bool:
 
 def _oxford(ctx: Ctx) -> Iterator[Raw]:
     for m in _SERIAL.finditer(ctx.masked):
-        start = ctx.masked.rfind("\n", 0, m.start()) + 1
+        start = _sentence_start(ctx.masked, m.start())
         if _is_introductory(ctx.masked[start:m.start()]):
             continue
         # "Save the file, then commit and push" is a sequence, not a list —
