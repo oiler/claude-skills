@@ -246,6 +246,17 @@ def _ly_hyphens(ctx: Ctx) -> Iterator[Raw]:
                   f"Drop the hyphen: {m.group(1)} {m.group(2)}.")
 
 
+# --- units and ranges -------------------------------------------------------
+# Shared by the `units` and `ranges` rules, which turn on the same distinction:
+# units-of-measure.html defines a unit as "both symbols (like the degree symbol
+# (º)) and abbreviations (like MB for megabytes) but not nouns (like file)".
+# Longest alternatives first so a partial never wins under a trailing guard.
+_UNIT_ABBREV = r"MHz|GHz|KiB|MiB|GiB|MB|GB|KB|TB|ms|Hz|px|kg|cm|mm"
+# Ranges additionally accept the bare symbols, which never appear glued to the
+# number the way an abbreviation does, so the `units` rule has no use for them.
+_RANGE_UNIT = rf"{_UNIT_ABBREV}|[°º][CF]?|%"
+
+
 # --- spacing ----------------------------------------------------------------
 # Comma and semicolon only: the colons rule owns space-before-colon,
 # and two rules firing on one span teaches the model the checker is noisy.
@@ -317,7 +328,7 @@ RULES += [
     Rule("spacing", "error", "periods", _spacing),
     regex_rule(
         "units", "error", "units-of-measure",
-        r"\b\d+(?:\.\d+)?(?:MB|GB|KB|TB|KiB|MiB|GiB|ms|Hz|MHz|GHz|px|kg|cm|mm)\b",
+        rf"\b\d+(?:\.\d+)?(?:{_UNIT_ABBREV})\b",
         "missing space before the unit: {match}",
         "Put a space between the number and the unit: 512 MB.",
         flags=0,
@@ -553,10 +564,19 @@ RULES += [
         "Spell ordinals out: first, second, third.",
     ),
     regex_rule(
-        "ranges", "warning", "numbers",
-        r"(?<!\d{4})(?<![\d-])\d{1,3}[ \t]*-[ \t]*\d{1,3}(?![\d-])",
-        "hyphenated range: {match}",
-        "Write \"from 3 to 5\" or \"3 through 5\". A hyphen reads as a minus sign.",
+        "ranges", "warning", "units-of-measure",
+        # A hyphenated numeric range is the guide's RECOMMENDED form, not a
+        # finding: numbers.html says "Use a hyphen with no space on either side
+        # of it … Recommended: 2012-2016", and hyphens.html lists "8-20 files"
+        # and "5-10 minutes" as Recommended. Only units-of-measure.html asks for
+        # "to", and only when the range carries a unit — hence the mandatory
+        # unit on the closing number. Flagging the bare form was an inversion
+        # against three pages at once; do not widen this back out.
+        rf"(?<![\d.])\d+(?:\.\d+)?[ \t]*(?:{_RANGE_UNIT})?[ \t]*-[ \t]*"
+        rf"\d+(?:\.\d+)?[ \t]*(?:{_RANGE_UNIT})(?![A-Za-z0-9])",
+        "hyphenated range with units: {match}",
+        "In a range with units, use \"to\" and repeat the unit: 10 MB to 20 MB. "
+        "A hyphen can be misread as a minus sign.",
         flags=0,
     ),
     regex_rule(

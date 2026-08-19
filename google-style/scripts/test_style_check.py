@@ -523,9 +523,27 @@ def test_ordinals_flag_numeral_forms():
     assert not findings_for("The first run is slowest.\n", "ordinals")
 
 
-def test_ranges_flag_hyphens_but_not_iso_dates():
-    assert findings_for("Wait 3-5 minutes.\n", "ranges")
+def test_ranges_flag_only_unit_bearing_ranges_not_plain_numeric_ones():
+    """A plain hyphenated numeric range is the guide's RECOMMENDED form.
+
+    numbers.html, "Ranges of numbers": "Use a hyphen with no space on either side
+    of it. Do not use an en dash. Recommended: 2012-2016." hyphens.html lists
+    "8-20 files" and "5-10 minutes" as Recommended. Only units-of-measure.html
+    asks for "to", and only for units — "symbols (like the degree symbol) and
+    abbreviations (like MB for megabytes) but not nouns (like file)".
+
+    Do not re-invert this to flag "3-5 minutes". That reading was the original
+    rule, it contradicted three pages at once, and the name is where it would
+    come back.
+    """
+    assert findings_for("The sensor operates at -40-85 °C.\n", "ranges")
+    assert findings_for("Allocate 10-20 MB per worker.\n", "ranges")
+    assert findings_for("The error rate stays at 5-10%.\n", "ranges")
+    assert not findings_for("Wait 3-5 minutes.\n", "ranges")
+    assert not findings_for("Copy 8-20 files.\n", "ranges")
+    assert not findings_for("The archive covers 2012-2016.\n", "ranges")
     assert not findings_for("Released 2026-08-18.\n", "ranges")
+    assert not findings_for("See test_foo.py:203-204 for the case.\n", "ranges")
 
 
 def test_condition_order_flags_instruction_before_condition():

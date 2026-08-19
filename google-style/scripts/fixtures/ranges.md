@@ -1,5 +1,5 @@
 # Fixture: ranges
 
-Source: https://developers.google.com/style/numbers
+Source: https://developers.google.com/style/units-of-measure
 
-Wait 3-5 minutes for the index to rebuild.
+The sensor operates at -40-85 °C.
