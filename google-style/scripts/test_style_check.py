@@ -445,6 +445,9 @@ def test_ly_hyphens_allows_adjectival_ly_words():
     assert not findings_for("A daily-use skill.\n", "ly-hyphens")
     assert not findings_for("A weekly-scheduled job.\n", "ly-hyphens")
     assert not findings_for("A costly-to-run query.\n", "ly-hyphens")
+    # A brand name is not an adverb — plotly-dash is a skill in this repo, and the
+    # rule flagged the README that lists it.
+    assert not findings_for("The plotly-dash skill.\n", "ly-hyphens")
     assert findings_for("A newly-added feature.\n", "ly-hyphens")
 
 
