@@ -16,7 +16,7 @@ The `colons` rule reports three shapes as warnings: a heading that ends in a col
 |---|---|
 | `The fields are defined as follows:` | `The fields are:` |
 | `Tone: concise, conversational, friendly, respectful` | `Tone: Concise, conversational, friendly, respectful` |
-| `Install the dependencies` | `Install the dependencies:` |
+| `## Install the dependencies` | `## Install the dependencies:` |
 
 ## Commas
 
@@ -76,7 +76,7 @@ Two rules watch this page. The `ly-hyphens` rule reports a hyphen after an adver
 
 | Recommended | Not recommended |
 |---|---|
-| `preprocessing` | `pre-processing` |
+| `metadata` | `meta-data` |
 | `non-Google` | `nonGoogle` |
 | `webpage` | `web page` |
 | `A well-designed app` | `A well designed app` |

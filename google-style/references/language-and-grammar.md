@@ -59,7 +59,7 @@ Keep the definite and indefinite articles: `a`, `an`, and `the`. Dropping them f
 
 Follow standard American English capitalization, then stop. Don't capitalize a word without a reason, and don't lean on capitalization to carry meaning: a reader new to the domain won't catch that a capitalized `Pod` means a Kubernetes unit while a lowercase `pod` means anything else. All-uppercase belongs to official names, always-capitalized abbreviations, and quoted code. Camel case belongs to official names and code.
 
-Sentence case is the default everywhere else. Titles and headings take sentence case with no trailing period, and so do captions, image labels, list items, glossary definitions, and every element of a table. References to another document's heading also take sentence case even when the original used title case, so the reference still matches after someone updates the original. Text after a colon starts lowercase unless it's a proper noun, a heading, a quotation, or the text after a label such as `Caution`. Don't name a casing style; state the requirement and show an example.
+Sentence case is the default everywhere else. Titles and headings take sentence case with no trailing period, and so do captions, image labels, list items, glossary definitions, and every element of a table. References to another document's heading also take sentence case even when the original used title case, so the reference still matches after someone updates the original. The counter-clause matters just as much: a work that doesn't follow this guide keeps its original capitalization when you reference its headings. Text after a colon starts lowercase unless it's a proper noun, a heading, a quotation, or the text after a label such as `Caution`. Don't name a casing style; state the requirement and show an example.
 
 The `headings` rule reports a heading that ends in a period, and one that looks like title case, as errors.
 
@@ -179,7 +179,7 @@ Don't put optional plurals in parentheses. Pick the singular or the plural and s
 | `64 GB` | `64 GBs` |
 | `To find your API key, visit the Credentials page.` | `To find your API key(s), visit the Credentials page.` |
 | `You can use a physical linecard, which can contain one or more ports.` | `You can use a physical linecard, which can contain port(s).` |
-| `Intent objects and Activity instances` | `Intents and Activitys` |
+| `Intent objects and Activity instances` | `Intents and Activities` |
 
 ## Verbs in reference documents
 
