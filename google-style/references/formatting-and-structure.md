@@ -141,7 +141,7 @@ Numeric-only dates are the reason this page exists. `04/05/09` means May 4 in th
 
 A nonbreaking space sits between a number and its unit, in both HTML and Markdown, so `64 GB` rather than `64GB`. The `units` rule reports a number glued to a unit abbreviation as an error. Three cases take no space at all: money, percent, and degrees of an angle. Temperature is the split case: a nonbreaking space sits between the number and the degree symbol, and nothing sits between the degree symbol and the scale letter, giving `50 °C`. Kelvin drops the degree symbol and keeps the space, giving `300 K`.
 
-Ranges carrying units are the corrected fact on this page, and it cuts against the intuition that every range takes a hyphen. A range of bare numbers takes a hyphen, and that is the guide's recommended form. A range whose numbers carry units takes the word `to`, with the unit repeated on both numbers, because a hyphen beside a unit reads as a minus sign. The guide counts a symbol such as `°` and an abbreviation such as `MB` as units, but not a noun such as `file`. The `ranges` rule fires only on the unit-bearing hyphenated form, as a warning; `5-10 minutes` and `2012-2016` pass clean.
+A range's punctuation turns on whether its numbers carry units. A range of bare numbers takes a hyphen, and that is the guide's recommended form. A range whose numbers carry units takes the word `to`, with the unit repeated on both numbers, because a hyphen beside a unit reads as a minus sign. The guide counts a symbol such as `°` and an abbreviation such as `MB` as units, but not a noun such as `file`. The `ranges` rule fires only on the unit-bearing hyphenated form, as a warning; `5-10 minutes` and `2012-2016` pass clean.
 
 The rest of the page is conventions. Multiplied components of a unit hyphenate, as in `5 vCPU-hours`. A lowercase `k` for thousands takes no space and needs a noun after it, so nobody reads it as kilobytes. Currency needs an indicator wherever the symbol is ambiguous, since `$` covers several currencies. Rates spell out `per` where space allows, and shorten to `p` only in established forms such as `Gbps`. Byte units follow the technology being documented: decimal `kB`, `MB`, and `GB` measure powers of 1000, and binary `KiB`, `MiB`, and `GiB` measure powers of 1024.
 
@@ -155,7 +155,7 @@ The rest of the page is conventions. Multiplied components of a unit hyphenate, 
 | `200 GB disk` | `200-GB disk` |
 | `55k download operations` | `55 k downloads` |
 | `requests per day` | `requests/day` |
-| `US$10` | `$10` |
+| `US$10` where the currency is ambiguous | `$10` where the currency is ambiguous |
 
 ## Examples
 
