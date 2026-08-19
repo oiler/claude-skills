@@ -1,5 +1,5 @@
 # Fixture: gendered
 
-Source: https://developers.google.com/style/inclusive-documentation
+Source: https://developers.google.com/style/pronouns
 
-Ask the chairman who owns the deployment.
+Ask he/she who owns the file to update it.

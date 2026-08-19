@@ -317,7 +317,20 @@ RULES += [
         "Write the month out: January 5, 2026. Numeric dates read differently by region.",
     ),
     regex_rule(
-        "excessive-claims", "error", "excessive-claims",
+        # The page is word-list, not excessive-claims. excessive-claims.html is
+        # about competitive and unverifiable product claims ("Our product is
+        # faster than ExampleCorp's product") and never mentions these words.
+        # What attests them is the word list's own entry:
+        #   "easy, easily — What might be easy for you might not be easy for
+        #    others. Try eliminating this word from the sentence because usually
+        #    the same meaning can be conveyed without it."
+        # with matching entries for "simple, simply" and for "just" ("Avoid.
+        # Usually, just is a filler word that you can delete"). The rest of the
+        # list — effortlessly, painless(ly), trivially, obviously, of course,
+        # clearly, no problem, all you need to do — is a workshop extension of
+        # that same principle, not text the guide states. The terms are good
+        # guidance either way; only the attribution was wrong.
+        "excessive-claims", "error", "word-list",
         r"\b(simply|easily|effortlessly|painless(?:ly)?|trivially|obviously|of course|"
         r"clearly|no problem|all you need to do)\b|"
         r"\bjust\b(?=[ \t]+(?:add|run|click|set|call|use|type|enter|open|edit|paste|copy|"
@@ -334,7 +347,16 @@ RULES += [
         flags=0,
     ),
     regex_rule(
-        "gendered", "error", "inclusive-documentation",
+        # The pronoun pairs are attested on pronouns.html, "Gender-neutral
+        # pronouns": "don't use he, him, his, she, or her as gender-neutral
+        # pronouns, and don't use he/she or (s)he or other such punctuational
+        # approaches. Instead, use the singular they." That is the page.
+        # The role nouns after them — guys, manpower, man-hours, mankind,
+        # chairman, chairmen, policeman, salesman, middleman — are a workshop
+        # extension of inclusive-documentation.html's principle of avoiding
+        # ableist, gendered, and violent language. Only "manpower" has its own
+        # word-list entry; the rest appear nowhere in the guide. Kept, labeled.
+        "gendered", "error", "pronouns",
         r"\b(he/she|s/he|his/her|he or she|guys|manpower|man-hours|mankind|"
         r"chairman|chairmen|policeman|salesman|middleman)\b",
         "gendered language: {match}",
@@ -509,11 +531,17 @@ def _colons(ctx: Ctx) -> Iterator[Raw]:
     colon-terminated ("### Task 2: `references/foo.md`"). Both are correct prose,
     and unguarded they were almost every finding this rule produced.
     """
+    # Attested, but cross-page: colons.html says nothing about headings, so the
+    # attestation is headings.html's summary — "Avoid using -ing verbs, numbers,
+    # and excessive punctuation in headings."
     for m in _HEADING_COLON.finditer(ctx.masked):
         if not ctx.raw[m.start():m.end()].rstrip().endswith(":"):
             continue
         yield Raw(m.start(), "heading ends with a colon",
                   "Drop it. A heading names its section; it does not introduce it.")
+    # Workshop punctuation hygiene, not stated on colons.html — that page covers
+    # only introductory-phrase completeness and lowercase after the colon, and
+    # the word "space" does not appear on it.
     for m in _SPACED_COLON.finditer(ctx.masked):
         # Only the character touching the colon decides. The run can legitimately
         # swallow a masked span, and what the author typed there was code.
@@ -521,6 +549,7 @@ def _colons(ctx: Ctx) -> Iterator[Raw]:
             continue
         yield Raw(m.end() - 1, "space before a colon",
                   "Close it up. A colon attaches to the word before it.")
+    # Workshop punctuation hygiene as well; the guide has no double-colon entry.
     for m in _DOUBLE_COLON.finditer(ctx.masked):
         yield Raw(m.start(), "double colon",
                   "Use one colon. Doubling it is code syntax, not prose punctuation.")

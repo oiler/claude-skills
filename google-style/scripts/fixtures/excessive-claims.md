@@ -1,5 +1,5 @@
 # Fixture: excessive-claims
 
-Source: https://developers.google.com/style/excessive-claims
+Source: https://developers.google.com/style/word-list
 
-Simply run the installer.
+You can easily configure the tool.
