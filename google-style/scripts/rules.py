@@ -163,6 +163,16 @@ def _oxford(ctx: Ctx) -> Iterator[Raw]:
         if not mid_words or mid_words[0].lower() in (
                 VOCAB["subordinators"] | VOCAB["intro_stoplist"] | _OXFORD_MID_SKIP):
             continue
+        # Masking is offset-preserving, so an inline-code span between the item
+        # text and the conjunction blanks to whitespace and the separator reads
+        # as an ordinary space: "with the `--format` and `--limit` flags" is one
+        # list item holding a two-item code pair, not a list. Scope the check to
+        # that separator alone — comparing the whole match against ctx.raw would
+        # also drop the true positive whose item merely contains code ("parse the
+        # `--force` flag and render"), and comparing the line would drop every
+        # finding in a paragraph that mentions code anywhere.
+        if ctx.raw[m.end("mid"):m.start("conj")].strip():
+            continue
         conj = m.group("conj")
         # Quote the source, not the mask: masking is offset-preserving, so the
         # masked slice renders inline code as a run of spaces.

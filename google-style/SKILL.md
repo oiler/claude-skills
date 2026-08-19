@@ -53,6 +53,8 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/style_check.py <path> --json   # machine-rea
 python3 ${CLAUDE_SKILL_DIR}/scripts/style_check.py --list-rules    # the 31 rules and their pages
 ```
 
+If `${CLAUDE_SKILL_DIR}` is unset, which happens whenever these files are read outside a live skill invocation, substitute the path to the directory that holds this file.
+
 The loop: write the file, run the checker, fix every error, and rerun until it exits 0. Then read the warnings and apply judgment.
 
 Errors gate, and warnings inform. The guide itself permits passive voice and semicolons where they read best, so blocking on them would be stricter than the standard this skill implements, and a checker that blocks on judgment calls teaches the reader to ignore it.

@@ -56,13 +56,13 @@ Three notations mark argument shapes, and all three break a click-to-copy comman
 
 A placeholder stands for a value the reader replaces, and its default value is a descriptive name. Placeholder text is uppercase with underscores between words: `API_NAME`, `METHOD_NAME`. Never `API-name`, `api_name`, or `apiName`. A possessive adjective doesn't belong in one, which rules out `MY_API_NAME` and `YOUR_API_NAME`. A single `x` or a run of them isn't informative enough to be a placeholder, with the standing exception of HTTP status code ranges, where `xx` is the convention. Where uppercase with underscores would be wrong for the context, pick something else, then stay internally consistent.
 
-Markup depends on where the placeholder sits. HTML wraps it in `var`, and in a code block that `var` sits inside `pre`. Markdown wraps an inline placeholder in backticks with an asterisk outside each one, and a code fence can't carry any formatting at all, so a placeholder inside a fence is plain uppercase text. Brackets, braces, and ellipses that mark argument shape stay outside the `var` element.
+Markup depends on where the placeholder sits. HTML wraps it in `var`, and in a code block that `var` sits inside `pre`. Markdown wraps an inline placeholder in backticks and puts an asterisk outside each backtick, giving ``*`PROJECT_ID`*``, and a code fence can't carry any formatting at all, so a placeholder inside a fence is plain uppercase text. Brackets, braces, and ellipses that mark argument shape stay outside the `var` element.
 
 Explain a placeholder the first time it appears, and again later only where the document is long, the procedure introduced several others, or the reader is unlikely to read from the top. One placeholder gets the form `Replace PLACEHOLDER with a description of what the placeholder represents`. Two or more get a list introduced by `Replace the following:`, in the order they appear in the command, each entry a placeholder, a colon, and a description starting lowercase. Introduce an example inside a description with an em dash or with `such as`. Placeholders in sample output follow the same shape under the lead-in `This output includes the following values:`.
 
 | Recommended | Not recommended |
 |---|---|
-| `PROJECT_ID` | `project-id` |
+| ``*`PROJECT_ID`*`` | `project-id` |
 | `INSTANCE_NAME` | `YOUR_INSTANCE_NAME` |
 | `Replace BUILD_ID with the ID of the build that you copied.` | `Replace the placeholder with your own value.` |
 | `LOCATION: the location of the reservation` | `LOCATION: The location of the reservation.` |

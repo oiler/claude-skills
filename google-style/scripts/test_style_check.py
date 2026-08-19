@@ -440,6 +440,30 @@ def test_oxford_fix_text_quotes_raw_source_not_masked_text():
     assert "  " not in findings[0].fix
 
 
+def test_oxford_comma_skips_a_conjunction_flanked_by_inline_code():
+    """A two-item `X` and `Y` pair inside one list item is not a missing serial
+    comma. Masking blanks the code span, so the separator before the conjunction
+    reads as ordinary whitespace and the pattern sees a list that isn't there."""
+    assert not findings_for(
+        "Count records, shape the output with the `--format` and `--limit` flags, "
+        "and read the summary.\n", "oxford-comma")
+    # The guard reads only the separator between the item text and the
+    # conjunction, so code elsewhere in the sentence still leaves a real finding
+    # reachable — including code inside the item itself.
+    assert findings_for("Fetch, parse the `--force` flag and render.\n", "oxford-comma")
+    assert findings_for("Fetch, parse and render the page.\n", "oxford-comma")
+
+
+def test_oxford_comma_still_fires_when_the_code_span_precedes_the_comma():
+    """Deliberate: the guard is scoped to the separator before the conjunction,
+    and here that separator is a plain space the author typed. What this sentence
+    actually trips is the documented and-inside-one-item blind spot ("set the port
+    and restart"), which predates the code-span guard and is unchanged by it —
+    widening the guard to the whole line to catch it would eat real lists."""
+    assert findings_for("Open `config.yaml`, set the port and restart the server.\n",
+                        "oxford-comma")
+
+
 def test_ly_hyphens_allows_adjectival_ly_words():
     """daily-use is a compound modifier, not an adverb wearing a stray hyphen."""
     assert not findings_for("A daily-use skill.\n", "ly-hyphens")
