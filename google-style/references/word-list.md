@@ -29,7 +29,7 @@ The checker reports each of these as an error.
 | `hit` | press, click, or call | Name the real interaction. |
 | `in order to` | to | Two words of padding in front of every purpose clause. |
 | `in the event that` | if | Padding. |
-| `kill` | stop, cancel, or end | Violent. The exception is a literal kill command in code font, which the checker already ignores. |
+| `kill` | stop, cancel, or end | Violent. The exception is a literal `kill` command in code font, which the checker already ignores. |
 | `leverage` | use | Business jargon for a plain verb. |
 | `prior to` | before | Plain word. |
 | `slave` | replica, secondary, or worker | Non-inclusive. |
@@ -53,7 +53,7 @@ One spelling or construction is correct; the other is reported as an error.
 | `e-mail` | email | One word, no hyphen. |
 | `info` | information | Spell it out outside UI labels. |
 | `irregardless` | regardless | Not a word. |
-| `login to` | log in to | Two words as a verb, one word as a noun or adjective. |
+| `login to` | log in to | Two words as a verb. One word as a noun or adjective. |
 | `type in` | enter | Enter covers typing, pasting, and dictating. |
 | `uncheck` | clear | Google's verb for clearing a checkbox. |
 | `web site` | website | One word. |
@@ -66,6 +66,6 @@ Acceptable in a narrow context, reported as a warning so you can judge.
 |---|---|---|
 | `as a service` | spell out the offering | Marketing shorthand. Fine in a product name, weak in prose. |
 | `execute` | run | Fine for a program executing an instruction; use run for what the reader does. |
-| `master` | primary, main, or original | Non-inclusive in master/slave pairings. A git branch named master is a literal name and belongs in code font. |
+| `master` | primary, main, or original | Non-inclusive in `master`/`slave` pairings. A git branch named `master` is a literal name and belongs in code font. |
 | `native` | built-in, integrated, or the platform's name | Ambiguous and carries a second meaning about people. |
 | `repo` | repository | Spell it out on first use in reference material. |
