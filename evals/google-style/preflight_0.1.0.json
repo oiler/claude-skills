@@ -1,0 +1,113 @@
+{
+  "skill": "google-style",
+  "repo": "/Users/jrf1039/files/repo/claude-skills",
+  "profile": "claude-code",
+  "change_class": "new",
+  "candidate_version": "0.1.0",
+  "skill_content_hash": "1cc583e5ea1c768f44878bdb6844231973a851934b1026556aa7509b1c2d9ec0",
+  "repo_commit": "edd11fc6047be194b5c1f85f10b1cf6bdc16c9bc",
+  "preflight_version": "1.1.0",
+  "timestamp": "2026-08-19T03:52:46+00:00",
+  "argv": [
+    "google-style",
+    "--change-class",
+    "new",
+    "--candidate-version",
+    "0.1.0",
+    "--out",
+    "/Users/jrf1039/files/repo/claude-skills/evals/google-style/preflight_0.1.0.json"
+  ],
+  "checks": [
+    {
+      "id": "structure",
+      "status": "pass",
+      "detail": "SKILL.md present, name matches, kebab-case"
+    },
+    {
+      "id": "profile",
+      "status": "pass",
+      "detail": "combined description budget 1325/1,536"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "invocation: trigger-eval trigger_eval_results_2026-08-18-r4.json"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "clean-room: clean-room report smoke-2026-08-18.md"
+    },
+    {
+      "id": "validity",
+      "status": "pass",
+      "detail": "trigger_eval_results_2026-08-18-r4.json: no errors, provenance complete"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "trigger artifact trigger_eval_results_2026-08-18-r4.json bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report smoke-2026-08-18.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "google-style/ is committed"
+    },
+    {
+      "id": "ceiling",
+      "status": "waived",
+      "detail": "waived: 'the checker exits 2 on a directory that has no markdown in i' \u2014 Boundary held at 3/3 after the instrument fix was exhausted. The description must state ownership of scripts/style_check.py to carry the spec-mandated \"run it on every documentation file you write\" instruction, and that factual ownership claim outweighs any exclusion phrasing in the same field: commit 931810b added an explicit exclusion naming the skill's own bundled checker scripts and routing did not move (3/3 before, 3/3 after). Overlap accepted on the merits \u2014 SKILL.md documents the checker's exit-code contract, which is context a user debugging that checker plausibly needs \u2014 while python remains the implementing skill for the code itself. Mirrors the web-security v1.2.1 precedent: one recorded waiver on a boundary query after the instrument-side fix was exhausted."
+    },
+    {
+      "id": "ceiling",
+      "status": "pass",
+      "detail": "negatives 9/10 clean (1 waived)"
+    },
+    {
+      "id": "regression",
+      "status": "advisory",
+      "detail": "no prior artifact to compare"
+    },
+    {
+      "id": "positives",
+      "status": "advisory",
+      "detail": "positives 10/10 (floor, non-gating)"
+    },
+    {
+      "id": "script-tests",
+      "status": "pass",
+      "detail": "scripts suite passed"
+    },
+    {
+      "id": "script-surface",
+      "status": "advisory",
+      "detail": "review by hand: gen_word_list.py:71 OUTPUT_PATH.write_text(render(load_word_list()), encoding=\"utf-8\"); rules.py:404 \"Cut it. Instructions are not requests, and politeness words do not tr; test_style_check.py:7 import subprocess; test_style_check.py:224 def run_cli(*args) -> subprocess.CompletedProcess:; test_style_check.py:225 return subprocess.run(; test_style_check.py:259 doc.write_text(\"This page explains the setup.\\n\", encoding=\"utf-8\"); test_style_check.py:266 doc.write_text(\"Delete the file(s) you no longer need.\\n\", encoding=\"u; test_style_check.py:274 doc.write_text(\"Delete the file(s) you no longer need.\\n\", encoding=\"u (+1 more)"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "changelog entry for v0.1.0 present"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "tag google-style-v0.1.0 is free"
+    },
+    {
+      "id": "drift",
+      "status": "advisory",
+      "detail": "upstream unchanged since 690f15c"
+    },
+    {
+      "id": "library-status",
+      "status": "advisory",
+      "detail": "docs/library-status.md drifted \u2014 regenerate (PYTHONPATH=\"$HOME/files/projects/001-claude-skills-creator/tools/skill-evals\" python3 -m scripts.library_status)"
+    }
+  ],
+  "overall": "pass"
+}
