@@ -105,6 +105,18 @@ def _headings(ctx: Ctx) -> Iterator[Raw]:
 # --- oxford-comma -----------------------------------------------------------
 _SERIAL = re.compile(r",[ \t]+(?P<mid>[^,\n]{1,40}?)[ \t]+(?P<conj>and|or)[ \t]+", re.IGNORECASE)
 
+# Oxford-specific, so it lives here rather than in vocab.json, whose keys each
+# document one rule's suppressors. Two shapes of correctly punctuated prose:
+# "and"/"or" catch the rule re-matching across its own serial comma ("Fetch,
+# parse, and render the page and exit"), and the auxiliaries catch a clause
+# continuation ("…only, must not start or end with a hyphen") where the
+# conjunction joins verbs, not list items.
+_OXFORD_MID_SKIP = frozenset({
+    "and", "or",
+    "must", "should", "can", "cannot", "may", "might", "will", "would", "shall",
+    "do", "does", "did", "is", "are", "was", "were", "has", "have", "had",
+})
+
 
 def _is_introductory(clause: str) -> bool:
     words = _WORD.findall(clause)
@@ -124,11 +136,14 @@ def _oxford(ctx: Ctx) -> Iterator[Raw]:
         # subordinator, the and/or joins verbs, not list items.
         mid_words = _WORD.findall(m.group("mid"))
         if not mid_words or mid_words[0].lower() in (
-                VOCAB["subordinators"] | VOCAB["intro_stoplist"]):
+                VOCAB["subordinators"] | VOCAB["intro_stoplist"] | _OXFORD_MID_SKIP):
             continue
         conj = m.group("conj")
+        # Quote the source, not the mask: masking is offset-preserving, so the
+        # masked slice renders inline code as a run of spaces.
+        mid = ctx.raw[m.start("mid"):m.end("mid")].strip()
         yield Raw(m.start(), f"missing serial comma before '{conj}'",
-                  f"Write \"…, {m.group('mid').strip()}, {conj} …\".")
+                  f"Write \"…, {mid}, {conj} …\".")
 
 
 # --- first-person -----------------------------------------------------------
@@ -225,18 +240,29 @@ def _ly_hyphens(ctx: Ctx) -> Iterator[Raw]:
 # --- spacing ----------------------------------------------------------------
 # Comma and semicolon only: the colons rule owns space-before-colon,
 # and two rules firing on one span teaches the model the checker is noisy.
-_SPACING = re.compile(r"(?<=[.!?])[ \t]{2,}(?=[A-Z])|[ \t]+(?=[,;](?:[ \t]|$))")
+_SPACING = re.compile(
+    r"(?<=[.!?])[ \t]{2,}(?=[A-Z])|(?P<before>[ \t]+)(?=[,;](?:[ \t]|$))")
 
 
 def _spacing(ctx: Ctx) -> Iterator[Raw]:
+    """Masking blanks inline code to spaces, so a whitespace run in the masked
+    text is not always whitespace the author typed. Both branches confirm against
+    ctx.raw at the same offsets, but they need different amounts of it.
+    """
     for m in _SPACING.finditer(ctx.masked):
-        # Masking blanks inline code to spaces, so whitespace in the masked text
-        # is not always whitespace the author typed: "`--force`," reads as a
-        # space before a comma. Confirm against the raw span before reporting.
-        if ctx.raw[m.start():m.end()].strip():
-            continue
-        yield Raw(m.start(), "spacing around punctuation",
-                  "One space after a sentence, none before a comma or semicolon.")
+        if m.group("before") is not None:
+            # Only the character touching the punctuation decides. The run can
+            # legitimately swallow a masked span — "Use `--force` , then go" is a
+            # real finding — so testing the whole span would drop true positives.
+            if ctx.raw[m.end() - 1] not in " \t":
+                continue
+            yield Raw(m.end() - 1, "spacing around punctuation",
+                      "One space after a sentence, none before a comma or semicolon.")
+        elif not ctx.raw[m.start():m.end()].strip():
+            # The sentence-gap branch reports the whole run, so the whole run has
+            # to be whitespace the author typed.
+            yield Raw(m.start(), "spacing around punctuation",
+                      "One space after a sentence, none before a comma or semicolon.")
 
 
 RULES: list[Rule] = [

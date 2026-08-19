@@ -415,3 +415,41 @@ def test_am_pm_requires_space_and_capitals():
     assert findings_for("Starts at 10am.\n", "am-pm")
     assert findings_for("Starts at 10 a.m.\n", "am-pm")
     assert not findings_for("Starts at 10 AM.\n", "am-pm")
+
+
+def test_oxford_comma_does_not_re_match_across_its_own_serial_comma():
+    """A correct list plus a trailing verb pair: the later 'and' must not re-match."""
+    assert not findings_for("Fetch, parse, and render the page and exit.\n", "oxford-comma")
+    assert findings_for("Fetch, parse and render the page.\n", "oxford-comma")
+
+
+def test_oxford_comma_skips_a_clause_continuation_opening_with_a_modal():
+    """"…only, must not start or end with a hyphen" joins verbs, not list items."""
+    assert not findings_for(
+        "Names use lowercase and hyphens only, must not start or end with a hyphen.\n",
+        "oxford-comma")
+    assert not findings_for(
+        "The path is optional, is read once and cached forever.\n", "oxford-comma")
+
+
+def test_oxford_fix_text_quotes_raw_source_not_masked_text():
+    """Masking is offset-preserving, so masked text renders inline code as spaces."""
+    findings = findings_for("Fetch, parse the `--force` flag and render.\n", "oxford-comma")
+    assert findings
+    assert "`--force`" in findings[0].fix
+    assert "  " not in findings[0].fix
+
+
+def test_ly_hyphens_allows_adjectival_ly_words():
+    """daily-use is a compound modifier, not an adverb wearing a stray hyphen."""
+    assert not findings_for("A daily-use skill.\n", "ly-hyphens")
+    assert not findings_for("A weekly-scheduled job.\n", "ly-hyphens")
+    assert not findings_for("A costly-to-run query.\n", "ly-hyphens")
+    assert findings_for("A newly-added feature.\n", "ly-hyphens")
+
+
+def test_spacing_still_reports_a_real_space_before_a_comma_after_inline_code():
+    """The raw-span guard must not swallow the space the author actually typed."""
+    assert findings_for("A `b` , c\n", "spacing")
+    assert findings_for("Use `--force` , then go.\n", "spacing")
+    assert not findings_for("Use `--force`, then go.\n", "spacing")
