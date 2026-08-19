@@ -7,7 +7,7 @@ All notable changes to this skill are documented here. The format follows Keep a
 ### Added
 
 - The Google developer documentation style guide as the standing standard for technical and project prose, pinned to the guide's last update of 2026-07-07.
-- Eight distilled reference files plus a generated word list, each naming the guide pages it covers.
+- Seven distilled reference files, one workshop-authored application guide, and one generated word list. Each distilled file names the guide pages it covers.
 - `scripts/style_check.py`: 31 rules, 19 that gate and 12 that inform, with offset-preserving masking so no finding lands inside a code sample.
 - `references/applying-to-artifacts.md`: the boundary with the `writing-style` skill, its edge cases, and per-artifact notes.
 
