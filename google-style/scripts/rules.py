@@ -366,6 +366,13 @@ def _passive(ctx: Ctx) -> Iterator[Raw]:
     for m in _PASSIVE.finditer(ctx.masked):
         if m.group(1).lower() in VOCAB["adjectival_participles"]:
             continue
+        # Masking is offset-preserving, so the auxiliary and the participle can
+        # sit adjacent in the masked text and be separated by inline code in the
+        # source: "is `--json` formatted" is not a passive. One guard kills both
+        # that false positive and the mask run the message would otherwise print
+        # back at the reader.
+        if ctx.raw[m.start():m.end()] != m.group(0):
+            continue
         yield Raw(m.start(), f"possible passive voice: {m.group(0)}",
                   "Name the actor: \"the installer creates the file\".")
 
@@ -387,6 +394,12 @@ def _contractions(ctx: Ctx) -> Iterator[Raw]:
         yield Raw(m.start(), f"three-word contraction: {m.group(0)}",
                   "Write it out. Only common two-word contractions are standard.")
     for m in _APOSTROPHE_RE.finditer(ctx.masked):
+        # \b\w+' also holds after the first apostrophe of a three-word form, so
+        # "mightn't've" matched again as "t've". The branch above already
+        # reported it, and a second, garbled finding on the same span is worse
+        # than none.
+        if m.start() > 0 and ctx.masked[m.start() - 1] == "'":
+            continue
         if _PRONOUN_RE.fullmatch(m.group(0)):
             continue
         yield Raw(m.start(), f"nonstandard contraction: {m.group(0)}",
@@ -451,11 +464,17 @@ def _acronyms(ctx: Ctx) -> Iterator[Raw]:
         token = m.group(1)
         if token in VOCAB["known_acronyms"] or token in seen:
             continue
-        window = ctx.masked[max(0, m.start() - 120):m.start()]
+        # Both expansion forms are anchored to this occurrence: the term then the
+        # acronym in parentheses ("flux capacitor (FLUX)"), or the acronym then
+        # the term ("FLUX (flux capacitor)"). The earlier check searched the 120
+        # characters before the match for "TOKEN (", which is unanchored — any
+        # longer token ending in TOKEN matched, and "SUPERFLUX (" silently
+        # suppressed the real FLUX finding after it.
+        #
         # m.end() stops before a closing paren, so slice one char past it or
         # "(FLUX)" never matches its own first occurrence.
-        expanded = f"({token})" in ctx.masked[:m.end() + 1] or re.search(
-            rf"{re.escape(token)}[ \t]*\(", window)
+        expanded = (f"({token})" in ctx.masked[:m.end() + 1]
+                    or re.match(r"[ \t]*\(", ctx.masked[m.end():]))
         seen.add(token)
         if not expanded:
             yield Raw(m.start(), f"unexpanded acronym: {token}",
@@ -463,8 +482,42 @@ def _acronyms(ctx: Ctx) -> Iterator[Raw]:
                       f"spelled-out term ({token}).")
 
 
+# --- colons -----------------------------------------------------------------
+_HEADING_COLON = re.compile(r"^#{1,6}[^\n]*:[ \t]*$", re.MULTILINE)
+_SPACED_COLON = re.compile(r"[ \t]+(?=:[ \t])")
+_DOUBLE_COLON = re.compile(r"::")
+
+
+def _colons(ctx: Ctx) -> Iterator[Raw]:
+    """Three different mistakes, so three different messages — and two of them
+    need a raw-text guard.
+
+    Masking is offset-preserving, which means a blanked inline-code span reads as
+    the whitespace before a colon ("`--json`: emit JSON", the ordinary shape of
+    CLI reference prose) and a heading ending in inline code reads as
+    colon-terminated ("### Task 2: `references/foo.md`"). Both are correct prose,
+    and unguarded they were almost every finding this rule produced.
+    """
+    for m in _HEADING_COLON.finditer(ctx.masked):
+        if not ctx.raw[m.start():m.end()].rstrip().endswith(":"):
+            continue
+        yield Raw(m.start(), "heading ends with a colon",
+                  "Drop it. A heading names its section; it does not introduce it.")
+    for m in _SPACED_COLON.finditer(ctx.masked):
+        # Only the character touching the colon decides. The run can legitimately
+        # swallow a masked span, and what the author typed there was code.
+        if ctx.raw[m.end() - 1] not in " \t":
+            continue
+        yield Raw(m.end() - 1, "space before a colon",
+                  "Close it up. A colon attaches to the word before it.")
+    for m in _DOUBLE_COLON.finditer(ctx.masked):
+        yield Raw(m.start(), "double colon",
+                  "Use one colon. Doubling it is code syntax, not prose punctuation.")
+
+
 RULES += [
     Rule("passive", "warning", "voice", _passive),
+    Rule("colons", "warning", "colons", _colons),
     Rule("contractions", "warning", "contractions", _contractions),
     Rule("semicolons", "warning", "semicolons", _semicolons),
     Rule("condition-order", "warning", "sentence-structure", _condition_order),
@@ -492,13 +545,6 @@ RULES += [
         "punctuation outside the quotation marks",
         "American convention puts the period or comma inside the closing quotation mark.",
         flags=0,
-    ),
-    regex_rule(
-        "colons", "warning", "colons",
-        r"^#{1,6}[^\n]*:[ \t]*$|[ \t]+:(?=[ \t])|::",
-        "colon usage",
-        "Drop the colon from the heading; keep no space before a colon.",
-        flags=re.MULTILINE,
     ),
     regex_rule(
         "ordinals", "warning", "numbers",

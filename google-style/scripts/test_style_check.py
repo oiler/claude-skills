@@ -539,3 +539,57 @@ def test_acronyms_flag_only_unexpanded_unknown_ones():
     assert findings_for("Configure the FLUX endpoint.\n", "acronyms")
     assert not findings_for("Configure the flux capacitor (FLUX) endpoint. FLUX is ready.\n", "acronyms")
     assert not findings_for("Call the API over HTTPS.\n", "acronyms")
+
+
+def test_colons_skips_mask_artifacts_and_names_each_class():
+    """Masking is offset-preserving, so a blanked inline-code span reads as the
+    whitespace before a colon, and a heading ending in inline code reads as
+    colon-terminated. Both shapes are ordinary correct prose.
+    """
+    assert not findings_for("Use `--flag`: do this.\n", "colons")
+    assert not findings_for("- `--json`: emit JSON.\n", "colons")
+    assert not findings_for("Open /etc/hosts: edit it.\n", "colons")
+    assert not findings_for("### Task 2: `references/foo.md`\n", "colons")
+    heading = findings_for("## Before you begin:\n", "colons")
+    spaced = findings_for("The rule is this : do not.\n", "colons")
+    doubled = findings_for("Use Foo::Bar here.\n", "colons")
+    assert heading and spaced and doubled
+    assert len({f.message for f in heading + spaced + doubled}) == 3, (
+        "one message for three different mistakes tells the reader nothing"
+    )
+
+
+def test_acronyms_expansion_check_is_anchored_to_the_occurrence():
+    """The old check searched the 120 characters before the match for "TOKEN (",
+    which matched unanchored substrings and suppressed the real finding after
+    them. Both expansion forms are anchored to the occurrence instead: term
+    first ("flux capacitor (FLUX)") or acronym first ("FLUX (flux capacitor)").
+    """
+    assert [f.message for f in
+            findings_for("The SUPERFLUX (thing) uses FLUX here.\n", "acronyms")
+            ] == ["unexpanded acronym: FLUX"]
+    # XFLUX is itself followed by a parenthetical, which is the reversed
+    # expansion form, so it is correctly silent. What matters is that FLUX no
+    # longer inherits XFLUX's parenthesis.
+    assert [f.message for f in
+            findings_for("The XFLUX (thing) uses FLUX here.\n", "acronyms")
+            ] == ["unexpanded acronym: FLUX"]
+    assert not findings_for("FLUX (flux capacitor) powers it. FLUX is ready.\n", "acronyms")
+
+
+def test_contractions_reports_a_three_word_form_once():
+    """\\b\\w+' also matches after the first apostrophe, so "mightn't've" yielded
+    the real finding plus a garbage "t've" one.
+    """
+    assert len(findings_for("You mightn't've noticed.\n", "contractions")) == 1
+
+
+def test_passive_skips_a_span_bridged_by_inline_code():
+    """The auxiliary and the participle are adjacent in the masked text but
+    separated by inline code in the source. Not a passive — and reporting it
+    printed the mask run back at the reader.
+    """
+    assert not findings_for("The output is `--json` formatted.\n", "passive")
+    assert not findings_for("The result was `foo` written.\n", "passive")
+    assert findings_for("The file was created by the installer.\n", "passive")
+    assert not findings_for("The field is required.\n", "passive")
