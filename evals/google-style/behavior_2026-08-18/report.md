@@ -39,7 +39,7 @@ Counts come from `scripts/style_check.py <file> --json`, summed by severity.
 
 The with-skill arm gates clean on every prompt. Its two warnings are both `passive`, which the checker reports and does not block, because the guide permits passive voice where it reads best.
 
-The nine errors in the without-skill arm break down as four `latin` (`e.g.` and `via`), two `oxford-comma`, two `headings` for title case, and one `please` in an instruction. The 105 warnings concentrate in `contractions` (28), `em-dash` (32), and `passive` (31).
+The nine errors in the without-skill arm break down as four `latin`, all of them `e.g.`, two `oxford-comma`, two `headings` for title case, and one `please` in an instruction. The `via` hits fire at warning severity and are not among the nine errors. The 105 warnings concentrate in `contractions` (28), `em-dash` (32), and `passive` (31).
 
 ## Output hashes
 
@@ -88,13 +88,15 @@ One more structural difference falls outside the checker: the with-skill arm nev
 
 ### Where the skill did not win
 
-The with-skill arm carries two `passive` warnings that the without-skill arm does not carry on the same prompts, and the without-skill README scored zero errors, matching the with-skill README on the gating rules. Prompt 1 is the smallest artifact in the set, which suggests the delta grows with document size rather than holding flat.
+`passive` is the only rule on which the with-skill arm is not clean, at two warnings across the set. The same two prompts without the skill carry 8 and 10 passive warnings, so the with-skill arm wins that rule too. The without-skill README scored zero errors, matching the with-skill README on the gating rules. Prompt 1 is the smallest artifact in the set, which suggests the delta grows with document size rather than holding flat.
 
 ## The honest limitation
 
 The checker scoring both arms is the same checker the skill tells one arm to run, so the mechanical delta is partly circular. The rubric read is what makes the comparison worth anything.
 
 The circularity is concrete rather than theoretical: the with-skill runs ran `style_check.py` and fixed what it reported before finishing, so a score of zero errors partly measures whether the loop ran, not whether the prose is better. Read the score table as evidence that the skill's loop works end to end, and read the rubric section as the evidence about quality. Two further limits apply. Each cell is a single run, so nothing here separates the skill's effect from run-to-run variance. The rubric read was performed by the same session that ran the comparison, which is a weaker arrangement than the one the clean-room smoke test used.
+
+A third limit governs reuse. The with-skill arm is a skill-read-on-instruction arrangement, where a prompt prefix points the model at `SKILL.md`, not a natively triggered skill. A later `behavioral` comparison has to reproduce the same arrangement, or the delta between the two reports measures the invocation path rather than the content change.
 
 ## Verdict
 
