@@ -3,6 +3,6 @@
     "query": "the checker exits 2 on a directory that has no markdown in it — debug it",
     "reason": "Boundary held at 3/3 after the instrument fix was exhausted. The description must state ownership of scripts/style_check.py to carry the spec-mandated \"run it on every documentation file you write\" instruction, and that factual ownership claim outweighs any exclusion phrasing in the same field: commit 931810b added an explicit exclusion naming the skill's own bundled checker scripts and routing did not move (3/3 before, 3/3 after). Overlap accepted on the merits — SKILL.md documents the checker's exit-code contract, which is context a user debugging that checker plausibly needs — while python remains the implementing skill for the code itself. Mirrors the web-security v1.2.1 precedent: one recorded waiver on a boundary query after the instrument-side fix was exhausted.",
     "date": "2026-08-18",
-    "finding": ".superpowers/sdd/2026-08-18-google-style-skill/task-12-report.md (run-2 analysis); evidence commit 21d562f"
+    "finding": "docs/changelogs/google-style.md (0.1.0 Notes); evidence commit 21d562f"
   }
 ]
