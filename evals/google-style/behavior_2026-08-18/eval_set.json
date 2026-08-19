@@ -1,0 +1,18 @@
+{
+  "skill": "google-style",
+  "date": "2026-08-18",
+  "method": "same prompt with and without the skill in the arena; both outputs scored by scripts/style_check.py, plus a rubric read",
+  "model": "opus",
+  "arena": "empty temp project root per run, cwd outside any repo, --setting-sources project, CLAUDECODE and ANTHROPIC_API_KEY stripped; probes confirmed no user CLAUDE.md and no user skills reach the arena",
+  "arms": {
+    "with_skill": "a byte-identical copy of the frozen skill is placed at ./google-style/ in the arena and the prompt is prefixed with an instruction to read and follow ./google-style/SKILL.md, loading the references it routes to",
+    "without_skill": "the bare prompt in an empty arena"
+  },
+  "prompts": [
+    "Write a README for a CLI tool that converts a CSV file to JSON, covering install, usage, and two flags.",
+    "Write the setup section of a contributor guide for a Python project that uses uv.",
+    "Write release notes for version 2.1 of a logging library that added structured output and deprecated one flag.",
+    "Document a REST endpoint that returns paginated results, including error responses.",
+    "Write a troubleshooting page for a build tool that fails when the lockfile is stale."
+  ]
+}
