@@ -1,0 +1,23 @@
+[
+  {"query": "write the README for the sumlog tool — it takes a session transcript and emits a handoff summary, and I want install, usage, and the two flags documented", "should_trigger": true},
+  {"query": "draft the design spec for the new trigger-eval sibling arenas before I forget how the four-state detector works", "should_trigger": true},
+  {"query": "I need release notes for wordpress-plugins v0.2.0 — tests went 11 to 33 and we added the behavior-comparison bundle", "should_trigger": true},
+  {"query": "clean up docs/workflow.md, it's gotten inconsistent and half the headings are Title Case", "should_trigger": true},
+  {"query": "write the PR description for this branch, it's the checker plus the eight reference files", "should_trigger": true},
+  {"query": "document the style_check.py CLI — flags, exit codes, what it skips", "should_trigger": true},
+  {"query": "add a changelog entry for the v0.3.0 python skill release", "should_trigger": true},
+  {"query": "write a PRD for the artifact-boundary feature, problem statement through success metrics", "should_trigger": true},
+  {"query": "turn my notes into a tutorial for setting up the eval harness from a clean checkout", "should_trigger": true},
+  {"query": "explain how the masking pass works and summarize the tradeoffs for me", "should_trigger": true},
+
+  {"query": "write a cover letter for the staff PM role at Vercel — I've got the fintech background and eight years shipping developer tools", "should_trigger": false, "boundary": "writing-style"},
+  {"query": "draft my reply to the recruiter who emailed about the platform role, polite but I'm passing", "should_trigger": false, "boundary": "writing-style"},
+  {"query": "clean this up — it's a blog post about why we stopped using feature flags, and it reads like a committee wrote it", "should_trigger": false, "boundary": "writing-style"},
+  {"query": "write a short memo to my team about the reorg, in my voice", "should_trigger": false, "boundary": "writing-style"},
+  {"query": "edit this LinkedIn post so it sounds like me and not like marketing", "should_trigger": false, "boundary": "writing-style"},
+  {"query": "write the docstring for parse_manifest — it takes a path and returns a list of entries, raises on a malformed row", "should_trigger": false, "boundary": "python"},
+  {"query": "write a commit message for this diff", "should_trigger": false},
+  {"query": "rename these CSS classes, the BEM naming has drifted", "should_trigger": false},
+  {"query": "the checker exits 2 on a directory that has no markdown in it — debug it", "should_trigger": false, "boundary": "python"},
+  {"query": "add type hints to gen_word_list.py and get it passing mypy strict", "should_trigger": false, "boundary": "python"}
+]
