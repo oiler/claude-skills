@@ -465,3 +465,77 @@ def test_oxford_comma_skips_relative_pronoun_and_negation_clause_openers():
         "See the reference, which carries this figure and the matching setting.\n",
         "oxford-comma")
     assert findings_for("Fetch, parse and render the page.\n", "oxford-comma")
+
+
+def test_passive_skips_adjectival_participles():
+    assert findings_for("The file was created by the installer.\n", "passive")
+    assert not findings_for("The field is required.\n", "passive")
+
+
+def test_anthropomorphism_flags_thinking_software():
+    assert findings_for("The API wants a token.\n", "anthropomorphism")
+    assert not findings_for("The API requires a token.\n", "anthropomorphism")
+
+
+def test_contractions_flag_nonstandard_forms_not_ordinary_ones():
+    assert findings_for("The guides're ready.\n", "contractions")
+    assert findings_for("You mightn't've noticed.\n", "contractions")
+    assert findings_for("The browser's a fast one.\n", "contractions")
+    assert not findings_for("You're ready and it's done.\n", "contractions")
+    assert not findings_for("It's a standard contraction.\n", "contractions")
+    suggestion = findings_for("Do not delete the file.\n", "contractions")
+    assert suggestion and suggestion[0].severity == "warning"
+
+
+def test_ellipsis_flags_both_forms_and_fixes_toward_three_periods():
+    """The guide says don't use ellipses at all, and when you must, three periods.
+
+    So both forms are reported; what distinguishes them is the fix text. Do not
+    rename this to "…not three periods" — that reading is the inversion the spec
+    review caught, and the name is where it would come back.
+    """
+    assert findings_for("Wait for it… then continue.\n", "ellipsis")
+    assert findings_for("Wait for it... then continue.\n", "ellipsis")
+    assert "three periods" in findings_for("Wait for it… go.\n", "ellipsis")[0].fix
+
+
+def test_quotes_flag_punctuation_outside_the_quotation_marks():
+    assert findings_for('Select "Save".\n', "quotes")
+    assert not findings_for('Select "Save."\n', "quotes")
+
+
+def test_semicolons_flag_only_procedural_lines():
+    assert findings_for("1. Run the installer; then restart.\n", "semicolons")
+    assert not findings_for("The parser is fast; the renderer is not.\n", "semicolons")
+
+
+def test_colons_flag_heading_colons_and_spaced_colons():
+    assert findings_for("## Before you begin:\n", "colons")
+    assert findings_for("The rule is this : do not.\n", "colons")
+    assert not findings_for("Do the following:\n", "colons")
+
+
+def test_ordinals_flag_numeral_forms():
+    assert findings_for("The 1st run is slowest.\n", "ordinals")
+    assert not findings_for("The first run is slowest.\n", "ordinals")
+
+
+def test_ranges_flag_hyphens_but_not_iso_dates():
+    assert findings_for("Wait 3-5 minutes.\n", "ranges")
+    assert not findings_for("Released 2026-08-18.\n", "ranges")
+
+
+def test_condition_order_flags_instruction_before_condition():
+    assert findings_for("Click Save if you are finished.\n", "condition-order")
+    assert not findings_for("If you are finished, click Save.\n", "condition-order")
+
+
+def test_exclamation_flags_prose_not_images():
+    assert findings_for("The build finished!\n", "exclamation")
+    assert not findings_for("![a diagram](diagram.png)\n", "exclamation")
+
+
+def test_acronyms_flag_only_unexpanded_unknown_ones():
+    assert findings_for("Configure the FLUX endpoint.\n", "acronyms")
+    assert not findings_for("Configure the flux capacitor (FLUX) endpoint. FLUX is ready.\n", "acronyms")
+    assert not findings_for("Call the API over HTTPS.\n", "acronyms")

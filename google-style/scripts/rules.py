@@ -357,4 +357,169 @@ RULES += [
     ),
 ]
 
+# --- passive ----------------------------------------------------------------
+_PASSIVE = re.compile(
+    r"\b(?:is|are|was|were|be|been|being|gets|got)[ \t]+(\w+(?:ed|en))\b", re.IGNORECASE)
+
+
+def _passive(ctx: Ctx) -> Iterator[Raw]:
+    for m in _PASSIVE.finditer(ctx.masked):
+        if m.group(1).lower() in VOCAB["adjectival_participles"]:
+            continue
+        yield Raw(m.start(), f"possible passive voice: {m.group(0)}",
+                  "Name the actor: \"the installer creates the file\".")
+
+
+# --- contractions -----------------------------------------------------------
+_PRONOUN_RE = re.compile(
+    r"\b(?:you|we|they|it|he|she|who|what|there|here|these|those|that|i)'(?:re|s|ve|ll|d|m)\b",
+    re.IGNORECASE)
+_APOSTROPHE_RE = re.compile(r"\b\w+'(?:re|ve|ll)\b", re.IGNORECASE)
+_THREE_WORD = re.compile(r"\b\w+n't've\b", re.IGNORECASE)
+_IS_CONTRACTION = re.compile(r"\b(\w+'s)[ \t]+(?:a|an|the|not|only|now|going to)\b", re.IGNORECASE)
+_UNCONTRACTED = re.compile(
+    r"\b(?:do|does|did|is|are|was|were|will|would|should|could|has|have|had|can)[ \t]+not\b|\bcannot\b",
+    re.IGNORECASE)
+
+
+def _contractions(ctx: Ctx) -> Iterator[Raw]:
+    for m in _THREE_WORD.finditer(ctx.masked):
+        yield Raw(m.start(), f"three-word contraction: {m.group(0)}",
+                  "Write it out. Only common two-word contractions are standard.")
+    for m in _APOSTROPHE_RE.finditer(ctx.masked):
+        if _PRONOUN_RE.fullmatch(m.group(0)):
+            continue
+        yield Raw(m.start(), f"nonstandard contraction: {m.group(0)}",
+                  "Contract pronouns only. Write the noun and verb out.")
+    for m in _IS_CONTRACTION.finditer(ctx.masked):
+        # "it's a valid form" is a standard pronoun contraction the guide
+        # recommends; only a noun + 's meaning "is" (browser's) is nonstandard.
+        if _PRONOUN_RE.fullmatch(m.group(1)):
+            continue
+        yield Raw(m.start(), f"'s standing in for \"is\": {m.group(0)}",
+                  "Write \"is\" out when the subject is a noun.")
+    for m in _UNCONTRACTED.finditer(ctx.masked):
+        yield Raw(m.start(), f"uncontracted negation: {m.group(0)}",
+                  "Contract it. A scanning reader misses a standalone \"not\", "
+                  "but cannot misread \"don't\" as \"do\".")
+
+
+# --- semicolons and condition-order (procedural context) --------------------
+_STEP_LINE = re.compile(r"^[ \t]*(?:\d+[.)][ \t]+|[-*][ \t]+)?(?P<first>[A-Za-z]+)\b")
+
+
+def _is_procedural(line: str) -> bool:
+    m = _STEP_LINE.match(line)
+    return bool(m) and m.group("first").lower() in VOCAB["imperative_verbs"]
+
+
+def _iter_lines(text: str) -> Iterator[tuple[int, str]]:
+    offset = 0
+    for line in text.split("\n"):
+        yield offset, line
+        offset += len(line) + 1
+
+
+def _semicolons(ctx: Ctx) -> Iterator[Raw]:
+    for offset, line in _iter_lines(ctx.masked):
+        if ";" in line and _is_procedural(line):
+            yield Raw(offset + line.index(";"), "semicolon in a procedural step",
+                      "Split it into two sentences, or two steps.")
+
+
+_CONDITION = re.compile(r"\b(if|when|unless)\b", re.IGNORECASE)
+
+
+def _condition_order(ctx: Ctx) -> Iterator[Raw]:
+    for offset, line in _iter_lines(ctx.masked):
+        if not _is_procedural(line):
+            continue
+        m = _CONDITION.search(line)
+        if m and m.start() > 0:
+            yield Raw(offset + m.start(), f"instruction before its condition ({m.group(0)})",
+                      "Put the condition first, so the reader knows whether the step applies "
+                      "before they start doing it.")
+
+
+# --- acronyms ---------------------------------------------------------------
+_ACRONYM = re.compile(r"\b([A-Z]{2,6})s?\b")
+
+
+def _acronyms(ctx: Ctx) -> Iterator[Raw]:
+    seen: set[str] = set()
+    for m in _ACRONYM.finditer(ctx.masked):
+        token = m.group(1)
+        if token in VOCAB["known_acronyms"] or token in seen:
+            continue
+        window = ctx.masked[max(0, m.start() - 120):m.start()]
+        # m.end() stops before a closing paren, so slice one char past it or
+        # "(FLUX)" never matches its own first occurrence.
+        expanded = f"({token})" in ctx.masked[:m.end() + 1] or re.search(
+            rf"{re.escape(token)}[ \t]*\(", window)
+        seen.add(token)
+        if not expanded:
+            yield Raw(m.start(), f"unexpanded acronym: {token}",
+                      f"Spell it out on first use, then give the acronym in parentheses: "
+                      f"spelled-out term ({token}).")
+
+
+RULES += [
+    Rule("passive", "warning", "voice", _passive),
+    Rule("contractions", "warning", "contractions", _contractions),
+    Rule("semicolons", "warning", "semicolons", _semicolons),
+    Rule("condition-order", "warning", "sentence-structure", _condition_order),
+    Rule("acronyms", "warning", "abbreviations", _acronyms),
+    regex_rule(
+        "anthropomorphism", "warning", "anthropomorphism",
+        r"\b(?:system|API|service|function|method|script|tool|app|application|code|"
+        r"server|database|module|library|model|agent|page|browser)[ \t]+"
+        r"(?:thinks|wants|knows|believes|likes|decides|feels|understands|sees|"
+        r"remembers|tries|expects|refuses|prefers|assumes)\b",
+        "anthropomorphism: {match}",
+        "Describe what the software does, not what it wants.",
+    ),
+    regex_rule(
+        "ellipsis", "warning", "ellipses",
+        r"…|\.\.\.",
+        "ellipsis: {match}",
+        "In general, don't use ellipses. When you must, use three periods in a row, "
+        "not the single ellipsis character.",
+        flags=0,
+    ),
+    regex_rule(
+        "quotes", "warning", "quotation-marks",
+        r"[\"”][ \t]*[.,]",
+        "punctuation outside the quotation marks",
+        "American convention puts the period or comma inside the closing quotation mark.",
+        flags=0,
+    ),
+    regex_rule(
+        "colons", "warning", "colons",
+        r"^#{1,6}[^\n]*:[ \t]*$|[ \t]+:(?=[ \t])|::",
+        "colon usage",
+        "Drop the colon from the heading; keep no space before a colon.",
+        flags=re.MULTILINE,
+    ),
+    regex_rule(
+        "ordinals", "warning", "numbers",
+        r"\b\d+(?:st|nd|rd|th)\b",
+        "numeric ordinal: {match}",
+        "Spell ordinals out: first, second, third.",
+    ),
+    regex_rule(
+        "ranges", "warning", "numbers",
+        r"(?<!\d{4})(?<![\d-])\d{1,3}[ \t]*-[ \t]*\d{1,3}(?![\d-])",
+        "hyphenated range: {match}",
+        "Write \"from 3 to 5\" or \"3 through 5\". A hyphen reads as a minus sign.",
+        flags=0,
+    ),
+    regex_rule(
+        "exclamation", "warning", "periods",
+        r"(?<!\])!(?!\[)",
+        "exclamation mark",
+        "Cut it. Reference prose stays level.",
+        flags=0,
+    ),
+]
+
 RULES.sort(key=lambda r: r.id)
