@@ -1,9 +1,9 @@
-# autonom.py — deterministic spine for the autonom skill
+# orko.py — deterministic spine for the orko skill
 # /// script
 # requires-python = ">=3.12"
 # dependencies = []
 # ///
-"""Owns every deterministic surface of an autonom run: artifact paths, the run
+"""Owns every deterministic surface of an orko run: artifact paths, the run
 ledger, artifact validation, and the Fable dispatch prompts.
 
 The model authors prose. This script owns structure. In particular the `prompt`
@@ -12,12 +12,12 @@ priming a reviewer with the authoring session's context turns a fresh critique
 into an echo of the author.
 
 Usage:
-    uv run autonom.py init <topic> [--root DIR] [--date YYYY-MM-DD]
-    uv run autonom.py ledger <step> <status> [--slug SLUG] [--commit SHA]
-    uv run autonom.py status [<slug>] [--root DIR]
-    uv run autonom.py prompt {spec|plan} <slug> [--root DIR]
-    uv run autonom.py escalations <slug> [--root DIR]
-    uv run autonom.py validate {spec|plan} <path>
+    uv run orko.py init <topic> [--root DIR] [--date YYYY-MM-DD]
+    uv run orko.py ledger <step> <status> [--slug SLUG] [--commit SHA]
+    uv run orko.py status [<slug>] [--root DIR]
+    uv run orko.py prompt {spec|plan} <slug> [--root DIR]
+    uv run orko.py escalations <slug> [--root DIR]
+    uv run orko.py validate {spec|plan} <path>
 
 Exit codes: 0 success / all checks pass; 1 validation failures; 2 usage or IO error.
 """
@@ -212,7 +212,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     try:
         text = target.read_text(encoding="utf-8")
     except OSError as error:
-        print(f"autonom: cannot read {target}: {error}", file=sys.stderr)
+        print(f"orko: cannot read {target}: {error}", file=sys.stderr)
         return 2
 
     findings = {"spec": validate_spec, "plan": validate_plan}[args.kind](text)
@@ -249,41 +249,44 @@ def find_repo_root(start: Path) -> Path | None:
 
 
 def compute_paths(root: Path, slug: str, date: str) -> dict[str, str]:
-    run_dir = root / ".superpowers" / "autonom" / slug
+    """Every path a run touches, derived from root and slug alone.
+
+    The run directory is scratch and Linear is the record, so artifacts need
+    no date in their filename; stability for the validators and seats is all
+    that matters.
+    """
+    run_dir = root / ".orko" / slug
     return {
         "slug": slug,
         "date": date,
         "root": str(root),
-        "spec": str(root / "docs/superpowers/specs" / f"{date}-{slug}-design.md"),
-        "plan": str(root / "docs/superpowers/plans" / f"{date}-{slug}.md"),
         "run_dir": str(run_dir),
         "ledger": str(run_dir / "progress.md"),
         "escalations": str(run_dir / "escalations.md"),
+        "spec": str(run_dir / "spec.md"),
+        "plan": str(run_dir / "plan.md"),
+        "brief": str(run_dir / "brief.md"),
+        "synthesis": str(run_dir / "synthesis.md"),
+        "findings_dir": str(run_dir / "findings"),
+        "context_dir": str(run_dir / "context"),
+        "unposted_dir": str(run_dir / "unposted"),
     }
 
 
 def ensure_gitignored(root: Path) -> None:
-    """Keep the run directory out of git. It is scratch, not history."""
+    """Append `.orko/` to the target's .gitignore once. The run directory is
+    scratch; a trail that commits by accident is the failure this prevents."""
     gitignore = root / ".gitignore"
     existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
-    if any(line.strip() == ".superpowers/" for line in existing.splitlines()):
+    if any(line.strip() == ".orko/" for line in existing.splitlines()):
         return
-    prefix = "" if existing.endswith("\n") or not existing else "\n"
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
     with gitignore.open("a", encoding="utf-8") as handle:
-        handle.write(f"{prefix}.superpowers/\n")
-
-
-def superpowers_present(cache: Path | None = None) -> bool:
-    """True when the superpowers plugin is installed and reachable."""
-    base = cache or (Path.home() / ".claude" / "plugins" / "cache")
-    if not base.exists():
-        return False
-    hits = base.glob("*/superpowers/*/skills/subagent-driven-development/SKILL.md")
-    return next(hits, None) is not None
+        handle.write(f"{prefix}.orko/\n")
 
 
 def _header(topic: str, slug: str, date: str) -> str:
-    return f"# autonom run — topic: {topic} — slug: {slug} — date: {date}"
+    return f"# orko run — topic: {topic} — slug: {slug} — date: {date}"
 
 
 def _parse_header(ledger: Path) -> dict[str, str] | None:
@@ -295,7 +298,7 @@ def _parse_header(ledger: Path) -> dict[str, str] | None:
         return None
     first = lines[0]
     match = re.match(
-        r"# autonom run — topic: (?P<topic>.*) — slug: (?P<slug>[a-z0-9-]+) "
+        r"# orko run — topic: (?P<topic>.*) — slug: (?P<slug>[a-z0-9-]+) "
         r"— date: (?P<date>\d{4}-\d{2}-\d{2})$",
         first,
     )
@@ -305,22 +308,12 @@ def _parse_header(ledger: Path) -> dict[str, str] | None:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    cache = Path(args.plugin_cache) if args.plugin_cache else None
-    if not superpowers_present(cache):
-        print(
-            "autonom: the superpowers plugin (v6.2.0+) is not installed. autonom "
-            "drives superpowers:brainstorming, writing-plans, using-git-worktrees, "
-            "and subagent-driven-development and cannot run without it.",
-            file=sys.stderr,
-        )
-        return 2
-
     root = Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
     if root is None:
-        print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
         return 2
     if CONTROL_RE.search(args.topic):
-        print("autonom: topic contains a newline or control character; the ledger "
+        print("orko: topic contains a newline or control character; the ledger "
               "header is a single line and could not be read back",
               file=sys.stderr)
         return 2
@@ -328,7 +321,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     try:
         slug = slugify(args.topic)
     except ValueError as error:
-        print(f"autonom: {error}", file=sys.stderr)
+        print(f"orko: {error}", file=sys.stderr)
         return 2
     paths = compute_paths(root, slug, date)
     ledger = Path(paths["ledger"])
@@ -338,11 +331,11 @@ def cmd_init(args: argparse.Namespace) -> int:
     if ledger.exists():
         existing = _parse_header(ledger)
         if existing is None:
-            print(f"autonom: unreadable ledger header in {ledger}", file=sys.stderr)
+            print(f"orko: unreadable ledger header in {ledger}", file=sys.stderr)
             return 2
         if existing["topic"] != args.topic:
             print(
-                f"autonom: topic {args.topic!r} collides with the existing run "
+                f"orko: topic {args.topic!r} collides with the existing run "
                 f"{existing['topic']!r} (both slugify to {slug!r}). "
                 "Choose a distinct topic or resume the existing run.",
                 file=sys.stderr,
@@ -413,7 +406,7 @@ def _dispatched_base(entries: list[dict[str, str | None]],
 
 
 def _run_dir_root(root: Path) -> Path:
-    return root / ".superpowers" / "autonom"
+    return root / ".orko"
 
 
 def _describe_run(root: Path, slug: str) -> dict | None:
@@ -442,11 +435,11 @@ def _resolved_root(args: argparse.Namespace) -> Path | None:
 def cmd_ledger(args: argparse.Namespace) -> int:
     root = _resolved_root(args)
     if root is None:
-        print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
         return 2
     ledger = _run_dir_root(root) / args.slug / "progress.md"
     if not ledger.exists():
-        print(f"autonom: no run named {args.slug!r}; run init first", file=sys.stderr)
+        print(f"orko: no run named {args.slug!r}; run init first", file=sys.stderr)
         return 2
     line = f"step {args.step} {args.status}"
     if args.commit:
@@ -459,16 +452,16 @@ def cmd_ledger(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     root = _resolved_root(args)
     if root is None:
-        print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
         return 2
 
     if args.slug:
         if not (_run_dir_root(root) / args.slug / "progress.md").exists():
-            print(f"autonom: no run named {args.slug!r}", file=sys.stderr)
+            print(f"orko: no run named {args.slug!r}", file=sys.stderr)
             return 2
         run = _describe_run(root, args.slug)
         if run is None:
-            print(f"autonom: unreadable ledger header for run {args.slug!r}",
+            print(f"orko: unreadable ledger header for run {args.slug!r}",
                   file=sys.stderr)
             return 2
         print(json.dumps(run, indent=2))
@@ -491,22 +484,22 @@ def references_dir() -> Path:
 def cmd_prompt(args: argparse.Namespace) -> int:
     root = _resolved_root(args)
     if root is None:
-        print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
         return 2
     if not (_run_dir_root(root) / args.slug / "progress.md").exists():
-        print(f"autonom: no run named {args.slug!r}", file=sys.stderr)
+        print(f"orko: no run named {args.slug!r}", file=sys.stderr)
         return 2
 
     run = _describe_run(root, args.slug)
     if run is None:
-        print(f"autonom: unreadable ledger header for run {args.slug!r}",
+        print(f"orko: unreadable ledger header for run {args.slug!r}",
               file=sys.stderr)
         return 2
     source = references_dir() / f"{args.kind}-reviewer.md"
     try:
         text = source.read_text(encoding="utf-8")
     except OSError as error:
-        print(f"autonom: cannot read {source}: {error}", file=sys.stderr)
+        print(f"orko: cannot read {source}: {error}", file=sys.stderr)
         return 2
 
     # {{ROOT}} anchors the reviewer's git commands with `git -C`. A subagent
@@ -521,7 +514,7 @@ def cmd_prompt(args: argparse.Namespace) -> int:
 
     leftover = re.search(r"\{\{[A-Z_]+\}\}", text)
     if leftover:
-        print(f"autonom: unsubstituted token {leftover.group(0)} in {source}",
+        print(f"orko: unsubstituted token {leftover.group(0)} in {source}",
               file=sys.stderr)
         return 2
 
@@ -539,11 +532,11 @@ def cmd_escalations(args: argparse.Namespace) -> int:
     """
     root = _resolved_root(args)
     if root is None:
-        print(f"autonom: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
         return 2
     run_dir = _run_dir_root(root) / args.slug
     if not (run_dir / "progress.md").exists():
-        print(f"autonom: no run named {args.slug!r}", file=sys.stderr)
+        print(f"orko: no run named {args.slug!r}", file=sys.stderr)
         return 2
 
     target = run_dir / "escalations.md"
@@ -552,7 +545,7 @@ def cmd_escalations(args: argparse.Namespace) -> int:
     try:
         text = target.read_text(encoding="utf-8")
     except OSError as error:
-        print(f"autonom: cannot read {target}: {error}", file=sys.stderr)
+        print(f"orko: cannot read {target}: {error}", file=sys.stderr)
         return 2
     if not text.strip():
         return 0
@@ -561,15 +554,13 @@ def cmd_escalations(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="autonom")
+    parser = argparse.ArgumentParser(prog="orko")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="start or resume a run")
     p_init.add_argument("topic")
     p_init.add_argument("--root", help="repo root (default: git toplevel of cwd)")
     p_init.add_argument("--date", help="YYYY-MM-DD (default: today)")
-    p_init.add_argument("--plugin-cache",
-                        help="plugin cache root (default: ~/.claude/plugins/cache)")
     p_init.set_defaults(func=cmd_init)
 
     p_ledger = sub.add_parser("ledger", help="append a step record")
