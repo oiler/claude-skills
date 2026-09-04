@@ -1,4 +1,5 @@
 """Tests for orko.py — the deterministic spine of the orko skill."""
+import io
 import json
 from pathlib import Path
 
@@ -945,3 +946,109 @@ class TestPostClose:
         capsys.readouterr()
         with pytest.raises(SystemExit):
             orko.main(["post", "close", "--slug", "demo-topic", "--root", str(tmp_path)])
+
+
+class TestPostFinding:
+    def _init(self, tmp_path, capsys):
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        capsys.readouterr()
+
+    def _post(self, tmp_path, capsys, monkeypatch, outcome, body="Evidence here.\n"):
+        monkeypatch.setattr("sys.stdin", io.StringIO(body))
+        rc = orko.main(["post", "finding", "--slug", "demo-topic", "--root", str(tmp_path),
+                        "--seat", "security-reviewer", "--outcome", outcome,
+                        "--title", "Token in query string"])
+        return rc, capsys.readouterr()
+
+    def test_handled_maps_to_done(self, tmp_path, capsys, monkeypatch):
+        self._init(tmp_path, capsys)
+        rc, out = self._post(tmp_path, capsys, monkeypatch, "handled")
+        assert rc == 0
+        payload = json.loads(out.out)
+        assert_posts_are_well_formed(payload)
+        assert payload["posts"][-1]["args"]["state"] == "Done"
+
+    def test_deferred_maps_to_backlog(self, tmp_path, capsys, monkeypatch):
+        self._init(tmp_path, capsys)
+        _, out = self._post(tmp_path, capsys, monkeypatch, "deferred")
+        assert json.loads(out.out)["posts"][-1]["args"]["state"] == "Backlog"
+
+    def test_rejected_maps_to_canceled(self, tmp_path, capsys, monkeypatch):
+        self._init(tmp_path, capsys)
+        _, out = self._post(tmp_path, capsys, monkeypatch, "rejected")
+        assert json.loads(out.out)["posts"][-1]["args"]["state"] == "Canceled"
+
+    def test_blocked_maps_to_todo_with_label(self, tmp_path, capsys, monkeypatch):
+        self._init(tmp_path, capsys)
+        orko.main(["linear", "set", "blocked_label", "lbl_1", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        capsys.readouterr()
+        _, out = self._post(tmp_path, capsys, monkeypatch, "blocked")
+        posts = json.loads(out.out)["posts"]
+        assert len(posts) == 1
+        assert posts[0]["args"]["state"] == "Todo"
+        assert posts[0]["args"]["labels"] == ["blocked"]
+
+    def test_blocked_bootstraps_the_label_when_unrecorded(self, tmp_path, capsys, monkeypatch):
+        self._init(tmp_path, capsys)
+        _, out = self._post(tmp_path, capsys, monkeypatch, "blocked")
+        posts = json.loads(out.out)["posts"]
+        assert [p["tool"] for p in posts] == ["mcp__linear__save_issue_label",
+                                              "mcp__linear__save_issue"]
+        assert posts[0]["args"] == {"team": "JRF", "name": "blocked",
+                                    "color": "#eb5757"}
+        assert posts[0]["then"] == "linear set blocked_label <returned id> --slug demo-topic"
+
+    def test_description_starts_with_the_seat_line(self, tmp_path, capsys, monkeypatch):
+        self._init(tmp_path, capsys)
+        _, out = self._post(tmp_path, capsys, monkeypatch, "handled")
+        description = json.loads(out.out)["posts"][-1]["args"]["description"]
+        assert description.startswith("Seat: security-reviewer\n")
+        assert "Evidence here." in description
+
+    def test_issue_targets_team_and_project(self, tmp_path, capsys, monkeypatch):
+        self._init(tmp_path, capsys)
+        _, out = self._post(tmp_path, capsys, monkeypatch, "handled")
+        args = json.loads(out.out)["posts"][-1]["args"]
+        assert args["team"] == "JRF"
+        assert args["project"] == "proj_1"
+        assert args["title"] == "Token in query string"
+
+    def test_empty_body_is_a_usage_error(self, tmp_path, capsys, monkeypatch):
+        self._init(tmp_path, capsys)
+        rc, out = self._post(tmp_path, capsys, monkeypatch, "handled", body="  \n")
+        assert rc == 2
+        assert "body" in out.err
+
+    def test_unknown_outcome_is_rejected_by_argparse(self, tmp_path, capsys, monkeypatch):
+        self._init(tmp_path, capsys)
+        with pytest.raises(SystemExit):
+            self._post(tmp_path, capsys, monkeypatch, "maybe")
+
+
+class TestPostEscalation:
+    def test_escalation_is_a_blocked_finding_that_writes_the_gate_file(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        orko.main(["linear", "set", "blocked_label", "lbl_1", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        capsys.readouterr()
+        monkeypatch.setattr("sys.stdin", io.StringIO("Scope grows to billing.\n"))
+        rc = orko.main(["post", "escalation", "--slug", "demo-topic",
+                        "--root", str(tmp_path), "--seat", "architecture-reviewer",
+                        "--title", "Billing is outside boundaries"])
+        assert rc == 0
+        posts = json.loads(capsys.readouterr().out)["posts"]
+        assert posts[-1]["args"]["state"] == "Todo"
+        assert posts[-1]["args"]["labels"] == ["blocked"]
+        gate = (tmp_path / ".orko/demo-topic/escalations.md").read_text()
+        assert "Billing is outside boundaries" in gate
+        assert "Scope grows to billing." in gate
+        assert orko.main(["escalations", "demo-topic", "--root", str(tmp_path)]) == 1

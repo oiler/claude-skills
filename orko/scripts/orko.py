@@ -746,6 +746,70 @@ def cmd_post_close(args: argparse.Namespace) -> int:
                          "args": post_args, "then": None}])
 
 
+# Decision outcomes and the JRF team state each maps to. The team has no
+# "Blocked" state, so an out-of-boundaries finding is a Todo carrying the
+# `blocked` label, and the run stops on it (see cmd_post_escalation).
+OUTCOMES: dict[str, str] = {
+    "handled": "Done",
+    "deferred": "Backlog",
+    "rejected": "Canceled",
+    "blocked": "Todo",
+}
+BLOCKED_LABEL = {"name": "blocked", "color": "#eb5757"}
+
+
+def _finding_posts(run: dict, seat: str, outcome: str, title: str,
+                   body: str) -> list[dict]:
+    posts: list[dict] = []
+    labels: list[str] = []
+    if outcome == "blocked":
+        labels = [BLOCKED_LABEL["name"]]
+        if not run["linear"].get("blocked_label"):
+            posts.append({
+                "tool": "mcp__linear__save_issue_label",
+                "args": {"team": run["team"], **BLOCKED_LABEL},
+                "then": f"linear set blocked_label <returned id> --slug {run['slug']}",
+            })
+    issue_args: dict = {
+        "team": run["team"],
+        "project": run["linear"]["project"],
+        "title": title,
+        "state": OUTCOMES[outcome],
+        "description": f"Seat: {seat}\n\n{body.rstrip()}\n",
+    }
+    if labels:
+        issue_args["labels"] = labels
+    posts.append({"tool": "mcp__linear__save_issue", "args": issue_args,
+                  "then": None})
+    return posts
+
+
+def _read_body() -> str | None:
+    body = sys.stdin.read()
+    return body if body.strip() else None
+
+
+def cmd_post_finding(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    _, run = loaded
+    if not run["linear"].get("project"):
+        print("orko: no Linear project recorded for this run", file=sys.stderr)
+        return 2
+    body = _read_body()
+    if body is None:
+        print("orko: the finding body (stdin) is empty; pipe the finding's "
+              "evidence and the conductor's reasoning", file=sys.stderr)
+        return 2
+    outcome = "blocked" if args.entity == "escalation" else args.outcome
+    if args.entity == "escalation":
+        gate = Path(run["escalations"])
+        with gate.open("a", encoding="utf-8") as handle:
+            handle.write(f"## {args.title}\n\nSeat: {args.seat}\n\n{body.rstrip()}\n\n")
+    return _emit_posts(_finding_posts(run, args.seat, outcome, args.title, body))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orko")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -812,6 +876,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_pc.add_argument("--summary", required=True)
     p_pc.add_argument("--pr")
     p_pc.set_defaults(func=cmd_post_close)
+
+    for entity in ("finding", "escalation"):
+        p_pf = post_sub.add_parser(entity)
+        p_pf.add_argument("--slug", required=True)
+        p_pf.add_argument("--root")
+        p_pf.add_argument("--seat", required=True)
+        p_pf.add_argument("--title", required=True)
+        if entity == "finding":
+            p_pf.add_argument("--outcome", required=True, choices=sorted(OUTCOMES))
+        p_pf.set_defaults(func=cmd_post_finding)
 
     p_linear = sub.add_parser("linear", help="record or read Linear IDs")
     linear_sub = p_linear.add_subparsers(dest="action", required=True)
