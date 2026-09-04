@@ -381,6 +381,25 @@ LEDGER_LINE_RE = re.compile(
     r"(?: commit=(?P<commit>\S+))?$"
 )
 
+LINEAR_KEYS = ("project", "spec_doc", "plan_doc", "brief_doc",
+               "synthesis_doc", "blocked_label")
+LINEAR_LINE_RE = re.compile(
+    r"^linear (?P<key>" + "|".join(LINEAR_KEYS) + r") (?P<id>\S+)$"
+)
+
+
+def _linear_ids(ledger: Path) -> dict[str, str]:
+    """Recorded Linear IDs, last write wins. Lives in the ledger so a resumed
+    session can re-fetch the Project and documents without the transcript."""
+    ids: dict[str, str] = {}
+    if not ledger.exists():
+        return ids
+    for line in ledger.read_text(encoding="utf-8").splitlines()[1:]:
+        match = LINEAR_LINE_RE.match(line.strip())
+        if match:
+            ids[match.group("key")] = match.group("id")
+    return ids
+
 
 def _ledger_entries(ledger: Path) -> list[dict[str, str | None]]:
     """Parsed step records in order, header excluded. Unparseable lines are
@@ -452,6 +471,7 @@ def _describe_run(root: Path, slug: str) -> dict | None:
         next_step_name=steps.get(next_step) if next_step is not None else None,
         last_status=entries[-1]["status"] if entries else None,
         dispatched_base=_dispatched_base(entries, next_step),
+        linear=_linear_ids(ledger),
     )
 
 
@@ -587,6 +607,26 @@ def cmd_escalations(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_linear(args: argparse.Namespace) -> int:
+    root = _resolved_root(args)
+    if root is None:
+        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        return 2
+    ledger = _run_dir_root(root) / args.slug / "progress.md"
+    if _parse_header(ledger) is None:
+        print(f"orko: no run named {args.slug!r}", file=sys.stderr)
+        return 2
+    if args.action == "set":
+        if CONTROL_RE.search(args.id) or " " in args.id:
+            print("orko: a Linear ID cannot contain whitespace", file=sys.stderr)
+            return 2
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(f"linear {args.key} {args.id}\n")
+        return 0
+    print(json.dumps(_linear_ids(ledger), indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orko")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -629,6 +669,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_escalations.add_argument("slug")
     p_escalations.add_argument("--root")
     p_escalations.set_defaults(func=cmd_escalations)
+
+    p_linear = sub.add_parser("linear", help="record or read Linear IDs")
+    linear_sub = p_linear.add_subparsers(dest="action", required=True)
+    p_set = linear_sub.add_parser("set")
+    p_set.add_argument("key", choices=LINEAR_KEYS)
+    p_set.add_argument("id")
+    p_set.add_argument("--slug", required=True)
+    p_set.add_argument("--root")
+    p_set.set_defaults(func=cmd_linear)
+    p_get = linear_sub.add_parser("get")
+    p_get.add_argument("--slug", required=True)
+    p_get.add_argument("--root")
+    p_get.set_defaults(func=cmd_linear)
 
     return parser
 

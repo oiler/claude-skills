@@ -694,3 +694,59 @@ class TestEscalations:
         monkeypatch.chdir(tmp_path)
         assert orko.main(["escalations", "demo-topic"]) == 2
         assert "not inside a git repository" in capsys.readouterr().err
+
+
+class TestLinearIds:
+    def _init(self, tmp_path, capsys):
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        capsys.readouterr()
+
+    def test_set_then_get_round_trips(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        assert orko.main(["linear", "set", "project", "proj_123",
+                          "--slug", "demo-topic", "--root", str(tmp_path)]) == 0
+        assert orko.main(["linear", "get", "--slug", "demo-topic",
+                          "--root", str(tmp_path)]) == 0
+        assert json.loads(capsys.readouterr().out) == {"project": "proj_123"}
+
+    def test_set_appends_a_ledger_line(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        orko.main(["linear", "set", "spec_doc", "doc_9", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        lines = (tmp_path / ".orko/demo-topic/progress.md").read_text().splitlines()
+        assert lines[-1] == "linear spec_doc doc_9"
+
+    def test_last_write_wins(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        for value in ("a", "b"):
+            orko.main(["linear", "set", "project", value, "--slug", "demo-topic",
+                       "--root", str(tmp_path)])
+        capsys.readouterr()
+        orko.main(["linear", "get", "--slug", "demo-topic", "--root", str(tmp_path)])
+        assert json.loads(capsys.readouterr().out)["project"] == "b"
+
+    def test_unknown_key_is_a_usage_error(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        with pytest.raises(SystemExit) as raised:
+            orko.main(["linear", "set", "wiki", "x", "--slug", "demo-topic",
+                       "--root", str(tmp_path)])
+        assert raised.value.code == 2
+
+    def test_status_reports_the_ids(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        orko.main(["linear", "set", "project", "proj_123", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        capsys.readouterr()
+        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        assert json.loads(capsys.readouterr().out)["linear"] == {"project": "proj_123"}
+
+    def test_linear_lines_do_not_disturb_step_parsing(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        orko.main(["ledger", "0", "complete", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        orko.main(["linear", "set", "project", "p", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        capsys.readouterr()
+        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        assert json.loads(capsys.readouterr().out)["next_step"] == 1
