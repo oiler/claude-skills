@@ -627,6 +627,125 @@ def cmd_linear(args: argparse.Namespace) -> int:
     return 0
 
 
+DOC_KINDS = {"spec": "Spec", "plan": "Plan", "brief": "Brief", "synthesis": "Synthesis"}
+
+
+def _emit_posts(posts: list[dict]) -> int:
+    """The one place payloads leave the script. Every `post` subcommand ends
+    here so the shape the conductor relays is identical across entities."""
+    print(json.dumps({"posts": posts}, indent=2))
+    return 0
+
+
+def _load_run(args: argparse.Namespace) -> tuple[Path, dict] | None:
+    root = _resolved_root(args)
+    if root is None:
+        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+        return None
+    run = _describe_run(root, args.slug)
+    if run is None:
+        print(f"orko: no run named {args.slug!r}", file=sys.stderr)
+        return None
+    return root, run
+
+
+def _project_description(run: dict, goal: str, boundaries: str,
+                         branch: str | None) -> str:
+    lines = [
+        f"**Goal:** {goal}",
+        "",
+        f"- Mode: {run['mode']}",
+        f"- Slug: `{run['slug']}`",
+        f"- Repository: `{run['root']}`",
+        f"- Branch: `{branch}`" if branch else "- Branch: none (analysis, read-only)",
+        f"- Run directory: `{run['run_dir']}`",
+        f"- Boundaries: {boundaries}",
+        "",
+        "Record kept by orko. Issues in this project are decisions kicked up to "
+        "the conductor, one per decision, attributed by seat in the first line "
+        "of each description. Documents hold the working artifacts.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def cmd_post_project(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    _, run = loaded
+    if run["mode"] == "build" and not args.branch:
+        print("orko: a build project needs --branch (the orko/<slug> branch the "
+              "run works on)", file=sys.stderr)
+        return 2
+    # Checked here rather than by argparse so a missing field is reported the
+    # same way as a missing --branch: exit 2 with an `orko:` line, not a
+    # usage dump. The branch check runs first because it is mode-specific.
+    if not args.boundaries:
+        print("orko: post project needs --boundaries (what the run may and may "
+              "not touch)", file=sys.stderr)
+        return 2
+    description = _project_description(run, args.goal, args.boundaries, args.branch)
+    existing = run["linear"].get("project")
+    if existing:
+        post_args = {"id": existing, "description": description}
+        then = None
+    else:
+        post_args = {"name": run["slug"], "addTeams": [run["team"]],
+                     "summary": args.goal[:255], "description": description}
+        then = f"linear set project <returned id> --slug {run['slug']}"
+    return _emit_posts([{"tool": "mcp__linear__save_project",
+                         "args": post_args, "then": then}])
+
+
+def cmd_post_document(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    _, run = loaded
+    project = run["linear"].get("project")
+    if not project:
+        print("orko: no Linear project recorded for this run; post project first "
+              "and record its id with `linear set project`", file=sys.stderr)
+        return 2
+    source = Path(run[args.kind])
+    try:
+        content = source.read_text(encoding="utf-8")
+    except OSError as error:
+        print(f"orko: cannot read {source}: {error}", file=sys.stderr)
+        return 2
+    key = f"{args.kind}_doc"
+    existing = run["linear"].get(key)
+    if existing:
+        post_args = {"id": existing, "content": content}
+        then = None
+    else:
+        post_args = {"title": DOC_KINDS[args.kind], "project": project,
+                     "content": content}
+        then = f"linear set {key} <returned id> --slug {run['slug']}"
+    return _emit_posts([{"tool": "mcp__linear__save_document",
+                         "args": post_args, "then": then}])
+
+
+def cmd_post_close(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    _, run = loaded
+    project = run["linear"].get("project")
+    if not project:
+        print("orko: no Linear project recorded for this run", file=sys.stderr)
+        return 2
+    post_args: dict = {
+        "id": project,
+        "state": "Completed",
+        "description": f"**Closed.** {args.summary}\n",
+    }
+    if args.pr:
+        post_args["links"] = [{"url": args.pr, "title": "Pull request"}]
+    return _emit_posts([{"tool": "mcp__linear__save_project",
+                         "args": post_args, "then": None}])
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orko")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -669,6 +788,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_escalations.add_argument("slug")
     p_escalations.add_argument("--root")
     p_escalations.set_defaults(func=cmd_escalations)
+
+    p_post = sub.add_parser("post", help="emit a Linear payload for the conductor to send")
+    post_sub = p_post.add_subparsers(dest="entity", required=True)
+
+    p_pp = post_sub.add_parser("project")
+    p_pp.add_argument("--slug", required=True)
+    p_pp.add_argument("--root")
+    p_pp.add_argument("--goal", required=True)
+    p_pp.add_argument("--boundaries")
+    p_pp.add_argument("--branch")
+    p_pp.set_defaults(func=cmd_post_project)
+
+    p_pd = post_sub.add_parser("document")
+    p_pd.add_argument("kind", choices=sorted(DOC_KINDS))
+    p_pd.add_argument("--slug", required=True)
+    p_pd.add_argument("--root")
+    p_pd.set_defaults(func=cmd_post_document)
+
+    p_pc = post_sub.add_parser("close")
+    p_pc.add_argument("--slug", required=True)
+    p_pc.add_argument("--root")
+    p_pc.add_argument("--summary", required=True)
+    p_pc.add_argument("--pr")
+    p_pc.set_defaults(func=cmd_post_close)
 
     p_linear = sub.add_parser("linear", help="record or read Linear IDs")
     linear_sub = p_linear.add_subparsers(dest="action", required=True)

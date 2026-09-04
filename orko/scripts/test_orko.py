@@ -7,6 +7,33 @@ import pytest
 import orko
 
 
+# Documented parameter names of the Linear MCP tools orko posts to. A payload
+# whose args carry a key not in this set would fail at the MCP boundary, after
+# the conductor has already committed to posting it.
+MCP_PARAMS = {
+    "mcp__linear__save_project": {
+        "id", "name", "addTeams", "description", "summary", "state", "links",
+    },
+    "mcp__linear__save_document": {
+        "id", "title", "project", "content",
+    },
+    "mcp__linear__save_issue": {
+        "team", "project", "title", "description", "state", "labels", "links",
+    },
+    "mcp__linear__save_issue_label": {
+        "team", "name", "color", "description",
+    },
+}
+
+
+def assert_posts_are_well_formed(payload):
+    assert list(payload) == ["posts"]
+    for post in payload["posts"]:
+        assert set(post) == {"tool", "args", "then"}
+        assert post["tool"] in MCP_PARAMS, post["tool"]
+        assert set(post["args"]) <= MCP_PARAMS[post["tool"]], post["args"].keys()
+
+
 class TestSlugify:
     def test_lowercases_and_hyphenates(self):
         assert orko.slugify("Orko Pipeline") == "orko-pipeline"
@@ -757,3 +784,148 @@ class TestLinearIds:
         capsys.readouterr()
         orko.main(["status", "demo-topic", "--root", str(tmp_path)])
         assert json.loads(capsys.readouterr().out)["next_step"] == 1
+
+
+class TestPostProject:
+    def _init(self, tmp_path, capsys):
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        capsys.readouterr()
+
+    def _post(self, tmp_path, capsys, *extra):
+        rc = orko.main(["post", "project", "--slug", "demo-topic",
+                        "--root", str(tmp_path), *extra])
+        out = capsys.readouterr()
+        return rc, out
+
+    def test_emits_save_project_for_the_team_named_at_init(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        rc, out = self._post(tmp_path, capsys, "--goal", "Ship it",
+                             "--branch", "orko/demo-topic",
+                             "--boundaries", "Only src/")
+        assert rc == 0
+        payload = json.loads(out.out)
+        assert_posts_are_well_formed(payload)
+        post = payload["posts"][0]
+        assert post["tool"] == "mcp__linear__save_project"
+        assert post["args"]["name"] == "demo-topic"
+        assert post["args"]["addTeams"] == ["JRF"]
+        assert "id" not in post["args"]
+        assert post["then"] == "linear set project <returned id> --slug demo-topic"
+
+    def test_description_carries_every_reconstruction_field(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        _, out = self._post(tmp_path, capsys, "--goal", "Ship it",
+                            "--branch", "orko/demo-topic", "--boundaries", "Only src/")
+        description = json.loads(out.out)["posts"][0]["args"]["description"]
+        for needle in ("Ship it", "build", str(tmp_path), "orko/demo-topic",
+                       ".orko/demo-topic", "demo-topic", "Only src/"):
+            assert needle in description, needle
+
+    def test_refuses_without_goal_or_branch(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        rc, out = self._post(tmp_path, capsys, "--goal", "Ship it")
+        assert rc == 2
+        assert "branch" in out.err
+
+    def test_updates_in_place_once_a_project_id_is_recorded(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        capsys.readouterr()
+        _, out = self._post(tmp_path, capsys, "--goal", "Ship it",
+                            "--branch", "orko/demo-topic", "--boundaries", "none")
+        post = json.loads(out.out)["posts"][0]
+        assert post["args"]["id"] == "proj_1"
+        assert "addTeams" not in post["args"]
+        assert post["then"] is None
+
+    def test_analysis_project_needs_no_branch(self, tmp_path, capsys):
+        orko.main(["init", "analysis", "Demo Q", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        capsys.readouterr()
+        rc = orko.main(["post", "project", "--slug", "demo-q", "--root", str(tmp_path),
+                        "--goal", "Why is it slow?", "--boundaries", "read-only"])
+        assert rc == 0
+
+
+class TestPostDocument:
+    def _init(self, tmp_path, capsys):
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        capsys.readouterr()
+
+    def test_emits_save_document_with_file_contents(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        (tmp_path / ".orko/demo-topic/spec.md").write_text("# Spec\n\nbody\n")
+        rc = orko.main(["post", "document", "spec", "--slug", "demo-topic",
+                        "--root", str(tmp_path)])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert_posts_are_well_formed(payload)
+        post = payload["posts"][0]
+        assert post["tool"] == "mcp__linear__save_document"
+        assert post["args"] == {"title": "Spec", "project": "proj_1",
+                                "content": "# Spec\n\nbody\n"}
+        assert post["then"] == "linear set spec_doc <returned id> --slug demo-topic"
+
+    def test_updates_when_the_document_id_is_recorded(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        (tmp_path / ".orko/demo-topic/plan.md").write_text("# Plan\n")
+        orko.main(["linear", "set", "plan_doc", "doc_2", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        capsys.readouterr()
+        orko.main(["post", "document", "plan", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        post = json.loads(capsys.readouterr().out)["posts"][0]
+        assert post["args"]["id"] == "doc_2"
+        assert "project" not in post["args"]
+        assert post["then"] is None
+
+    def test_refuses_before_the_project_exists(self, tmp_path, capsys):
+        orko.main(["init", "build", "Other", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        (tmp_path / ".orko/other/spec.md").write_text("# Spec\n")
+        capsys.readouterr()
+        rc = orko.main(["post", "document", "spec", "--slug", "other",
+                        "--root", str(tmp_path)])
+        assert rc == 2
+        assert "project" in capsys.readouterr().err
+
+    def test_refuses_when_the_file_is_missing(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        rc = orko.main(["post", "document", "synthesis", "--slug", "demo-topic",
+                        "--root", str(tmp_path)])
+        assert rc == 2
+
+
+class TestPostClose:
+    def test_emits_completed_state_with_summary(self, tmp_path, capsys):
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        capsys.readouterr()
+        rc = orko.main(["post", "close", "--slug", "demo-topic", "--root", str(tmp_path),
+                        "--summary", "Two tasks shipped.", "--pr",
+                        "https://github.com/x/y/pull/1"])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert_posts_are_well_formed(payload)
+        post = payload["posts"][0]
+        assert post["args"]["id"] == "proj_1"
+        assert post["args"]["state"] == "Completed"
+        assert post["args"]["links"] == [{"url": "https://github.com/x/y/pull/1",
+                                          "title": "Pull request"}]
+        assert "Two tasks shipped." in post["args"]["description"]
+
+    def test_refuses_without_summary(self, tmp_path, capsys):
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        capsys.readouterr()
+        with pytest.raises(SystemExit):
+            orko.main(["post", "close", "--slug", "demo-topic", "--root", str(tmp_path)])
