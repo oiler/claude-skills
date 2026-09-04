@@ -118,6 +118,12 @@ class TestModes:
         assert rc == 2
         assert "team key" in capsys.readouterr().err
 
+    def test_init_rejects_a_team_key_with_trailing_newline(self, tmp_path, capsys):
+        rc = orko.main(["init", "build", "Demo Topic", "--team", "JRF\n",
+                        "--root", str(tmp_path)])
+        assert rc == 2
+        assert "team key" in capsys.readouterr().err
+
     def test_analysis_run_starts_at_step_one(self, tmp_path, capsys):
         self._init(tmp_path, capsys, mode="analysis")
         orko.main(["status", "demo-topic", "--root", str(tmp_path)])
@@ -223,7 +229,7 @@ class TestLedgerAndStatus:
         capsys.readouterr()
 
     def _complete_through_spec(self, tmp_path, commit=None):
-        """Walk a build run past intake so the next step is the spec step."""
+        """Walk a build run past intake and the spec step, to the spec review."""
         for step in (0, 1):
             argv = ["ledger", str(step), "complete", "--slug", "demo-topic",
                     "--root", str(tmp_path)]

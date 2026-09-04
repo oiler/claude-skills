@@ -321,7 +321,9 @@ def cmd_init(args: argparse.Namespace) -> int:
     if root is None:
         print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
         return 2
-    if not TEAM_RE.match(args.team):
+    # fullmatch, not match: `$` also matches before a trailing newline, and a
+    # newline in the team key writes a two-line header nothing can parse back.
+    if not TEAM_RE.fullmatch(args.team):
         print(f"orko: team key {args.team!r} must be the Linear team key, "
               "uppercase letters and digits (for example JRF)", file=sys.stderr)
         return 2
