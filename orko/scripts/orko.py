@@ -4,7 +4,7 @@
 # dependencies = []
 # ///
 """Owns every deterministic surface of an orko run: artifact paths, the run
-ledger, artifact validation, and the Fable dispatch prompts.
+ledger, artifact validation, every dispatch prompt, and every Linear payload.
 
 The model authors prose. This script owns structure. In particular the `prompt`
 subcommand exists so the orchestrator dispatches reviewer text it cannot edit —
@@ -12,13 +12,20 @@ priming a reviewer with the authoring session's context turns a fresh critique
 into an echo of the author.
 
 Usage:
-    uv run orko.py init {analysis|build} <topic> --team KEY [--root DIR]
-                       [--date YYYY-MM-DD]
-    uv run orko.py ledger <step> <status> [--slug SLUG] [--commit SHA]
+    uv run orko.py init {analysis|build} <topic> --team KEY [--root DIR] [--date YYYY-MM-DD]
+    uv run orko.py ledger <step> <status> --slug SLUG [--commit SHA] [--root DIR]
     uv run orko.py status [<slug>] [--root DIR]
-    uv run orko.py prompt {spec|plan} <slug> [--root DIR]
-    uv run orko.py escalations <slug> [--root DIR]
     uv run orko.py validate {spec|plan} <path>
+    uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--root DIR]
+    uv run orko.py prompt plan-write <slug> [--root DIR]
+    uv run orko.py prompt {seat|verifier} <slug> --seat NAME --question TEXT --context-file PATH [--root DIR]
+    uv run orko.py escalations <slug> [--root DIR]
+    uv run orko.py linear set <key> <id> --slug SLUG | linear get --slug SLUG
+    uv run orko.py post project --slug SLUG --goal TEXT --boundaries TEXT [--branch NAME]
+    uv run orko.py post document {spec|plan|brief|synthesis} --slug SLUG
+    uv run orko.py post finding --slug SLUG --seat NAME --outcome {handled|deferred|rejected|blocked} --title TEXT   (body on stdin)
+    uv run orko.py post escalation --slug SLUG --seat NAME --title TEXT   (body on stdin)
+    uv run orko.py post close --slug SLUG --summary TEXT [--pr URL]
 
 Exit codes: 0 success / all checks pass; 1 validation failures; 2 usage or IO error.
 """
@@ -569,7 +576,8 @@ def _lenses(text: str) -> dict[str, str]:
 
 
 def _strip_lenses(text: str) -> str:
-    """The dispatched prompt carries one lens, not the menu."""
+    """The dispatched prompt carries one lens, not the menu. `## Lenses` must be
+    the last section of a review charter: everything from it on is dropped."""
     head, _, _ = text.partition("\n## Lenses")
     return head.rstrip() + "\n"
 
@@ -625,13 +633,18 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         subs["{{FINDINGS_PATH}}"] = str(findings_dir / f"{args.seat}.md")
         subs["{{VERDICT_PATH}}"] = str(findings_dir / f"{args.seat}.verdict.md")
 
+    # Scanned on the raw template, before splicing: a context file or question
+    # that happens to quote `{{ROOT}}` is operator text to pass through, not a
+    # template defect, and a post-substitution scan would blame the charter for
+    # it. `_strip_lenses` has already run for review kinds, so what is scanned
+    # is exactly what gets emitted.
+    missing = sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", text)) - set(subs))
+    if missing:
+        print(f"orko: template {source.name} names tokens this kind cannot "
+              f"supply: {', '.join(missing)}", file=sys.stderr)
+        return 2
     for token, value in subs.items():
         text = text.replace(token, value)
-    leftover = re.search(r"\{\{[A-Z_]+\}\}", text)
-    if leftover:
-        print(f"orko: unsubstituted token {leftover.group(0)} in {source}",
-              file=sys.stderr)
-        return 2
     sys.stdout.write(text)
     return 0
 

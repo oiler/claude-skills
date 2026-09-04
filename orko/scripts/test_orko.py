@@ -681,6 +681,15 @@ class TestPrompt:
         assert str(tmp_path / ".orko/demo-topic/findings/perf.verdict.md") in out
         assert "{{" not in out
 
+    def test_context_containing_template_tokens_is_passed_through(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+        ctx.write_text("see {{ROOT}} and {{SEAT}}\n")
+        assert orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
+                          "--question", "Where is the N+1?",
+                          "--context-file", str(ctx), "--root", str(tmp_path)]) == 0
+        assert "see {{ROOT}} and {{SEAT}}" in capsys.readouterr().out
+
     def test_seat_kinds_require_seat_question_and_context(self, tmp_path, capsys):
         self._init(tmp_path, capsys, mode="analysis")
         rc = orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
