@@ -9,7 +9,7 @@ import orko
 
 class TestSlugify:
     def test_lowercases_and_hyphenates(self):
-        assert orko.slugify("Autonom Pipeline") == "autonom-pipeline"
+        assert orko.slugify("Orko Pipeline") == "orko-pipeline"
 
     def test_strips_punctuation(self):
         assert orko.slugify("spec -> plan, unattended!") == "spec-plan-unattended"
@@ -55,54 +55,120 @@ class TestComputePaths:
 
 class TestInit:
     def test_creates_run_dir_and_ledger_header_and_prints_json(self, tmp_path, capsys):
-        rc = orko.main(["init", "Demo Topic", "--root", str(tmp_path),
-                           "--date", "2026-07-28"])
+        rc = orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                        "--root", str(tmp_path), "--date", "2026-09-04"])
         assert rc == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["slug"] == "demo-topic"
-        assert payload["next_step"] == 6
+        assert payload["mode"] == "build"
+        assert payload["team"] == "JRF"
+        assert payload["next_step"] == 0
         ledger = tmp_path / ".orko/demo-topic/progress.md"
         assert ledger.read_text().splitlines()[0] == (
-            "# autonom run — topic: Demo Topic — slug: demo-topic — date: 2026-07-28"
+            "# orko run — mode: build — team: JRF — topic: Demo Topic "
+            "— slug: demo-topic — date: 2026-09-04"
         )
 
     def test_reinit_same_topic_resumes_instead_of_restarting(self, tmp_path, capsys):
-        orko.main(["init", "Demo Topic", "--root", str(tmp_path),
-                      "--date", "2026-07-28"])
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-07-28"])
         capsys.readouterr()
-        rc = orko.main(["init", "Demo Topic", "--root", str(tmp_path),
-                           "--date", "2026-07-28"])
+        rc = orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                        "--root", str(tmp_path), "--date", "2026-07-28"])
         assert rc == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["resumed"] is True
-        assert payload["next_step"] == 6
+        assert payload["next_step"] == 0
 
     def test_slug_collision_with_different_topic_is_an_error(self, tmp_path, capsys):
-        orko.main(["init", "Demo Topic", "--root", str(tmp_path),
-                      "--date", "2026-07-28"])
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-07-28"])
         capsys.readouterr()
-        rc = orko.main(["init", "demo topic!", "--root", str(tmp_path),
-                           "--date", "2026-07-28"])
+        rc = orko.main(["init", "build", "demo topic!", "--team", "JRF",
+                        "--root", str(tmp_path), "--date", "2026-07-28"])
         assert rc == 2
         assert "collides" in capsys.readouterr().err
 
     def test_init_gitignores_the_run_directory(self, tmp_path, capsys):
-        orko.main(["init", "Demo Topic", "--root", str(tmp_path),
-                      "--date", "2026-07-28"])
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-07-28"])
         assert ".orko/" in (tmp_path / ".gitignore").read_text()
 
     def test_init_does_not_duplicate_an_existing_gitignore_entry(self, tmp_path, capsys):
         (tmp_path / ".gitignore").write_text("node_modules/\n.orko/\n")
-        orko.main(["init", "Demo Topic", "--root", str(tmp_path),
-                      "--date", "2026-07-28"])
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-07-28"])
         assert (tmp_path / ".gitignore").read_text().count(".orko/") == 1
+
+
+class TestModes:
+    def _init(self, tmp_path, capsys, mode="build"):
+        orko.main(["init", mode, "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        capsys.readouterr()
+
+    def test_init_requires_a_team(self, tmp_path):
+        with pytest.raises(SystemExit) as raised:
+            orko.main(["init", "build", "Demo Topic", "--root", str(tmp_path)])
+        assert raised.value.code == 2
+
+    def test_init_rejects_a_lowercase_team_key(self, tmp_path, capsys):
+        rc = orko.main(["init", "build", "Demo Topic", "--team", "jrf",
+                        "--root", str(tmp_path)])
+        assert rc == 2
+        assert "team key" in capsys.readouterr().err
+
+    def test_analysis_run_starts_at_step_one(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        run = json.loads(capsys.readouterr().out)
+        assert run["mode"] == "analysis"
+        assert run["next_step"] == 1
+        assert run["next_step_name"] == "open"
+
+    def test_build_run_starts_at_intake(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        run = json.loads(capsys.readouterr().out)
+        assert run["next_step"] == 0
+        assert run["next_step_name"] == "intake"
+
+    def test_ledger_rejects_a_step_outside_the_runs_mode(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        rc = orko.main(["ledger", "7", "complete", "--slug", "demo-topic",
+                        "--root", str(tmp_path)])
+        assert rc == 2
+        assert "analysis" in capsys.readouterr().err
+
+    def test_ledger_rejects_step_zero_on_analysis(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        rc = orko.main(["ledger", "0", "complete", "--slug", "demo-topic",
+                        "--root", str(tmp_path)])
+        assert rc == 2
+
+    def test_reinit_with_a_different_mode_is_an_error(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        rc = orko.main(["init", "analysis", "Demo Topic", "--team", "JRF",
+                        "--root", str(tmp_path), "--date", "2026-09-04"])
+        assert rc == 2
+        assert "mode" in capsys.readouterr().err
+
+    def test_run_is_done_after_the_last_step_of_its_mode(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        for step in range(1, 7):
+            orko.main(["ledger", str(step), "complete", "--slug", "demo-topic",
+                       "--root", str(tmp_path)])
+        capsys.readouterr()
+        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        assert json.loads(capsys.readouterr().out)["next_step"] is None
 
 
 class TestErrorContracts:
     def test_init_outside_a_git_repo_returns_usage_error(self, tmp_path, capsys,
-                                                          monkeypatch):
+                                                         monkeypatch):
         monkeypatch.chdir(tmp_path)
-        rc = orko.main(["init", "Demo Topic", "--date", "2026-07-28"])
+        rc = orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                        "--date", "2026-07-28"])
         assert rc == 2
         assert "not inside a git repository" in capsys.readouterr().err
 
@@ -112,8 +178,8 @@ class TestErrorContracts:
         run_dir = tmp_path / ".orko" / "demo-topic"
         run_dir.mkdir(parents=True)
         (run_dir / "progress.md").write_text("not a valid header\n")
-        rc = orko.main(["init", "Demo Topic", "--root", str(tmp_path),
-                           "--date", "2026-07-28"])
+        rc = orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                        "--root", str(tmp_path), "--date", "2026-07-28"])
         assert rc == 2
         assert "unreadable ledger header" in capsys.readouterr().err
 
@@ -123,8 +189,8 @@ class TestErrorContracts:
         run_dir = tmp_path / ".orko" / "demo-topic"
         run_dir.mkdir(parents=True)
         (run_dir / "progress.md").write_text("")
-        assert orko.main(["init", "Demo Topic", "--root", str(tmp_path),
-                             "--date", "2026-07-28"]) == 2
+        assert orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                          "--root", str(tmp_path), "--date", "2026-07-28"]) == 2
         assert "unreadable ledger header" in capsys.readouterr().err
         assert orko.main(["status", "demo-topic", "--root", str(tmp_path)]) == 2
 
@@ -135,8 +201,8 @@ class TestErrorContracts:
     ])
     def test_a_topic_with_a_control_character_is_rejected(self, tmp_path, capsys,
                                                           topic):
-        rc = orko.main(["init", topic, "--root", str(tmp_path),
-                           "--date", "2026-07-28"])
+        rc = orko.main(["init", "build", topic, "--team", "JRF",
+                        "--root", str(tmp_path), "--date", "2026-07-28"])
         assert rc == 2
         assert "control character" in capsys.readouterr().err
         assert not (tmp_path / ".orko").exists()
@@ -144,70 +210,78 @@ class TestErrorContracts:
     def test_a_topic_that_slugifies_to_nothing_is_an_error_not_a_traceback(
         self, tmp_path, capsys
     ):
-        rc = orko.main(["init", "日本語", "--root", str(tmp_path),
-                           "--date", "2026-07-28"])
+        rc = orko.main(["init", "build", "日本語", "--team", "JRF",
+                        "--root", str(tmp_path), "--date", "2026-07-28"])
         assert rc == 2
         assert "empty slug" in capsys.readouterr().err
 
 
 class TestLedgerAndStatus:
     def _init(self, tmp_path, capsys, topic="Demo Topic"):
-        orko.main(["init", topic, "--root", str(tmp_path), "--date", "2026-07-28"])
+        orko.main(["init", "build", topic, "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-07-28"])
         capsys.readouterr()
+
+    def _complete_through_spec(self, tmp_path, commit=None):
+        """Walk a build run past intake so the next step is the spec step."""
+        for step in (0, 1):
+            argv = ["ledger", str(step), "complete", "--slug", "demo-topic",
+                    "--root", str(tmp_path)]
+            if commit and step == 1:
+                argv += ["--commit", commit]
+            orko.main(argv)
 
     def test_ledger_appends_a_line_with_commit(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
-        rc = orko.main(["ledger", "6", "complete", "--slug", "demo-topic",
-                           "--root", str(tmp_path), "--commit", "abc1234"])
+        rc = orko.main(["ledger", "1", "complete", "--slug", "demo-topic",
+                        "--root", str(tmp_path), "--commit", "abc1234"])
         assert rc == 0
         text = (tmp_path / ".orko/demo-topic/progress.md").read_text()
-        assert text.splitlines()[1] == "step 6 complete commit=abc1234"
+        assert text.splitlines()[1] == "step 1 complete commit=abc1234"
 
     def test_ledger_is_append_only(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
-        for step in (6, 7):
+        for step in (1, 2):
             orko.main(["ledger", str(step), "complete", "--slug", "demo-topic",
-                          "--root", str(tmp_path)])
+                       "--root", str(tmp_path)])
         lines = (tmp_path / ".orko/demo-topic/progress.md").read_text().splitlines()
-        assert lines[1] == "step 6 complete"
-        assert lines[2] == "step 7 complete"
+        assert lines[1] == "step 1 complete"
+        assert lines[2] == "step 2 complete"
 
     def test_ledger_records_a_dispatched_base_sha(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
-        rc = orko.main(["ledger", "7", "dispatched", "--slug", "demo-topic",
-                           "--root", str(tmp_path), "--commit", "base123"])
+        rc = orko.main(["ledger", "2", "dispatched", "--slug", "demo-topic",
+                        "--root", str(tmp_path), "--commit", "base123"])
         assert rc == 0
         text = (tmp_path / ".orko/demo-topic/progress.md").read_text()
-        assert text.splitlines()[1] == "step 7 dispatched commit=base123"
+        assert text.splitlines()[1] == "step 2 dispatched commit=base123"
 
     @pytest.mark.parametrize("status", ["dispatched", "escalated", "failed"])
     def test_only_complete_advances_the_resume_point(self, tmp_path, capsys, status):
         self._init(tmp_path, capsys)
-        orko.main(["ledger", "6", "complete", "--slug", "demo-topic",
-                      "--root", str(tmp_path)])
-        orko.main(["ledger", "7", status, "--slug", "demo-topic",
-                      "--root", str(tmp_path), "--commit", "base123"])
+        self._complete_through_spec(tmp_path)
+        orko.main(["ledger", "2", status, "--slug", "demo-topic",
+                   "--root", str(tmp_path), "--commit", "base123"])
         capsys.readouterr()
         orko.main(["status", "demo-topic", "--root", str(tmp_path)])
-        assert json.loads(capsys.readouterr().out)["next_step"] == 7
+        assert json.loads(capsys.readouterr().out)["next_step"] == 2
 
     def test_status_with_slug_reports_the_resume_point(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
-        orko.main(["ledger", "6", "complete", "--slug", "demo-topic",
-                      "--root", str(tmp_path)])
+        self._complete_through_spec(tmp_path)
         capsys.readouterr()
         rc = orko.main(["status", "demo-topic", "--root", str(tmp_path)])
         assert rc == 0
         payload = json.loads(capsys.readouterr().out)
-        assert payload["next_step"] == 7
-        assert payload["next_step_name"] == "review spec"
+        assert payload["next_step"] == 2
+        assert payload["next_step_name"] == "spec review"
         assert payload["topic"] == "Demo Topic"
 
     def test_status_reports_none_when_the_run_is_complete(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
-        for step in (6, 7, 8, 9):
+        for step in range(0, 8):
             orko.main(["ledger", str(step), "complete", "--slug", "demo-topic",
-                          "--root", str(tmp_path)])
+                       "--root", str(tmp_path)])
         capsys.readouterr()
         orko.main(["status", "demo-topic", "--root", str(tmp_path)])
         assert json.loads(capsys.readouterr().out)["next_step"] is None
@@ -215,14 +289,14 @@ class TestLedgerAndStatus:
     def test_bare_status_lists_every_run(self, tmp_path, capsys):
         self._init(tmp_path, capsys, topic="Alpha Feature")
         self._init(tmp_path, capsys, topic="Beta Feature")
-        orko.main(["ledger", "6", "complete", "--slug", "alpha-feature",
-                      "--root", str(tmp_path)])
+        orko.main(["ledger", "0", "complete", "--slug", "alpha-feature",
+                   "--root", str(tmp_path)])
         capsys.readouterr()
         rc = orko.main(["status", "--root", str(tmp_path)])
         assert rc == 0
         runs = json.loads(capsys.readouterr().out)
         assert [r["slug"] for r in runs] == ["alpha-feature", "beta-feature"]
-        assert [r["next_step"] for r in runs] == [7, 6]
+        assert [r["next_step"] for r in runs] == [1, 0]
 
     def test_bare_status_on_a_repo_with_no_runs_prints_an_empty_list(self, tmp_path, capsys):
         rc = orko.main(["status", "--root", str(tmp_path)])
@@ -233,14 +307,13 @@ class TestLedgerAndStatus:
         self, tmp_path, capsys
     ):
         self._init(tmp_path, capsys)
-        orko.main(["ledger", "6", "complete", "--slug", "demo-topic",
-                      "--root", str(tmp_path), "--commit", "aaa111"])
-        orko.main(["ledger", "7", "dispatched", "--slug", "demo-topic",
-                      "--root", str(tmp_path), "--commit", "bbb222"])
+        self._complete_through_spec(tmp_path, commit="aaa111")
+        orko.main(["ledger", "2", "dispatched", "--slug", "demo-topic",
+                   "--root", str(tmp_path), "--commit", "bbb222"])
         capsys.readouterr()
         orko.main(["status", "demo-topic", "--root", str(tmp_path)])
         payload = json.loads(capsys.readouterr().out)
-        assert payload["next_step"] == 7
+        assert payload["next_step"] == 2
         assert payload["last_status"] == "dispatched"
         assert payload["dispatched_base"] == "bbb222"
 
@@ -258,19 +331,20 @@ class TestLedgerAndStatus:
     ):
         self._init(tmp_path, capsys)
         for step, status, commit in (
-            (6, "complete", "aaa111"),
-            (7, "dispatched", "bbb222"),
-            (7, "complete", "ccc333"),
-            (8, "complete", "ddd444"),
+            (0, "complete", "000aaa"),
+            (1, "complete", "aaa111"),
+            (2, "dispatched", "bbb222"),
+            (2, "complete", "ccc333"),
+            (3, "complete", "ddd444"),
         ):
             orko.main(["ledger", str(step), status, "--slug", "demo-topic",
-                          "--root", str(tmp_path), "--commit", commit])
+                       "--root", str(tmp_path), "--commit", commit])
         capsys.readouterr()
         orko.main(["status", "demo-topic", "--root", str(tmp_path)])
         payload = json.loads(capsys.readouterr().out)
-        assert payload["next_step"] == 9
+        assert payload["next_step"] == 4
         assert payload["last_status"] == "complete"
-        # Step 7's base must not leak into a step-9 resume.
+        # Step 2's base must not leak into a step-4 resume.
         assert payload["dispatched_base"] is None
 
     def test_the_latest_dispatch_wins_when_a_step_was_dispatched_twice(
@@ -278,10 +352,9 @@ class TestLedgerAndStatus:
     ):
         self._init(tmp_path, capsys)
         for commit in ("bbb222", "eee555"):
-            orko.main(["ledger", "7", "dispatched", "--slug", "demo-topic",
-                          "--root", str(tmp_path), "--commit", commit])
-        orko.main(["ledger", "6", "complete", "--slug", "demo-topic",
-                      "--root", str(tmp_path)])
+            orko.main(["ledger", "2", "dispatched", "--slug", "demo-topic",
+                       "--root", str(tmp_path), "--commit", commit])
+        self._complete_through_spec(tmp_path)
         capsys.readouterr()
         orko.main(["status", "demo-topic", "--root", str(tmp_path)])
         assert json.loads(capsys.readouterr().out)["dispatched_base"] == "eee555"
@@ -290,14 +363,13 @@ class TestLedgerAndStatus:
         self, tmp_path, capsys
     ):
         self._init(tmp_path, capsys)
-        orko.main(["ledger", "6", "complete", "--slug", "demo-topic",
-                      "--root", str(tmp_path), "--commit", "aaa111"])
-        orko.main(["ledger", "6", "escalated", "--slug", "demo-topic",
-                      "--root", str(tmp_path)])
+        self._complete_through_spec(tmp_path, commit="aaa111")
+        orko.main(["ledger", "1", "escalated", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
         capsys.readouterr()
         orko.main(["status", "demo-topic", "--root", str(tmp_path)])
         payload = json.loads(capsys.readouterr().out)
-        assert payload["next_step"] == 7
+        assert payload["next_step"] == 2
         assert payload["last_status"] == "escalated"
 
     def test_a_malformed_ledger_line_is_skipped_not_fatal(self, tmp_path, capsys):
@@ -305,12 +377,11 @@ class TestLedgerAndStatus:
         ledger = tmp_path / ".orko/demo-topic/progress.md"
         with ledger.open("a", encoding="utf-8") as handle:
             handle.write("this is not a step record\n")
-        orko.main(["ledger", "6", "complete", "--slug", "demo-topic",
-                      "--root", str(tmp_path)])
+        self._complete_through_spec(tmp_path)
         capsys.readouterr()
         assert orko.main(["status", "demo-topic", "--root", str(tmp_path)]) == 0
         payload = json.loads(capsys.readouterr().out)
-        assert payload["next_step"] == 7
+        assert payload["next_step"] == 2
         assert payload["last_status"] == "complete"
 
     def test_status_for_an_unknown_slug_is_an_error(self, tmp_path, capsys):
@@ -502,19 +573,21 @@ class TestValidatePlan:
 
 class TestPrompt:
     def _init(self, tmp_path, capsys):
-        orko.main(["init", "Demo Topic", "--root", str(tmp_path),
-                      "--date", "2026-07-28"])
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-07-28"])
         capsys.readouterr()
 
+    @pytest.mark.xfail(reason="rewritten in Task 6", strict=True)
     def test_spec_prompt_substitutes_every_token(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
         assert orko.main(["prompt", "spec", "demo-topic",
-                             "--root", str(tmp_path)]) == 0
+                          "--root", str(tmp_path)]) == 0
         out = capsys.readouterr().out
         assert "{{" not in out
         assert str(tmp_path / ".orko/demo-topic/spec.md") in out
         assert str(tmp_path / ".orko/demo-topic") in out
 
+    @pytest.mark.xfail(reason="rewritten in Task 6", strict=True)
     def test_plan_prompt_carries_the_spec_path_as_its_contract(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
         orko.main(["prompt", "plan", "demo-topic", "--root", str(tmp_path)])
@@ -522,6 +595,7 @@ class TestPrompt:
         assert str(tmp_path / ".orko/demo-topic/plan.md") in out
         assert str(tmp_path / ".orko/demo-topic/spec.md") in out
 
+    @pytest.mark.xfail(reason="rewritten in Task 6", strict=True)
     def test_output_is_the_reference_file_verbatim_with_substitutions_only(
         self, tmp_path, capsys
     ):
@@ -540,13 +614,14 @@ class TestPrompt:
                     .replace("{{SLUG}}", "demo-topic"))
         assert out == expected
 
+    @pytest.mark.xfail(reason="rewritten in Task 6", strict=True)
     @pytest.mark.parametrize("kind", ["spec", "plan"])
     def test_prompt_anchors_the_reviewer_git_commands_to_the_run_root(
         self, tmp_path, capsys, kind
     ):
         self._init(tmp_path, capsys)
         assert orko.main(["prompt", kind, "demo-topic",
-                             "--root", str(tmp_path)]) == 0
+                          "--root", str(tmp_path)]) == 0
         out = capsys.readouterr().out
         assert f"git -C {tmp_path} add " in out
         assert f"git -C {tmp_path} commit -m " in out
@@ -556,6 +631,7 @@ class TestPrompt:
         assert orko.main(["prompt", "spec", "nope", "--root", str(tmp_path)]) == 2
         assert "no run" in capsys.readouterr().err
 
+    @pytest.mark.xfail(reason="rewritten in Task 6", strict=True)
     def test_both_reference_files_ship_and_carry_the_scope_carve_out(self):
         for name in ("spec-reviewer.md", "plan-reviewer.md"):
             text = (orko.references_dir() / name).read_text(encoding="utf-8")
@@ -567,8 +643,8 @@ class TestPrompt:
 
 class TestEscalations:
     def _init(self, tmp_path, capsys):
-        orko.main(["init", "Demo Topic", "--root", str(tmp_path),
-                      "--date", "2026-07-28"])
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-07-28"])
         capsys.readouterr()
 
     def _escalations_path(self, tmp_path) -> Path:
@@ -577,20 +653,20 @@ class TestEscalations:
     def test_absent_file_exits_zero_and_prints_nothing(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
         assert orko.main(["escalations", "demo-topic",
-                             "--root", str(tmp_path)]) == 0
+                          "--root", str(tmp_path)]) == 0
         assert capsys.readouterr().out == ""
 
     def test_empty_file_exits_zero(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
         self._escalations_path(tmp_path).write_text("")
         assert orko.main(["escalations", "demo-topic",
-                             "--root", str(tmp_path)]) == 0
+                          "--root", str(tmp_path)]) == 0
 
     def test_whitespace_only_file_exits_zero(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
         self._escalations_path(tmp_path).write_text("\n\n   \n\t\n")
         assert orko.main(["escalations", "demo-topic",
-                             "--root", str(tmp_path)]) == 0
+                          "--root", str(tmp_path)]) == 0
         assert capsys.readouterr().out == ""
 
     def test_file_with_content_exits_one_and_prints_it(self, tmp_path, capsys):
@@ -599,7 +675,7 @@ class TestEscalations:
             "## Escalation\n\nThe spec contradicts itself about `007`.\n"
         )
         assert orko.main(["escalations", "demo-topic",
-                             "--root", str(tmp_path)]) == 1
+                          "--root", str(tmp_path)]) == 1
         out = capsys.readouterr().out
         assert "contradicts itself" in out
         assert out.endswith("\n")

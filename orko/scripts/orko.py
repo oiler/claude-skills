@@ -12,7 +12,8 @@ priming a reviewer with the authoring session's context turns a fresh critique
 into an echo of the author.
 
 Usage:
-    uv run orko.py init <topic> [--root DIR] [--date YYYY-MM-DD]
+    uv run orko.py init {analysis|build} <topic> --team KEY [--root DIR]
+                       [--date YYYY-MM-DD]
     uv run orko.py ledger <step> <status> [--slug SLUG] [--commit SHA]
     uv run orko.py status [<slug>] [--root DIR]
     uv run orko.py prompt {spec|plan} <slug> [--root DIR]
@@ -35,13 +36,19 @@ from typing import NamedTuple
 
 SLUG_MAX = 60
 
-# Step 6 authors the spec, 7 reviews it, 8 authors the plan, 9 reviews it.
-STEPS: dict[int, str] = {
-    6: "author spec",
-    7: "review spec",
-    8: "author plan",
-    9: "review plan",
+# Steps per engagement type. Only `complete` advances a run; the names are what
+# `status` prints so a resumed conductor knows where it is without the table.
+MODES: dict[str, dict[int, str]] = {
+    "analysis": {
+        1: "open", 2: "propose", 3: "dispatch",
+        4: "verify", 5: "synthesize", 6: "close",
+    },
+    "build": {
+        0: "intake", 1: "spec", 2: "spec review", 3: "plan",
+        4: "plan review", 5: "execute", 6: "code review", 7: "close",
+    },
 }
+TEAM_RE = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
 
 PLACEHOLDER_RE = re.compile(
     r"\b(?:TBD|TODO|FIXME|XXX)\b|<placeholder>|\[fill in\]", re.IGNORECASE
@@ -285,26 +292,28 @@ def ensure_gitignored(root: Path) -> None:
         handle.write(f"{prefix}.orko/\n")
 
 
-def _header(topic: str, slug: str, date: str) -> str:
-    return f"# orko run — topic: {topic} — slug: {slug} — date: {date}"
+def _header(mode: str, team: str, topic: str, slug: str, date: str) -> str:
+    return (f"# orko run — mode: {mode} — team: {team} — topic: {topic} "
+            f"— slug: {slug} — date: {date}")
+
+
+HEADER_LINE_RE = re.compile(
+    r"# orko run — mode: (?P<mode>analysis|build) — team: (?P<team>[A-Z0-9]+) "
+    r"— topic: (?P<topic>.*) — slug: (?P<slug>[a-z0-9-]+) "
+    r"— date: (?P<date>\d{4}-\d{2}-\d{2})$"
+)
 
 
 def _parse_header(ledger: Path) -> dict[str, str] | None:
-    """Read topic/slug/date back out of a ledger's first line, or None if
-    the header is unreadable. An empty file is unreadable, not a crash: every
-    caller turns None into exit 2, and exit 1 is reserved for findings."""
+    """Read mode/team/topic/slug/date out of a ledger's first line, or None if
+    unreadable. Empty is unreadable, not a crash: callers turn None into exit 2."""
+    if not ledger.exists():
+        return None
     lines = ledger.read_text(encoding="utf-8").splitlines()
     if not lines:
         return None
-    first = lines[0]
-    match = re.match(
-        r"# orko run — topic: (?P<topic>.*) — slug: (?P<slug>[a-z0-9-]+) "
-        r"— date: (?P<date>\d{4}-\d{2}-\d{2})$",
-        first,
-    )
-    if not match:
-        return None
-    return match.groupdict()
+    match = HEADER_LINE_RE.match(lines[0])
+    return match.groupdict() if match else None
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -312,10 +321,13 @@ def cmd_init(args: argparse.Namespace) -> int:
     if root is None:
         print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
         return 2
+    if not TEAM_RE.match(args.team):
+        print(f"orko: team key {args.team!r} must be the Linear team key, "
+              "uppercase letters and digits (for example JRF)", file=sys.stderr)
+        return 2
     if CONTROL_RE.search(args.topic):
         print("orko: topic contains a newline or control character; the ledger "
-              "header is a single line and could not be read back",
-              file=sys.stderr)
+              "header is a single line and could not be read back", file=sys.stderr)
         return 2
     date = args.date or _dt.date.today().isoformat()
     try:
@@ -334,21 +346,30 @@ def cmd_init(args: argparse.Namespace) -> int:
             print(f"orko: unreadable ledger header in {ledger}", file=sys.stderr)
             return 2
         if existing["topic"] != args.topic:
-            print(
-                f"orko: topic {args.topic!r} collides with the existing run "
-                f"{existing['topic']!r} (both slugify to {slug!r}). "
-                "Choose a distinct topic or resume the existing run.",
-                file=sys.stderr,
-            )
+            print(f"orko: topic {args.topic!r} collides with the existing run "
+                  f"{existing['topic']!r} (both slugify to {slug!r}). Choose a "
+                  "distinct topic or resume the existing run.", file=sys.stderr)
+            return 2
+        if existing["mode"] != args.mode:
+            print(f"orko: run {slug!r} is a {existing['mode']} engagement; "
+                  f"cannot resume it as {args.mode}. A run's mode is fixed at init.",
+                  file=sys.stderr)
             return 2
         resumed = True
         paths = compute_paths(root, slug, existing["date"])
     else:
         ledger.parent.mkdir(parents=True, exist_ok=True)
-        ledger.write_text(_header(args.topic, slug, date) + "\n", encoding="utf-8")
+        for key in ("findings_dir", "context_dir"):
+            Path(paths[key]).mkdir(parents=True, exist_ok=True)
+        ledger.write_text(
+            _header(args.mode, args.team, args.topic, slug, date) + "\n",
+            encoding="utf-8",
+        )
 
-    payload = dict(paths, topic=args.topic, resumed=resumed,
-                   next_step=_next_step(ledger))
+    header = _parse_header(ledger)
+    payload = dict(paths, mode=header["mode"], team=header["team"],
+                   topic=args.topic, resumed=resumed,
+                   next_step=_next_step(ledger, header["mode"]))
     print(json.dumps(payload, indent=2))
     return 0
 
@@ -373,8 +394,8 @@ def _ledger_entries(ledger: Path) -> list[dict[str, str | None]]:
     return entries
 
 
-def _next_step(ledger: Path) -> int | None:
-    """Lowest pipeline step not recorded complete; None when the run is done.
+def _next_step(ledger: Path, mode: str) -> int | None:
+    """Lowest step of `mode` not recorded complete; None when the run is done.
 
     Only `complete` advances the run. `dispatched`, `escalated`, and `failed`
     are annotations that survive a compaction, and none of them may move the
@@ -385,7 +406,7 @@ def _next_step(ledger: Path) -> int | None:
         for entry in _ledger_entries(ledger)
         if entry["status"] == "complete"
     }
-    remaining = [step for step in sorted(STEPS) if step not in done]
+    remaining = [step for step in sorted(MODES[mode]) if step not in done]
     return remaining[0] if remaining else None
 
 
@@ -416,12 +437,17 @@ def _describe_run(root: Path, slug: str) -> dict | None:
     if header is None:
         return None
     entries = _ledger_entries(ledger)
-    next_step = _next_step(ledger)
+    next_step = _next_step(ledger, header["mode"])
+    steps = MODES[header["mode"]]
     return dict(
         compute_paths(root, slug, header["date"]),
+        mode=header["mode"],
+        team=header["team"],
         topic=header["topic"],
         next_step=next_step,
-        next_step_name=STEPS.get(next_step) if next_step else None,
+        # `is not None`: build starts at step 0, and a falsy test would report
+        # the intake step as already done.
+        next_step_name=steps.get(next_step) if next_step is not None else None,
         last_status=entries[-1]["status"] if entries else None,
         dispatched_base=_dispatched_base(entries, next_step),
     )
@@ -438,8 +464,14 @@ def cmd_ledger(args: argparse.Namespace) -> int:
         print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
         return 2
     ledger = _run_dir_root(root) / args.slug / "progress.md"
-    if not ledger.exists():
+    header = _parse_header(ledger)
+    if header is None:
         print(f"orko: no run named {args.slug!r}; run init first", file=sys.stderr)
+        return 2
+    if args.step not in MODES[header["mode"]]:
+        valid = ", ".join(str(step) for step in sorted(MODES[header["mode"]]))
+        print(f"orko: step {args.step} is not a step of a {header['mode']} run "
+              f"(valid: {valid})", file=sys.stderr)
         return 2
     line = f"step {args.step} {args.status}"
     if args.commit:
@@ -558,13 +590,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="start or resume a run")
+    p_init.add_argument("mode", choices=sorted(MODES))
     p_init.add_argument("topic")
+    p_init.add_argument("--team", required=True, help="Linear team key, e.g. JRF")
     p_init.add_argument("--root", help="repo root (default: git toplevel of cwd)")
     p_init.add_argument("--date", help="YYYY-MM-DD (default: today)")
     p_init.set_defaults(func=cmd_init)
 
     p_ledger = sub.add_parser("ledger", help="append a step record")
-    p_ledger.add_argument("step", type=int, choices=sorted(STEPS))
+    p_ledger.add_argument("step", type=int)
     p_ledger.add_argument(
         "status", choices=["dispatched", "complete", "failed", "escalated"])
     p_ledger.add_argument("--slug", required=True)
