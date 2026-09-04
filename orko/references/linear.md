@@ -6,8 +6,8 @@ Linear is the record. Git holds code and nothing else, and the run directory is 
 
 | Entity | Shape |
 |---|---|
-| Project | One per engagement. Its name is the slug. It lives on the team `init --team` named, and the key is uppercase letters and digits, for example `JRF`. The description is rebuilt from the ledger header on every `post project` call: goal, mode, slug, repository, branch, run directory, boundaries. |
-| Documents | Attached to the Project. A build has `Spec` and `Plan`; an analysis has `Brief` and `Synthesis`. `post document <kind>` sends the file's contents as `content`, and on an update it sends the recorded document id so the document is revised rather than duplicated. |
+| Project | One per engagement. Its name is the slug. It lives on the team `init --team` named, and the key is uppercase letters and digits, for example `JRF`. The payloads pass that key in `addTeams` and in an issue's `team` although both schemas say "name or ID": Linear resolves a team key the same way it resolves a name, so the key is a valid value there. The description is rebuilt from the ledger header on every `post project` call: goal, mode, slug, repository, branch, run directory, boundaries. |
+| Documents | Attached to the Project. A build has `Spec` and `Plan`; an analysis has `Brief` and `Synthesis`. `post document <kind>` sends the file's contents as `content`, and on an update it sends the recorded document id so the document is revised rather than duplicated. On an update the payload carries `id` and `content` only — no `title`, no `project`. That is the contract, not a dropped key: Linear keeps the title and the project association from the create. |
 | Issues | One per decision kicked up to the conductor. Never one per seat, never one per task. The first line of the description is `Seat: <name>`. |
 | Label | `blocked`, created once per workspace — the payload carries no team, so `save_issue` resolves it by name from any team. `post finding --outcome blocked` and `post escalation` emit the label payload ahead of the issue payload when the ledger does not yet record the label id. The ledger is per run, so before sending that payload call `mcp__linear__list_issue_labels` with `name: "blocked"`; if a label named `blocked` already exists, skip the create and run the payload's `then` with the existing label's id. |
 
@@ -19,6 +19,8 @@ Every `post` subcommand prints one object: `{"posts": [...]}`. Work the list in 
 2. If `then` is non-null, run it as an `orko.py` command with `<returned id>` replaced by the id the tool just returned. That is what records the Project, document, and label ids in the ledger, and every later `post` fails without them.
 
 One exception to step 1, and only one: a `mcp__linear__save_issue_label` payload is preceded by a `mcp__linear__list_issue_labels` call with `name: "blocked"`. If the label exists, do not send the create — run the payload's `then` with the existing label's id instead. The label is a workspace-level object that outlives any single run, and the ledger that guards the create is per run, so a second engagement would otherwise re-create a label that is already there.
+
+A `post document` payload carries a fourth key, `content_sha256`, beside `tool`, `args`, and `then`. It is not part of the Linear call and never goes into `args`. Document content is relayed by you, the model, retyping it into the tool call, and nothing in the script can see whether it arrived intact — the hash is the check. After `save_document` returns, call `mcp__linear__get_document` on the returned id and compare the hash of what came back. On a mismatch, re-post once; if it mismatches again, treat it as a failed call and follow the failure path below.
 
 A payload whose `then` you skip is worse than a failed call: the next `post document` creates a second document instead of updating the first, and nothing reports the divergence.
 
@@ -37,7 +39,9 @@ Every decision is one of four, and each maps to a Linear state:
 | `rejected` | `Canceled` | Why the finding was not acted on. |
 | `blocked` | `Todo` plus the `blocked` label | The finding and the boundary it crosses. |
 
-Reviewer findings are decisions under this rule: one issue per finding, never a single issue summarizing a seat's report. A seat that raised four findings produces four issues, which may carry four different outcomes.
+Reviewer findings are decisions under this rule: one issue per finding, never a single issue summarizing a seat's report. A seat that raised four findings produces four issues, which may carry four different outcomes. A finding is one bullet in the seat's `Recommendations` list — that is the only enumerated structure the FINDINGS schema gives you.
+
+Deduplicate across seats. Where two or more seats raised the same thing, post one issue attributed to the first seat that raised it and name the corroborating seats in the body. Corroboration across isolated seats is orko's strongest signal and the body is where it reads as one; a second issue makes the board longer without making the evidence stronger.
 
 `post finding --outcome blocked` and `post escalation` emit the same issue. Only `post escalation` also appends to `escalations.md`, and only `escalations.md` stops the run and trips `preflight`'s `blocked-escalation` check on a resume. So use `post escalation` whenever the finding actually blocks the engagement, and reserve `post finding --outcome blocked` for recording a blocking condition that someone else owns and that is not stopping this run. `post escalation` appends rather than replaces, so posting the same escalation twice stacks a second section under the same title; that append-only shape is the gate log, and only oiler empties it.
 

@@ -2,7 +2,7 @@
 
 A build engagement runs from intake to close in one conductor session. You hold the goal and the boundaries, you author the spec, and you decide what happens to every finding that comes back. Seats report and never write. `orko.py` owns the paths, the ledger, the dispatch prompts, and the Linear payloads. Linear holds the record: every decision you make lands there as an issue, so a week later the run is readable without a checkout.
 
-Every script call in this file is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py <subcommand>`. If that substitution resolves to an empty string inside a Bash call, use `~/.claude/skills/orko/scripts/orko.py` instead, which is the machine-wide symlink to the same file. Never use shell command substitution anywhere in a run: the prefix matching behind `allowed-tools` cannot see through it, so a substituted command produces a permission prompt, and a permission prompt in the middle of a long dispatch is invisible. Where a command needs a value another command produces, run two commands: read the value, then pass it.
+Every script call in this file is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py <subcommand>`. If `${CLAUDE_SKILL_DIR}` is empty in your Bash call (it substitutes when the skill is invoked as `/orko`; it does not when SKILL.md is merely read), use `~/.claude/skills/orko/scripts/orko.py`; `~/.claude/skills/orko` is a symlink to the skill folder, so both paths reach the same file, and both are in `allowed-tools`. Never use shell command substitution anywhere in a run: the prefix matching behind `allowed-tools` cannot see through it, so a substituted command produces a permission prompt, and a permission prompt in the middle of a long dispatch is invisible. Where a command needs a value another command produces, run two commands: read the value, then pass it.
 
 ## Startup sequence
 
@@ -40,7 +40,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py init build "<goal>" --team <KEY>
 
 `--team` is the Linear team key: uppercase letters and digits, for example `JRF`. The mode is positional and fixed at `init`; a run created as `build` cannot later be resumed as `analysis`.
 
-The topic string becomes both the slug and the Linear Project name, so write the goal as one sentence, with no trailing punctuation and no file paths in it. A topic carrying a path slugifies into something unreadable in the Project list and tells a human nothing a week later.
+The goal string the user passed to `/orko build` is the topic string you pass to `init build`, and it is the same string you later pass to `post project --goal`, so the Project name and the description's Goal line agree. It becomes both the slug and the Linear Project name, so write the goal as one sentence, with no trailing punctuation and no file paths in it. A topic carrying a path slugifies into something unreadable in the Project list and tells a human nothing a week later. The slug truncates to 60 characters on a word boundary, so a long topic loses whole trailing words rather than ending mid-word.
 
 Read the slug, `run_dir`, `spec`, `plan`, `ledger`, `escalations`, `findings_dir`, `context_dir`, `unposted_dir`, and `next_step` out of the JSON. Never construct a path. The script derives all of them from the root and the slug; a hand-built path is a silently orphaned artifact that no other command will find.
 
@@ -59,7 +59,7 @@ A resume switches, it does not create; `checkout -b` fails on an existing branch
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py preflight --slug <slug>
 ```
 
-`preflight` checks in code what prose used to ask you to check: `uv-missing`, `on-default-branch`, `run-dir-not-ignored`, `project-id-missing`, and `blocked-escalation`. Exit `1` prints one finding per line and stops intake — fix the named condition and run it again. Exit `2` means you are not inside a git repository or named a run that does not exist. Run `preflight` after the branch switch, not before: `on-default-branch` is the finding it exists for, and on `master` it would fire on every run.
+`preflight` checks in code what prose used to ask you to check: `uv-missing`, `on-default-branch`, `run-dir-not-ignored`, `project-id-missing`, and `blocked-escalation`. Exit `1` prints one finding per line and stops intake — fix the named condition and run it again. Two of those five are resume-only and pass on a fresh run: `project-id-missing` fires only once a Project should already be recorded, and `blocked-escalation` only once `escalations.md` could exist. On a fresh run their exit `0` means "not yet applicable", not "skipped". Exit `2` means you are not inside a git repository or named a run that does not exist. Run `preflight` after the branch switch, not before: `on-default-branch` is the finding it exists for, and on `master` it would fire on every run.
 
 **On a resume, reconcile before you author.**
 
@@ -84,6 +84,14 @@ Do not "correct" this back. A future reader who sees the gates skipped and resto
 ## The steps
 
 Each step ends with its ledger line. `complete` is the only status that advances the run, so record it every time a step's work actually finished.
+
+**The step summary.** At the end of every step, before its `complete` line, post one issue recording how the step ran:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py post finding --slug <slug> --seat conductor --outcome handled --title "Step <n>: <name>"
+```
+
+The body, on stdin, lists what a reader could not reconstruct from the artifacts: lenses dropped and why, seats that failed delivery twice, any tier change made after intake and why, and the edits you made to a seat's draft. Nothing to report is still a summary — say the step ran clean. This is the artifact every "record it in the step summary" below points at.
 
 ### 0 Intake
 
@@ -115,7 +123,7 @@ Exit `1` from `validate` is a real defect: one repair attempt against the report
 
 ### 2 Spec review
 
-Pick the lenses. The default is all four in `references/spec-reviewer.md`: `requirements`, `architecture`, `testability`, `security`. Drop one only when it has nothing to examine, and say which you dropped and why in the step summary you post at close.
+Pick the lenses. The default is all four in `references/spec-reviewer.md`: `requirements`, `architecture`, `testability`, `security`. Drop one only when it has nothing to examine, and say which you dropped and why in the step summary.
 
 Record the dispatch before it goes out, then emit one prompt per lens:
 
@@ -128,7 +136,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt spec-review <slug> --lens <len
 
 Dispatch one `general-purpose` subagent per lens at `opus`, with that stdout as the entire prompt, byte for byte. Add nothing: no summary of the spec, no authoring rationale, no list of areas you are worried about. You wrote the spec, so you cannot see what you failed to consider, and that blind spot is exactly what a fresh reader finds. Every sentence of context you add narrows where the reviewer looks and returns you an echo of your own framing. Send all the dispatches in one message so the seats run in parallel.
 
-Review seats run at `opus` rather than orko's default-down tier because the spec review is the judgment-heavy step of a build. You may raise a single seat to `fable` when the spec carries a design decision you cannot evaluate yourself; say why in the step summary.
+Review seats run at `opus` rather than orko's default-down tier because the spec review is the judgment-heavy step of a build. You may raise a single seat to `fable` when the spec carries a design decision you cannot evaluate yourself; say why in the step summary. A build has no propose gate — intake is its only gate — so a tier change decided after intake is recorded there and nowhere else.
 
 When they return, check delivery: each seat's findings file must exist at `<findings_dir>/<lens>.md` and carry the FINDINGS schema. A seat that returned a receipt but wrote no file gets one re-dispatch with the same prompt from `prompt spec-review`. A seat that fails twice is recorded as failed in the step summary and the step proceeds with the seats that delivered.
 
@@ -140,7 +148,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py post finding --slug <slug> --seat <le
 
 The body comes from stdin — the finding's evidence and your reasoning, piped in. An empty body exits `2`. Call the tool with the emitted `args`; a `blocked` finding emits a label payload first, and its `then` must be run before the issue payload. Check with `list_issue_labels` whether `blocked` already exists before sending that create — see the Label row and the posting protocol in [linear.md](linear.md).
 
-For a finding that falls outside the boundaries, use `post escalation` and not `post finding --outcome blocked`. The two emit the same issue, but only `post escalation` appends to `escalations.md`, and `escalations.md` is what stops the run and what `preflight` reads on a resume. A blocked issue with no gate file is a decision nothing enforces.
+A seat's `scope:` mark is a recommendation to escalate, not a determination: a finding is outside boundaries only when acting on it would touch a file or behavior the intake boundaries excluded, and otherwise you decide it like any other finding. For a finding that genuinely falls outside the boundaries, use `post escalation` and not `post finding --outcome blocked`. The two emit the same issue, but only `post escalation` appends to `escalations.md`, and `escalations.md` is what stops the run and what `preflight` reads on a resume. A blocked issue with no gate file is a decision nothing enforces.
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py post escalation --slug <slug> --seat <lens> --title "<title>"
@@ -160,6 +168,8 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 2 complete --slug <slug>
 
 The second `post document spec` updates the recorded document in place, because `spec_doc` is now in the ledger. The second validation is not redundant: folding several findings into a spec can strand an edit mid-sentence or delete a required section as easily as authoring can.
 
+A finding whose fix belongs in the *other* artifact — a spec finding that needs a plan change, or a plan finding that needs a spec change — is recorded `deferred` with the target artifact named in the body, and applied when that artifact's step runs. Do not edit and re-post an artifact outside its own step: the ledger has no line for it, and a document updated after its step closed is a change nothing records.
+
 ### 3 Plan
 
 The plan is drafted by a seat, not by you. It is long, mechanical against a fixed spec, and benefits from a reader who has not spent a step arguing with reviewers.
@@ -170,7 +180,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 3 dispatched --slug <slug> --c
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt plan-write <slug>
 ```
 
-Read the SHA from `git rev-parse HEAD` and pass it to `ledger` as its own command, so the base survives a compaction mid-dispatch.
+Read the SHA from `git rev-parse HEAD` and pass it to `ledger` as its own command, so the base survives a compaction mid-dispatch. On a fresh run nothing has landed on the branch yet, so this is the pre-run HEAD — that is correct and not a sign you ran it too early. The base earns its keep on a resume, where it says what the round was dispatched against, and in step 6, where it is the diff base.
 
 Dispatch one `general-purpose` seat at `opus` with that stdout as the entire prompt. Check delivery: the plan must exist at the `plan` path from `init`. Then read the draft and edit it yourself — the plan is your artifact, and the seat's draft is a draft.
 

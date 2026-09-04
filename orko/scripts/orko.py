@@ -18,7 +18,8 @@ Usage:
     uv run orko.py validate {spec|plan} <path>
     uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--root DIR]
     uv run orko.py prompt plan-write <slug> [--root DIR]
-    uv run orko.py prompt {seat|verifier} <slug> --seat NAME --question TEXT --context-file PATH [--root DIR]
+    uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--root DIR]
+    uv run orko.py prompt verifier <slug> --seat NAME [--question TEXT] --context-file PATH [--root DIR]
     uv run orko.py escalations <slug> [--root DIR]
     uv run orko.py preflight [--slug SLUG | --mode {analysis|build}] [--root DIR]
     uv run orko.py linear set <key> <id> --slug SLUG | linear get --slug SLUG
@@ -34,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import re
 import shutil
@@ -247,7 +249,16 @@ def slugify(topic: str) -> str:
         .encode("ascii", "ignore")
         .decode("ascii")
     )
-    slug = "-".join(re.findall(r"[a-z0-9]+", ascii_only.lower()))[:SLUG_MAX].strip("-")
+    slug = "-".join(re.findall(r"[a-z0-9]+", ascii_only.lower()))
+    if len(slug) > SLUG_MAX:
+        # The slug is the Linear Project name and the branch name, so a cut
+        # landing mid-word reads as a typo forever. Drop the partial word —
+        # unless the first word alone overruns, where a hard cut is all there is.
+        cut = slug[:SLUG_MAX]
+        if slug[SLUG_MAX] != "-" and "-" in cut:
+            cut = cut.rsplit("-", 1)[0]
+        slug = cut
+    slug = slug.strip("-")
     if not slug:
         raise ValueError(f"topic {topic!r} produced an empty slug")
     return slug
@@ -627,17 +638,33 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         subs["{{FINDINGS_PATH}}"] = str(findings_dir / f"{args.lens}.md")
         text = _strip_lenses(text)
     elif args.kind in SEAT_KINDS:
-        if not (args.seat and args.question and args.context_file):
+        if not (args.seat and args.context_file):
             print(f"orko: {args.kind} needs --seat, --question, and --context-file",
                   file=sys.stderr)
             return 2
+        question = args.question
+        question_file = Path(run["context_dir"]) / f"{args.seat}.question"
+        if not question:
+            if args.kind == "seat":
+                print(f"orko: {args.kind} needs --seat, --question, and "
+                      "--context-file", file=sys.stderr)
+                return 2
+            # A verifier must be re-runnable from the trail alone: the seat
+            # dispatch recorded its question so a resumed session need not
+            # remember it, and a remembered-wrong question is a tilted verifier.
+            try:
+                question = question_file.read_text(encoding="utf-8")
+            except OSError:
+                print(f"orko: no recorded question for seat {args.seat}; "
+                      "pass --question", file=sys.stderr)
+                return 2
         try:
             context = Path(args.context_file).read_text(encoding="utf-8")
         except OSError as error:
             print(f"orko: cannot read {args.context_file}: {error}", file=sys.stderr)
             return 2
         subs["{{SEAT}}"] = args.seat
-        subs["{{QUESTION}}"] = args.question
+        subs["{{QUESTION}}"] = question
         subs["{{CONTEXT}}"] = context.rstrip()
         subs["{{FINDINGS_PATH}}"] = str(findings_dir / f"{args.seat}.md")
         subs["{{VERDICT_PATH}}"] = str(findings_dir / f"{args.seat}.verdict.md")
@@ -655,6 +682,13 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     for token, value in subs.items():
         text = text.replace(token, value)
     sys.stdout.write(text)
+    if args.kind == "seat":
+        try:
+            question_file.write_text(question, encoding="utf-8")
+        except OSError as error:
+            print(f"orko: cannot record the question at {question_file}: {error}",
+                  file=sys.stderr)
+            return 2
     return 0
 
 
@@ -876,8 +910,13 @@ def cmd_post_document(args: argparse.Namespace) -> int:
         post_args = {"title": DOC_KINDS[args.kind], "project": project,
                      "content": content}
         then = f"linear set {key} <returned id> --slug {run['slug']}"
+    # The conductor retypes `content` into the MCP call, so the payload carries
+    # the hash of what the script read: `get_document` after the save is the
+    # only check on a relay nothing else can verify.
     return _emit_posts([{"tool": "mcp__linear__save_document",
-                         "args": post_args, "then": then}])
+                         "args": post_args, "then": then,
+                         "content_sha256": hashlib.sha256(
+                             content.encode()).hexdigest()}])
 
 
 def cmd_post_close(args: argparse.Namespace) -> int:

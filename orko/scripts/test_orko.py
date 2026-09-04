@@ -1,4 +1,5 @@
 """Tests for orko.py — the deterministic spine of the orko skill."""
+import hashlib
 import io
 import json
 import subprocess
@@ -32,7 +33,12 @@ MCP_PARAMS = {
 def assert_posts_are_well_formed(payload):
     assert list(payload) == ["posts"]
     for post in payload["posts"]:
-        assert set(post) == {"tool", "args", "then"}
+        # `content_sha256` rides alongside the payload, never inside `args`:
+        # it is the conductor's relay check, not a Linear field.
+        allowed = {"tool", "args", "then"}
+        if post["tool"] == "mcp__linear__save_document":
+            allowed = allowed | {"content_sha256"}
+        assert {"tool", "args", "then"} <= set(post) <= allowed, set(post)
         assert post["tool"] in MCP_PARAMS, post["tool"]
         assert set(post["args"]) <= MCP_PARAMS[post["tool"]], post["args"].keys()
 
@@ -54,6 +60,17 @@ class TestSlugify:
         slug = orko.slugify("word " * 40)
         assert len(slug) <= 60
         assert not slug.endswith("-")
+
+    def test_truncates_on_a_word_boundary(self):
+        slug = orko.slugify(
+            "Add a subtract function with a test and a CLI entry point that "
+            "reads two numbers from argv")
+        assert slug == "add-a-subtract-function-with-a-test-and-a-cli-entry-point"
+        assert len(slug) <= 60
+
+    def test_hard_cuts_when_the_first_word_is_longer_than_the_limit(self):
+        slug = orko.slugify("a" * 80)
+        assert slug == "a" * 60
 
     def test_empty_slug_is_an_error(self):
         with pytest.raises(ValueError):
@@ -709,6 +726,39 @@ class TestPrompt:
         assert str(tmp_path / ".orko/demo-topic/findings/perf.verdict.md") in out
         assert "{{" not in out
 
+    def test_seat_records_the_question_for_a_later_verifier(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+        ctx.write_text("src/hot.py\n")
+        orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
+                   "--question", "Where is the N+1?",
+                   "--context-file", str(ctx), "--root", str(tmp_path)])
+        recorded = tmp_path / ".orko/demo-topic/context/perf.question"
+        assert recorded.read_text(encoding="utf-8") == "Where is the N+1?"
+
+    def test_verifier_reads_the_recorded_question_when_none_is_passed(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+        ctx.write_text("src/hot.py\n")
+        orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
+                   "--question", "Where is the N+1?",
+                   "--context-file", str(ctx), "--root", str(tmp_path)])
+        capsys.readouterr()
+        assert orko.main(["prompt", "verifier", "demo-topic", "--seat", "perf",
+                          "--context-file", str(ctx), "--root", str(tmp_path)]) == 0
+        out = capsys.readouterr().out
+        assert str(tmp_path / ".orko/demo-topic/findings/perf.verdict.md") in out
+        assert "{{" not in out
+
+    def test_verifier_without_a_question_or_a_record_is_a_usage_error(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+        ctx.write_text("src/hot.py\n")
+        rc = orko.main(["prompt", "verifier", "demo-topic", "--seat", "perf",
+                        "--context-file", str(ctx), "--root", str(tmp_path)])
+        assert rc == 2
+        assert "no recorded question for seat perf" in capsys.readouterr().err
+
     def test_context_containing_template_tokens_is_passed_through(self, tmp_path, capsys):
         self._init(tmp_path, capsys, mode="analysis")
         ctx = tmp_path / ".orko/demo-topic/context/perf.md"
@@ -962,6 +1012,16 @@ class TestPostDocument:
         assert post["args"]["id"] == "doc_2"
         assert "project" not in post["args"]
         assert post["then"] is None
+
+    def test_carries_the_sha256_of_the_content(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        content = "# Spec\n\nbody\n"
+        (tmp_path / ".orko/demo-topic/spec.md").write_text(content)
+        orko.main(["post", "document", "spec", "--slug", "demo-topic",
+                   "--root", str(tmp_path)])
+        post = json.loads(capsys.readouterr().out)["posts"][0]
+        assert post["content_sha256"] == hashlib.sha256(content.encode()).hexdigest()
+        assert "content_sha256" not in post["args"]
 
     def test_refuses_before_the_project_exists(self, tmp_path, capsys):
         orko.main(["init", "build", "Other", "--team", "JRF",

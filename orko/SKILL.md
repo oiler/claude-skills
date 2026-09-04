@@ -20,6 +20,7 @@ argument-hint: "[question] | build <goal> [init docs]"
 allowed-tools: >-
   Agent Task Read Write Edit Grep Glob Skill
   Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py *)
+  Bash(uv run ~/.claude/skills/orko/scripts/orko.py *)
   Bash(git rev-parse *) Bash(git log *) Bash(git status *) Bash(git diff *)
   Bash(git checkout -b orko/*) Bash(git checkout orko/*) Bash(git branch *)
   mcp__linear__save_project mcp__linear__get_project
@@ -61,7 +62,7 @@ Three things define the role. You own the thread and never disappear into the wo
 
 `scripts/orko.py` owns the paths, the ledger, the validators, every dispatch prompt, and every Linear payload. Prose is yours; structure is the script's. Never hand-build a path and never hand-compose a reviewer prompt: both come out of the script so that a resumed session finds the same artifacts and a reviewer reads text you could not have tilted.
 
-Every command in this skill is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py <subcommand>`. If that substitution resolves to an empty string inside a Bash call, use `~/.claude/skills/orko/scripts/orko.py`, the machine-wide symlink to the same file. Never use shell command substitution: the prefix matching behind `allowed-tools` cannot see through it, so it turns into an invisible permission prompt. Where a command needs a value another command produces, run two commands.
+Every command in this skill is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py <subcommand>`. If `${CLAUDE_SKILL_DIR}` is empty in your Bash call (it substitutes when the skill is invoked as `/orko`; it does not when SKILL.md is merely read), use `~/.claude/skills/orko/scripts/orko.py`; `~/.claude/skills/orko` is a symlink to the skill folder, so both paths reach the same file, and both are in `allowed-tools`. Never use shell command substitution: the prefix matching behind `allowed-tools` cannot see through it, so it turns into an invisible permission prompt. Where a command needs a value another command produces, run two commands.
 
 - `0` — success, all checks passed. Continue.
 - `1` — validation findings, one per line with its line number. A real defect in the artifact; repair it.
@@ -69,7 +70,7 @@ Every command in this skill is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/or
 
 ## Analysis engagement
 
-1. **Open** — restate the request. If it is genuinely underspecified, ask 1–2 scoping questions; otherwise proceed. Then `init analysis "<question>" --team <KEY>`, read the paths out of the JSON, and create the Linear Project with `post project --slug <slug> --goal "<question>" --boundaries "<what the seats may read and what is out of scope>"` (no `--branch` for an analysis; the run is read-only, and the description records that in place of a branch), sending each emitted payload per [references/linear.md](references/linear.md).
+1. **Open** — restate the request. If it is genuinely underspecified, ask 1–2 scoping questions; otherwise proceed. Then `init analysis "<question>" --team <KEY>`, read the paths out of the JSON, and create the Linear Project with `post project --slug <slug> --goal "<question>" --boundaries "<what the seats may read and what is out of scope>"` (no `--branch` for an analysis; the run is read-only, and the description records that in place of a branch), sending each emitted payload per [references/linear.md](references/linear.md). `init` appends `.orko/` to the target's `.gitignore` even when the boundaries say read-only; that one line is the documented exception, and you say so in the brief.
 2. **Propose (the gate)** — write `brief.md` to the `brief` path from `init`, then present its seat list (each as *role / model tier / what it investigates*) and dispatch plan for approval; **wait for the user's go** before any expert runs. State the cost shape plainly: verification roughly doubles the dispatch (one verifier per seat), so present it as a cost choice the user opts into — not a silent default. Post it with `post document brief` and run the emitted `then`.
 3. **Dispatch** — run every seat of a round concurrently, then check what came back.
    1. One subagent call (the `Agent`/`Task` tool) per seat, all **in a single message** — that is what makes them parallel.
@@ -78,12 +79,12 @@ Every command in this skill is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/or
    4. **Cap a round at six seats.** If the decomposition needs more, split it into rounds.
    5. Write the seat's context file to `<run_dir>/context/<seat>.md` (paths, constraints, the larger goal, who the work is for), then take the whole prompt from `prompt seat <slug> --seat <name> --question "<one question>" --context-file <run_dir>/context/<name>.md` and dispatch that stdout byte for byte. Seats are one-shot and inherit no conversation history.
    6. **Check delivery before accepting a seat.** Confirm its findings file exists, is non-empty, and follows the FINDINGS schema. If not, re-dispatch that seat once, naming what failed. A seat that fails twice is recorded as **failed** in the synthesis — never silently omitted.
-4. **Verify** (default on) — one fresh-context verifier per seat, dispatched in parallel; each writes `findings/<seat>.verdict.md`. The prompt comes from `prompt verifier` with the same `--seat`, `--question`, and `--context-file`.
+4. **Verify** (default on) — one fresh-context verifier per seat, dispatched in parallel; each writes `findings/<seat>.verdict.md`. The prompt comes from `prompt verifier` with the same `--seat` and `--context-file`; `--question` is optional, because `prompt seat` recorded the question at `<context_dir>/<seat>.question` and the verifier reads it back — pass `--question` only to override what was recorded.
    1. **Check delivery, as in step 3.** Verifiers drop their file more often than seats do: the analysis feels like the deliverable and the file feels like bookkeeping. Confirm the verdict file exists before accepting the verdict.
    2. **Latency is not failure.** Confirm a dispatch has actually returned before replacing it — a verifier taking its time is usually the one doing the work you asked for.
    3. **A re-dispatched verifier must be as blind as the first.** Re-run the same `prompt verifier` command and dispatch its output unchanged. Never summarize what the failed pass concluded: that is the answer key, and a verifier handed the answer key confirms it. Fresh context is the entire mechanism you are paying for.
    4. The user may downgrade — "skip verification" → the conductor self-reviews each finding against the source while synthesizing (no separate verifier seat); "no verification" → trust the seats and synthesize directly.
-5. **Synthesize** — read findings + verdicts; write `synthesis.md` with cross-cutting conclusions, conflicts, and a recommended order of action, kept clearly separate from the verbatim per-seat relay. Then one `post finding` per verified finding, followed by `post document synthesis`. Outcomes map differently in an analysis, which recommends rather than acts: see [references/linear.md](references/linear.md) for the mapping and for how a corrected finding is written up.
+5. **Synthesize** — read findings + verdicts; write `synthesis.md` with cross-cutting conclusions, conflicts, and a recommended order of action, kept clearly separate from the verbatim per-seat relay. Then one `post finding` per verified finding, followed by `post document synthesis`. A finding is one bullet in a seat's `Recommendations` list, so a seat with three recommendations produces three issues. Deduplicate across seats: where two seats raised the same thing, post one issue attributed to the first seat that raised it and name the corroborating seats in the body — corroboration is evidence, not a second issue. A verified conclusion that no defect exists gets no issue at all; it belongs in the Synthesis document. Outcomes map differently in an analysis, which recommends rather than acts: see [references/linear.md](references/linear.md) for the mapping and for how a corrected finding is written up.
    - Where seats disagree, surface the conflict as a first-class finding. Disagreement marks where the genuine uncertainty lives; do not smooth it into a false consensus.
    - Where a verdict corrects a seat, **the verdict wins**: relay the corrected version and say the seat was corrected. Never pass through a seat's claim a verifier has contradicted.
 6. **Re-ground** — report back: outcome first, attributed by seat, with links into the trail and into Linear.
@@ -108,7 +109,7 @@ After intake you are in charge within the declared boundaries. The `/orko build`
 
 **Reviewer seats are report-only.** They read the artifact and the repository, write a findings file in the FINDINGS schema, and return a receipt. No write authority on the artifact, no git access, no Linear access. You decide every finding and you post it.
 
-**Review seats run at `opus`**, a deliberate exception to the default-down tiering below: the spec and plan reviews are the judgment-heavy steps of a build. Say so at the gate, and say why if you raise a single seat to `fable`. No verifiers are dispatched on review seats; your per-finding Linear issue is the check.
+**Review seats run at `opus`**, a deliberate exception to the default-down tiering below: the spec and plan reviews are the judgment-heavy steps of a build. A build has no propose gate — intake is its only gate — so state the tiers in the intake round, and record any tier change made after intake in that step's summary (see [references/build.md](references/build.md)), including why if you raise a single seat to `fable`. No verifiers are dispatched on review seats; your per-finding Linear issue is the check.
 
 Run `preflight --slug <slug>` after the branch switch and before any dispatch. A finding that falls outside the boundaries goes through `post escalation`, never `post finding --outcome blocked`: the two emit the same issue, but only `post escalation` appends to `escalations.md`, and only that file stops the run and trips `preflight` on a resume.
 
@@ -116,13 +117,13 @@ Step-by-step commands, the validator contract, error handling, and ending rules:
 
 ## Model tiering
 
-The conductor assigns a tier per seat by task difficulty and states it at the gate so the user can override. Default the tier *down*: the cheapest model that clears the bar is the resting state, and Opus is the exception you justify per seat — not where seats start.
+The conductor assigns a tier per seat by task difficulty and states it where the user can override it: at the propose gate in an analysis, in the intake round in a build. Default the tier *down*: the cheapest model that clears the bar is the resting state, and Opus is the exception you justify per seat — not where seats start.
 
 | Seat | `model` value |
 |---|---|
 | Conductor + synthesis — where the final judgment lives | the session model — the conductor is the main thread, not a dispatch; run engagements from a frontier-class session |
-| Analyst seats (security analysis, architecture critique, focused review, targeted research) **and verifiers** | `sonnet` — the default; escalate a single seat to `opus` only when its question genuinely needs frontier judgment, and say why at the gate |
-| Spec and plan review seats, the plan-writer, and the two tool-running code-review seats | `opus` — the judgment-heavy steps of a build; say so at the gate |
+| Analyst seats (security analysis, architecture critique, focused review, targeted research) **and verifiers** | `sonnet` — the default; escalate a single seat to `opus` only when its question genuinely needs frontier judgment, and say why where you state the tiers |
+| Spec and plan review seats, the plan-writer, and the two tool-running code-review seats | `opus` — the judgment-heavy steps of a build; say so at intake |
 | Mechanical (file survey, grep-and-report, test runs, inventory) | `haiku` |
 
 Pass tier **aliases** (`opus`, `sonnet`, `haiku`) to the dispatch tool, never pinned version strings — aliases track the current model of each tier, so the table never goes stale and a dispatch never fails on a retired model name.

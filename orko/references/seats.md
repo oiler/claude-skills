@@ -36,6 +36,6 @@ These are example seats, not a fixed cast. The conductor picks from them or synt
 Both prompts are emitted by the script, never composed by hand:
 
     uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt seat <slug> --seat <name> --question "<one question>" --context-file <run_dir>/context/<name>.md
-    uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt verifier <slug> --seat <name> --question "<same question>" --context-file <run_dir>/context/<name>.md
+    uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt verifier <slug> --seat <name> --context-file <run_dir>/context/<name>.md
 
 The context file is the conductor's one authored input per seat: paths, constraints, the larger goal, and who the work is for. The templates live in `seat-prompt.md` and `verifier-prompt.md` beside this file. Both end with a numbered write-then-return close, because a subagent treats its returned message as the answer and a file instruction buried mid-prompt gets skipped. Keep any new template structurally parallel.
