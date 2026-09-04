@@ -14,7 +14,7 @@ The tradeoff: a curated cast buys consistency and named experts you can reason a
 
 ## Persistent peers (agent-teams)
 
-By default orko seats are one-shot. A dispatch returns once and the seat is gone; following up does not resume that seat — it re-dispatches a cold one that rehydrates from the disk trail (`docs/sessions/<slug>/`). The conductor↔expert relationship is fire-and-forget, not a conversation.
+By default orko seats are one-shot. A dispatch returns once and the seat is gone; following up does not resume that seat — it re-dispatches a cold one that rehydrates from the disk trail (`.orko/<slug>/`). The conductor↔expert relationship is fire-and-forget, not a conversation.
 
 Setting `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` changes this. The flag enables `SendMessage`, which resumes an existing seat with its full context intact — the conductor can send a follow-up to a seat that still remembers everything it did, giving true multi-turn conductor↔expert dialogue instead of a cold rehydrate from files.
 
@@ -26,10 +26,14 @@ Under ultracode, the engagement can be modeled as a Workflow DAG: stages wired a
 
 Two constraints pin this as an upgrade, not the everyday baseline. The Workflow tool is ultracode-gated — it is not available in the standard harness. And a Workflow DAG is deterministic and non-conversational: stages execute along fixed edges with no conductor judgment mid-run, which is exactly what buys the fidelity but also removes the adaptive, conversational decomposition the prompt-only conductor provides. Reach for it when the engagement is stable enough to wire as a fixed graph and relay fidelity matters more than adaptability.
 
-## Build extension (v2, not built)
+## Build engagement (shipped in v1.0.0)
 
-orko v1 is an analysis instrument — review, audit, research. To extend it to build engagements, the conductor sequences a plan → execute → verify → finish lifecycle and hands the implementer seats to `subagent-driven-development` rather than inventing its own execution machinery. Analyst seats (the v1 cast) and implementer seats then coexist in one engagement: analysts investigate and report, implementers build against an approved plan, and the conductor runs both under the same gate-and-trail protocol.
+The build engagement designed here on 2026-09-04 shipped as orko v1.0.0. The lifecycle lives in `build.md`, the Linear contract in `linear.md`, and the script surface in `scripts/orko.py --help`. Two design points worth keeping in view:
 
-**The judge is tuned per task.** v1's verifier is a *prose* judge — it re-reads findings and labels them against cited evidence, which is the right referee for analysis, review, and research. Code is different: synthesizing a tidy summary of three competing patches tells you nothing about whether the code runs. So when build seats produce competing implementations, the judge must not synthesize prose — it runs the test suite and keeps the candidate whose patch passes. Same panel-plus-judge shape, objective referee swapped in. The rule for v2: prose work gets a synthesizing judge, code work gets a judge that runs the tests.
+- **Linear is the record, git is for code.** Artifacts never commit. Every decision kicked up to the conductor is one issue with one of four outcomes; reviewer findings are decisions under that rule. Seats never write to Linear; the conductor posts, attributed by seat, from payloads the script emits.
 
-This is deferred. It is NOT built in v1 — recorded here as the intended shape of a future version, not a capability orko currently has.
+## Not yet built
+
+This is a design note from the 2026-09-04 session, not a shipped mechanism — nothing in `SKILL.md`, `build.md`, or the script implements it, so do not look for it during a run.
+
+- **The judge is tuned per task.** Analysis gets a prose verifier. Code gets a judge that runs the tests: when the conductor dispatches competing implementations for one task, it keeps the candidate whose patch passes the suite and records the other as rejected.

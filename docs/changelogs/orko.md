@@ -1,5 +1,34 @@
 # orko — Changelog
 
+## v1.0.0 — 2026-09-04
+
+Build engagement and a Linear record. Folds the `autonom` skill into orko. Breaking: the run directory moves from `docs/sessions/<slug>/` to `.orko/<slug>/`, and Linear replaces the disk trail as the record for both engagement types.
+
+### Added
+
+- `/orko build <goal>`: intake, spec, spec review, plan, plan review, execute via `subagent-driven-development`, code review, close. Reviewer seats are report-only; the conductor is the only writer to artifacts and to Linear.
+- `scripts/orko.py` (from `autonom.py`): `init <mode> --team`, per-mode ledger steps, `linear set|get`, `post project|document|finding|escalation|close`, `prompt spec-review|plan-review|plan-write|seat|verifier`, `preflight`.
+- Every decision kicked up to the conductor is one Linear issue with one of four outcomes: handled (`Done`), deferred (`Backlog`), rejected (`Canceled`), outside boundaries (`Todo` + `blocked`, run stops).
+- Analysis seat and verifier prompts are now script-emitted (determinism tier 1, up from tier 2).
+- Validators pinned to real fixtures under `scripts/fixtures/`.
+
+### Changed
+
+- Spec and plan live in the run directory as working copies and in Linear as documents. Nothing commits to the target repository except code.
+- Review seats run at `opus`; verifiers are not dispatched on review seats because the conductor's per-finding decision is the check, and it is recorded.
+- `post close` appends a closing line with a `patch` op and leaves the Project description intact; it runs once per run.
+
+### Removed
+
+- Reviewer write authority and the separate-review-commit safeguard that existed for it.
+- `docs/sessions/` trail and the `.gitignore` editing instructions; `init` gitignores `.orko/`.
+
+### Fixed (from the autonom v0.2.0 backlog)
+
+- Escalation gate is unambiguous: a blocked finding stops the run before the next step in both modes, and `preflight` reports a non-empty `escalations.md` on resume.
+- `${CLAUDE_SKILL_DIR}` empty in Bash: documented fallback to `~/.claude/skills/orko/scripts/orko.py`.
+- Topic-string guidance in `references/build.md`.
+
 ## v0.2.0 — 2026-07-13
 
 Reliability pass. Every change below is a fix for a failure observed in a live smoke engagement (two seats, two verifiers, run against the `wordpress-plugins` scaffolder), not a speculative hardening.

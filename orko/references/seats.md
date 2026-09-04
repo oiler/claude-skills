@@ -31,55 +31,11 @@ These are example seats, not a fixed cast. The conductor picks from them or synt
 - Confidence & gaps: <what is uncertain or unchecked>
 ```
 
-## Dispatch-prompt template
+## Dispatch and verifier prompts
 
-The conductor fills the `<...>` slots per seat.
+Both prompts are emitted by the script, never composed by hand:
 
-```markdown
-You are the <seat-role> on an orko engagement. Investigate ONLY: <scoped question>.
+    uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt seat <slug> --seat <name> --question "<one question>" --context-file <run_dir>/context/<name>.md
+    uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt verifier <slug> --seat <name> --context-file <run_dir>/context/<name>.md
 
-Context (you inherit no prior conversation — everything you need is here):
-<paths, constraints, the larger goal and who it is for>
-
-Rules:
-- Substantiate every claim against a tool result (cite file:line or command output). State explicitly what you did NOT check.
-- Do not change anything. Report findings only.
-- Stay within your seat's scope; flag adjacent issues in one line, don't chase them.
-- Be concise: findings are evidence, not prose. No preamble, no restating the task, no narrating your steps — output tokens cost several times more than input, and the conductor only needs the substance.
-
-When done:
-1. Write your full findings to docs/sessions/<slug>/findings/<seat>.md using the FINDINGS schema exactly.
-2. Return to the conductor ONLY: the file path, your one-line verdict, and your confidence (high/medium/low). Do not paste the findings into your return.
-```
-
-## Verifier-prompt template
-
-Runs fresh-context, one per seat by default.
-
-```markdown
-You are an independent verifier on an orko engagement. You did not author these findings and have no stake in them.
-
-Read ONLY:
-- The findings file: docs/sessions/<slug>/findings/<seat>.md
-- The same source material it cites: <paths / how to access>
-
-For EACH finding, re-check it against the actual evidence and label it:
-- confirmed — evidence supports it as stated
-- overstated — real but exaggerated (give the accurate version)
-- unsubstantiated — evidence does not support it
-- missing-context — true but omits something that changes the conclusion
-
-Check severity, not just existence. A seat reproduces a problem under conditions it chose; ask whether the *documented, normal* usage path reaches it at all. A real bug that only fires under conditions the tool never encounters is `overstated`, and saying so is the job.
-
-Do not rewrite the findings or investigate beyond checking the claims.
-
-When done:
-1. Write your verdicts to docs/sessions/<slug>/findings/<seat>.verdict.md using this schema exactly:
-
-### VERDICTS — Seat: <seat> (verifier: <model>)
-- <finding> -> <label>: <one-line reason, cite evidence>
-
-2. Return to the conductor ONLY a one-line tally (e.g. "3 confirmed, 1 overstated, 0 unsubstantiated"). Do not paste your verdicts into the return — the file IS the deliverable; the return is a receipt.
-```
-
-**Why both templates end this way.** A subagent treats its returned message as "the answer" and the file as bookkeeping, so an artifact instruction buried mid-prompt gets skipped — the analysis comes back correct and the file never appears. The write must be the last, numbered, unmissable step, and the return must be framed as a receipt. Keep the two templates structurally parallel; when you add a template, close it the same way.
+The context file is the conductor's one authored input per seat: paths, constraints, the larger goal, and who the work is for. The templates live in `seat-prompt.md` and `verifier-prompt.md` beside this file. Both end with a numbered write-then-return close, because a subagent treats its returned message as the answer and a file instruction buried mid-prompt gets skipped. Keep any new template structurally parallel.
