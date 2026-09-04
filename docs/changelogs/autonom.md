@@ -1,5 +1,9 @@
 # autonom — Changelog
 
+## v0.2.0 — 2026-09-04
+
+Retired. The skill is now a redirect stub pointing at `/orko build`. Scripts, references, and tests moved to `orko/` (see orko v1.0.0). Evidence reports under `evals/autonom/` are kept as history.
+
 ## v0.1.0 — 2026-07-28
 
 Initial release. Runs superpowers steps 6–9 — author spec, review spec, author plan, review plan — as one unattended relay from a single `/autonom` invocation.

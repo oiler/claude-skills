@@ -87,7 +87,7 @@ The spec and plan no longer carry a date in their filename. The run directory is
 | `prompt <kind> <slug> ...` | `kind` is one of `spec-review`, `plan-review`, `plan-write`, `seat`, `verifier`. The first three emit a charter file from `references/` with paths substituted; `--lens <name>` picks one row of the review charter's lens table so each parallel reviewer gets one question. `seat` and `verifier` emit the v1 templates from `references/seats.md` with `--seat <name>`, `--question <text>`, and `--context-file <path>` substituted, so analysis dispatches are script-assembled too. Any unsubstituted token exits `2`. |
 | `escalations <slug>` | Unchanged gate. |
 | `linear set <key> <id>` / `linear get` | New. Records and reads `project`, `spec_doc`, `plan_doc` IDs in the ledger so a resumed session can re-fetch. |
-| `post <entity> ...` | New. Emits one JSON payload per call, shaped for the matching Linear MCP tool. Entities: `project`, `document`, `finding`, `escalation`, `close`. See "Linear contract". |
+| `post <entity> ...` | New. Emits `{"posts": [{"tool", "args", "then"}]}`, one entry per Linear MCP call, shaped for the named tool. Entities: `project`, `document`, `finding`, `escalation`, `close`. See "Linear contract". |
 | `preflight` | New. Checks in code what autonom's prose asked the orchestrator to check: inside a git repo, `uv` on PATH, not on `master` or `main` for build mode, run directory gitignored, Linear IDs present when the ledger is past step 0. Exit `1` with one finding per line. |
 
 The script cannot call Linear. Every `post` payload passes through the conductor, who calls the MCP tool with the payload's `args` verbatim and then records the returned ID with `linear set` where the payload says to. This is the bright-line contract autonom used for reviewer prompts, applied to Linear writes: the conductor can add to a payload, and nothing would catch it, but doing so is an overt violation of a written contract rather than a judgment call.
@@ -104,7 +104,7 @@ Review seats run at `opus`. This is a deliberate exception to orko's default-dow
 
 | Step | Conductor | Dispatches | Linear |
 |---|---|---|---|
-| 0 Intake | Reads goal and init docs. Asks one round of clarifying questions, including autonom's checkpoint-or-auto question and the target repo. Confirms branch and boundaries. Runs `init build`, `preflight`, creates branch `orko/<slug>`. | none | Project created. Description carries goal, boundaries, repo, branch, run directory, slug. |
+| 0 Intake | Reads goal and init docs. Asks one round of clarifying questions, including autonom's checkpoint-or-auto question and the target repo. Confirms branch and boundaries. Runs `init build`, creates branch `orko/<slug>`, then runs `preflight` (which rejects a build on a default branch). | none | Project created. Description carries goal, boundaries, repo, branch, run directory, slug. |
 | 1 Spec | Writes `.orko/<slug>/spec.md`. Runs `validate spec`. | none | Document "Spec" created. `linear set spec_doc`. |
 | 2 Spec review | Dispatches reviewers. Checks delivery. Decides per finding, edits the spec, re-validates. | 2 to 4 reviewer seats at `opus` | One issue per finding. Document "Spec" updated. |
 | 3 Plan | Dispatches one plan-writer seat that drafts `.orko/<slug>/plan.md` from the spec. Edits the draft. Runs `validate plan`. | one plan-writer at `opus` | Document "Plan" created. `linear set plan_doc`. |
@@ -140,7 +140,7 @@ Every decision kicked up to the conductor is one issue. Reviewer findings are de
 
 `post finding` takes `--seat`, `--outcome`, `--title`, and reads the finding body from stdin. It emits `save_issue` with the team, the project ID from the ledger, the mapped state, the label when blocked, and a description whose first line is `Seat: <seat>` followed by the body. Attribution by seat is structural: the conductor cannot post a finding without naming the seat that raised it. The `blocked` label is created once per team by the conductor on first use; `post finding --outcome blocked` emits a preceding `save_issue_label` payload when the ledger does not record the label as existing.
 
-`post escalation` is `post finding --outcome blocked` and additionally appends the title, seat, and body to `escalations.md` itself, so the gate file is script-written. `post close` emits `save_project` with state `Completed` and a summary description.
+`post escalation` is `post finding --outcome blocked` and additionally appends the title, seat, and body to `escalations.md` itself, so the gate file is script-written. `post close` emits `save_project` with state `Completed` and a `patch` that appends a closing line, so the reconstruction block in the description survives the close. It runs once per run, because project links are append-only.
 
 Seats never write to Linear. The conductor posts, attributed by seat.
 

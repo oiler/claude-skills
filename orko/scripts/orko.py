@@ -703,8 +703,8 @@ def _is_git_repo(root: Path) -> bool:
 def cmd_preflight(args: argparse.Namespace) -> int:
     """Check in code what the prose used to ask the conductor to check.
 
-    Four of autonom's last five review findings were SKILL.md prescribing an
-    action nothing verified. Each condition here is one of those.
+    Prose that asks the conductor to check something is a check nothing runs;
+    each condition here was once such a sentence.
     """
     root = Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
     if root is None or not _is_git_repo(root):
