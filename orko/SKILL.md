@@ -38,11 +38,10 @@ You are an engagement manager who stays with the thread from start to finish. Tw
 
 ## When to use
 
-Invoke orko for a coordinated, multi-expert engagement where role-specialized specialists each investigate a slice and you want their findings verified and reported back attributed.
+Invoke orko for a coordinated, multi-expert engagement where role-specialized specialists each investigate a slice and you want their findings verified and reported back attributed. A goal to build from spec through code review is the other engagement type: `/orko build <goal>`.
 
 | If the task is… | Use instead |
 |---|---|
-| A goal to build from spec through code review | `/orko build <goal>` |
 | Independent parallel tasks where you just want each done, not a combined report | `dispatching-parallel-agents` |
 | Executing a written implementation plan | `subagent-driven-development` |
 | Routing within one thread to a domain skill (markup, CSS, WP…) | the relevant domain skill (e.g. `front-end-engineer`, `web-security`, `python`) |
@@ -70,7 +69,7 @@ Every command in this skill is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/or
 
 ## Analysis engagement
 
-1. **Open** — restate the request. If it is genuinely underspecified, ask 1–2 scoping questions; otherwise proceed. Then `init analysis "<question>" --team <KEY>`, read the paths out of the JSON, and create the Linear Project with `post project`, sending each emitted payload per [references/linear.md](references/linear.md).
+1. **Open** — restate the request. If it is genuinely underspecified, ask 1–2 scoping questions; otherwise proceed. Then `init analysis "<question>" --team <KEY>`, read the paths out of the JSON, and create the Linear Project with `post project` (no `--branch` for an analysis; the run is read-only, and the description records that in place of a branch), sending each emitted payload per [references/linear.md](references/linear.md).
 2. **Propose (the gate)** — write `brief.md` to the `brief` path from `init`, then present its seat list (each as *role / model tier / what it investigates*) and dispatch plan for approval; **wait for the user's go** before any expert runs. State the cost shape plainly: verification roughly doubles the dispatch (one verifier per seat), so present it as a cost choice the user opts into — not a silent default. Post it with `post document brief` and run the emitted `then`.
 3. **Dispatch** — run every seat of a round concurrently, then check what came back.
    1. One subagent call (the `Agent`/`Task` tool) per seat, all **in a single message** — that is what makes them parallel.
@@ -90,13 +89,13 @@ Every command in this skill is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/or
 6. **Re-ground** — report back: outcome first, attributed by seat, with links into the trail and into Linear.
 7. **Close** — `post close --slug <slug> --summary "<summary>"`, then name the Project URL and where the run directory is.
 
-Record `ledger <n> complete` at the end of each step. The analysis ledger has six steps, not seven: `1` open, `2` propose, `3` dispatch, `4` verify, `5` synthesize, `6` close. Re-ground and Close both record under `ledger 6 complete`, written once, after the close post lands.
+Record `ledger <n> complete --slug <slug>` at the end of each step. The analysis ledger has six steps, not seven: `1` open, `2` propose, `3` dispatch, `4` verify, `5` synthesize, `6` close. Re-ground and Close both record under `ledger 6 complete`, written once, after the close post lands.
 
 ## Build engagement
 
 | Step | Conductor | Dispatches | Linear |
 |---|---|---|---|
-| 0 Intake | Reads goal and init docs. Asks one round of clarifying questions, including checkpoint-or-auto and the target repo. Confirms branch and boundaries. Runs `init build`, `preflight`, creates branch `orko/<slug>`. | none | Project created; description carries goal, boundaries, repo, branch, run directory, slug |
+| 0 Intake | Reads goal and init docs. Asks one round of clarifying questions, including checkpoint-or-auto and the target repo. Confirms branch and boundaries. Runs `init build`, creates branch `orko/<slug>`, runs `preflight`. | none | Project created; description carries goal, boundaries, repo, branch, run directory, slug |
 | 1 Spec | Writes the spec to the run dir. Runs `validate spec`. | none | Document "Spec" created |
 | 2 Spec review | Dispatches reviewers. Checks delivery. Decides per finding, edits the spec, re-validates. | 2 to 4 reviewer seats at `opus` | One issue per finding; document "Spec" updated |
 | 3 Plan | Dispatches one plan-writer that drafts the plan from the spec. Edits the draft. Runs `validate plan`. | one plan-writer at `opus` | Document "Plan" created |
