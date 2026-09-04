@@ -617,7 +617,7 @@ def cmd_linear(args: argparse.Namespace) -> int:
         print(f"orko: no run named {args.slug!r}", file=sys.stderr)
         return 2
     if args.action == "set":
-        if CONTROL_RE.search(args.id) or " " in args.id:
+        if CONTROL_RE.search(args.id) or args.id.split() != [args.id]:
             print("orko: a Linear ID cannot contain whitespace", file=sys.stderr)
             return 2
         with ledger.open("a", encoding="utf-8") as handle:

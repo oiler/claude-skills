@@ -732,6 +732,13 @@ class TestLinearIds:
             orko.main(["linear", "set", "wiki", "x", "--slug", "demo-topic",
                        "--root", str(tmp_path)])
         assert raised.value.code == 2
+        assert "invalid choice: 'wiki'" in capsys.readouterr().err
+
+    def test_set_rejects_an_id_containing_unicode_whitespace(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        assert orko.main(["linear", "set", "project", "proj\u00a0123",
+                          "--slug", "demo-topic", "--root", str(tmp_path)]) == 2
+        assert "whitespace" in capsys.readouterr().err
 
     def test_status_reports_the_ids(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
