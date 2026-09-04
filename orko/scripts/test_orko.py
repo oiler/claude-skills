@@ -828,6 +828,13 @@ class TestPostProject:
         assert rc == 2
         assert "branch" in out.err
 
+    def test_refuses_without_boundaries(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        rc, out = self._post(tmp_path, capsys, "--goal", "Ship it",
+                             "--branch", "orko/demo-topic")
+        assert rc == 2
+        assert "boundaries" in out.err
+
     def test_updates_in_place_once_a_project_id_is_recorded(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
         orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
@@ -920,6 +927,15 @@ class TestPostClose:
         assert post["args"]["links"] == [{"url": "https://github.com/x/y/pull/1",
                                           "title": "Pull request"}]
         assert "Two tasks shipped." in post["args"]["description"]
+
+    def test_close_refuses_before_the_project_exists(self, tmp_path, capsys):
+        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
+        capsys.readouterr()
+        rc = orko.main(["post", "close", "--slug", "demo-topic",
+                        "--root", str(tmp_path), "--summary", "x"])
+        assert rc == 2
+        assert "project" in capsys.readouterr().err
 
     def test_refuses_without_summary(self, tmp_path, capsys):
         orko.main(["init", "build", "Demo Topic", "--team", "JRF",
