@@ -640,7 +640,7 @@ MCP_PARAMS = {
         "team", "project", "title", "description", "state", "labels", "links",
     },
     "mcp__linear__save_issue_label": {
-        "team", "name", "color", "description",
+        "id", "name", "color", "description", "isGroup", "parent", "teamId",
     },
 }
 
@@ -1030,8 +1030,7 @@ class TestPostFinding:
         posts = json.loads(out.out)["posts"]
         assert [p["tool"] for p in posts] == ["mcp__linear__save_issue_label",
                                               "mcp__linear__save_issue"]
-        assert posts[0]["args"] == {"team": "JRF", "name": "blocked",
-                                    "color": "#eb5757"}
+        assert posts[0]["args"] == {"name": "blocked", "color": "#eb5757"}
         assert posts[0]["then"] == "linear set blocked_label <returned id> --slug demo-topic"
 
     def test_description_starts_with_the_seat_line(self, tmp_path, capsys, monkeypatch):
@@ -1117,7 +1116,7 @@ def _finding_posts(run: dict, seat: str, outcome: str, title: str,
         if not run["linear"].get("blocked_label"):
             posts.append({
                 "tool": "mcp__linear__save_issue_label",
-                "args": {"team": run["team"], **BLOCKED_LABEL},
+                "args": dict(BLOCKED_LABEL),
                 "then": f"linear set blocked_label <returned id> --slug {run['slug']}",
             })
     issue_args: dict = {
