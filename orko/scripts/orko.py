@@ -535,43 +535,103 @@ def references_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "references"
 
 
-def cmd_prompt(args: argparse.Namespace) -> int:
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
-        return 2
-    if not (_run_dir_root(root) / args.slug / "progress.md").exists():
-        print(f"orko: no run named {args.slug!r}", file=sys.stderr)
-        return 2
+PROMPT_SOURCES = {
+    "spec-review": "spec-reviewer.md",
+    "plan-review": "plan-reviewer.md",
+    "plan-write": "plan-writer.md",
+    "seat": "seat-prompt.md",
+    "verifier": "verifier-prompt.md",
+}
+REVIEW_KINDS = ("spec-review", "plan-review")
+SEAT_KINDS = ("seat", "verifier")
+LENS_ROW_RE = re.compile(r"^\|\s*([a-z][a-z0-9-]*)\s*\|\s*(.+?)\s*\|\s*$")
 
-    run = _describe_run(root, args.slug)
-    if run is None:
-        print(f"orko: unreadable ledger header for run {args.slug!r}",
-              file=sys.stderr)
+
+def _lenses(text: str) -> dict[str, str]:
+    """Rows of the `## Lenses` table: name -> question. The table lives in the
+    charter so the lens list is prose the conductor can read, and parsing it
+    here keeps the script the only thing that assembles a dispatch."""
+    lenses: dict[str, str] = {}
+    in_table = False
+    for line in text.splitlines():
+        if line.strip() == "## Lenses":
+            in_table = True
+            continue
+        if not in_table:
+            continue
+        match = LENS_ROW_RE.match(line)
+        if not match or match.group(1) == "lens":
+            continue
+        if set(match.group(2)) <= {"-", " "}:
+            continue
+        lenses[match.group(1)] = match.group(2)
+    return lenses
+
+
+def _strip_lenses(text: str) -> str:
+    """The dispatched prompt carries one lens, not the menu."""
+    head, _, _ = text.partition("\n## Lenses")
+    return head.rstrip() + "\n"
+
+
+def cmd_prompt(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
         return 2
-    source = references_dir() / f"{args.kind}-reviewer.md"
+    _, run = loaded
+    source = references_dir() / PROMPT_SOURCES[args.kind]
     try:
         text = source.read_text(encoding="utf-8")
     except OSError as error:
         print(f"orko: cannot read {source}: {error}", file=sys.stderr)
         return 2
 
-    # {{ROOT}} anchors the reviewer's git commands with `git -C`. A subagent
-    # inherits the session's working directory, not the run's, and while Read
-    # and Edit are safe on absolute paths, git subcommands are cwd-bound.
-    text = (text
-            .replace("{{ARTIFACT_PATH}}", run[args.kind])
-            .replace("{{SPEC_PATH}}", run["spec"])
-            .replace("{{RUN_DIR}}", run["run_dir"])
-            .replace("{{ROOT}}", run["root"])
-            .replace("{{SLUG}}", args.slug))
+    findings_dir = Path(run["findings_dir"])
+    subs = {
+        "{{SPEC_PATH}}": run["spec"],
+        "{{PLAN_PATH}}": run["plan"],
+        "{{RUN_DIR}}": run["run_dir"],
+        "{{ROOT}}": run["root"],
+        "{{SLUG}}": run["slug"],
+    }
 
+    if args.kind in REVIEW_KINDS:
+        if not args.lens:
+            print(f"orko: {args.kind} needs --lens", file=sys.stderr)
+            return 2
+        lenses = _lenses(text)
+        if args.lens not in lenses:
+            print(f"orko: unknown lens {args.lens!r}; valid: {', '.join(lenses)}",
+                  file=sys.stderr)
+            return 2
+        subs["{{ARTIFACT_PATH}}"] = run["spec" if args.kind == "spec-review" else "plan"]
+        subs["{{LENS_NAME}}"] = args.lens
+        subs["{{LENS_QUESTION}}"] = lenses[args.lens]
+        subs["{{FINDINGS_PATH}}"] = str(findings_dir / f"{args.lens}.md")
+        text = _strip_lenses(text)
+    elif args.kind in SEAT_KINDS:
+        if not (args.seat and args.question and args.context_file):
+            print(f"orko: {args.kind} needs --seat, --question, and --context-file",
+                  file=sys.stderr)
+            return 2
+        try:
+            context = Path(args.context_file).read_text(encoding="utf-8")
+        except OSError as error:
+            print(f"orko: cannot read {args.context_file}: {error}", file=sys.stderr)
+            return 2
+        subs["{{SEAT}}"] = args.seat
+        subs["{{QUESTION}}"] = args.question
+        subs["{{CONTEXT}}"] = context.rstrip()
+        subs["{{FINDINGS_PATH}}"] = str(findings_dir / f"{args.seat}.md")
+        subs["{{VERDICT_PATH}}"] = str(findings_dir / f"{args.seat}.verdict.md")
+
+    for token, value in subs.items():
+        text = text.replace(token, value)
     leftover = re.search(r"\{\{[A-Z_]+\}\}", text)
     if leftover:
         print(f"orko: unsubstituted token {leftover.group(0)} in {source}",
               file=sys.stderr)
         return 2
-
     sys.stdout.write(text)
     return 0
 
@@ -841,9 +901,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate.add_argument("path")
     p_validate.set_defaults(func=cmd_validate)
 
-    p_prompt = sub.add_parser("prompt", help="emit a reviewer dispatch prompt")
-    p_prompt.add_argument("kind", choices=["spec", "plan"])
+    p_prompt = sub.add_parser("prompt", help="emit a dispatch prompt")
+    p_prompt.add_argument("kind", choices=sorted(PROMPT_SOURCES))
     p_prompt.add_argument("slug")
+    p_prompt.add_argument("--lens")
+    p_prompt.add_argument("--seat")
+    p_prompt.add_argument("--question")
+    p_prompt.add_argument("--context-file")
     p_prompt.add_argument("--root")
     p_prompt.set_defaults(func=cmd_prompt)
 

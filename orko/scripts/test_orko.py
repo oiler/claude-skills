@@ -606,73 +606,107 @@ class TestValidatePlan:
 
 
 class TestPrompt:
-    def _init(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-07-28"])
+    def _init(self, tmp_path, capsys, mode="build"):
+        orko.main(["init", mode, "Demo Topic", "--team", "JRF",
+                   "--root", str(tmp_path), "--date", "2026-09-04"])
         capsys.readouterr()
 
-    @pytest.mark.xfail(reason="rewritten in Task 6", strict=True)
-    def test_spec_prompt_substitutes_every_token(self, tmp_path, capsys):
+    def test_spec_review_substitutes_every_token_including_the_lens(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
-        assert orko.main(["prompt", "spec", "demo-topic",
+        assert orko.main(["prompt", "spec-review", "demo-topic", "--lens", "security",
                           "--root", str(tmp_path)]) == 0
         out = capsys.readouterr().out
         assert "{{" not in out
         assert str(tmp_path / ".orko/demo-topic/spec.md") in out
-        assert str(tmp_path / ".orko/demo-topic") in out
+        assert str(tmp_path / ".orko/demo-topic/findings/security.md") in out
+        assert "Your lens is **security**" in out
+        assert "trust boundary" in out
+        assert "## Lenses" not in out
 
-    @pytest.mark.xfail(reason="rewritten in Task 6", strict=True)
-    def test_plan_prompt_carries_the_spec_path_as_its_contract(self, tmp_path, capsys):
+    def test_plan_review_carries_the_spec_path(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
-        orko.main(["prompt", "plan", "demo-topic", "--root", str(tmp_path)])
+        orko.main(["prompt", "plan-review", "demo-topic", "--lens", "coverage",
+                   "--root", str(tmp_path)])
         out = capsys.readouterr().out
         assert str(tmp_path / ".orko/demo-topic/plan.md") in out
         assert str(tmp_path / ".orko/demo-topic/spec.md") in out
+        assert "{{" not in out
 
-    @pytest.mark.xfail(reason="rewritten in Task 6", strict=True)
-    def test_output_is_the_reference_file_verbatim_with_substitutions_only(
-        self, tmp_path, capsys
-    ):
+    def test_unknown_lens_is_a_usage_error_naming_the_valid_ones(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
-        orko.main(["prompt", "spec", "demo-topic", "--root", str(tmp_path)])
-        out = capsys.readouterr().out
-        paths = orko.compute_paths(tmp_path, "demo-topic", "2026-07-28")
-        expected = (orko.references_dir() / "spec-reviewer.md").read_text(
-            encoding="utf-8"
-        )
-        expected = (expected
-                    .replace("{{ARTIFACT_PATH}}", paths["spec"])
-                    .replace("{{SPEC_PATH}}", paths["spec"])
-                    .replace("{{RUN_DIR}}", paths["run_dir"])
-                    .replace("{{ROOT}}", paths["root"])
-                    .replace("{{SLUG}}", "demo-topic"))
-        assert out == expected
+        rc = orko.main(["prompt", "spec-review", "demo-topic", "--lens", "vibes",
+                        "--root", str(tmp_path)])
+        assert rc == 2
+        err = capsys.readouterr().err
+        for lens in ("requirements", "architecture", "testability", "security"):
+            assert lens in err
 
-    @pytest.mark.xfail(reason="rewritten in Task 6", strict=True)
-    @pytest.mark.parametrize("kind", ["spec", "plan"])
-    def test_prompt_anchors_the_reviewer_git_commands_to_the_run_root(
-        self, tmp_path, capsys, kind
-    ):
+    def test_review_kinds_require_a_lens(self, tmp_path, capsys):
         self._init(tmp_path, capsys)
-        assert orko.main(["prompt", kind, "demo-topic",
+        rc = orko.main(["prompt", "plan-review", "demo-topic", "--root", str(tmp_path)])
+        assert rc == 2
+
+    def test_plan_write_names_both_artifact_paths(self, tmp_path, capsys):
+        self._init(tmp_path, capsys)
+        assert orko.main(["prompt", "plan-write", "demo-topic",
                           "--root", str(tmp_path)]) == 0
         out = capsys.readouterr().out
-        assert f"git -C {tmp_path} add " in out
-        assert f"git -C {tmp_path} commit -m " in out
-        assert "\n    git add " not in out
+        assert str(tmp_path / ".orko/demo-topic/spec.md") in out
+        assert str(tmp_path / ".orko/demo-topic/plan.md") in out
+        assert "{{" not in out
 
-    def test_unknown_slug_is_an_error(self, tmp_path, capsys):
-        assert orko.main(["prompt", "spec", "nope", "--root", str(tmp_path)]) == 2
-        assert "no run" in capsys.readouterr().err
+    def test_seat_prompt_inlines_the_context_file(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+        ctx.write_text("Look at src/hot.py\n")
+        assert orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
+                          "--question", "Where is the N+1?",
+                          "--context-file", str(ctx), "--root", str(tmp_path)]) == 0
+        out = capsys.readouterr().out
+        assert "You are the perf on an orko engagement" in out
+        assert "Where is the N+1?" in out
+        assert "Look at src/hot.py" in out
+        assert str(tmp_path / ".orko/demo-topic/findings/perf.md") in out
+        assert "{{" not in out
 
-    @pytest.mark.xfail(reason="rewritten in Task 6", strict=True)
-    def test_both_reference_files_ship_and_carry_the_scope_carve_out(self):
+    def test_verifier_prompt_names_findings_and_verdict_paths(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+        ctx.write_text("src/hot.py\n")
+        orko.main(["prompt", "verifier", "demo-topic", "--seat", "perf",
+                   "--question", "Where is the N+1?",
+                   "--context-file", str(ctx), "--root", str(tmp_path)])
+        out = capsys.readouterr().out
+        assert str(tmp_path / ".orko/demo-topic/findings/perf.md") in out
+        assert str(tmp_path / ".orko/demo-topic/findings/perf.verdict.md") in out
+        assert "{{" not in out
+
+    def test_seat_kinds_require_seat_question_and_context(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        rc = orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
+                        "--root", str(tmp_path)])
+        assert rc == 2
+
+    def test_missing_context_file_is_an_io_error(self, tmp_path, capsys):
+        self._init(tmp_path, capsys, mode="analysis")
+        rc = orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
+                        "--question", "q", "--context-file", str(tmp_path / "nope.md"),
+                        "--root", str(tmp_path)])
+        assert rc == 2
+
+    def test_no_charter_mentions_git_or_write_authority(self):
         for name in ("spec-reviewer.md", "plan-reviewer.md"):
             text = (orko.references_dir() / name).read_text(encoding="utf-8")
-            assert "{{ARTIFACT_PATH}}" in text
-            assert "{{RUN_DIR}}" in text
-            assert "{{ROOT}}" in text
-            assert "escalations.md" in text
+            assert "git -C" not in text
+            assert "write authority on the spec" not in text
+            assert "write authority on the plan" not in text
+            assert "Report only" in text
+
+    def test_lens_table_parses(self):
+        text = (orko.references_dir() / "spec-reviewer.md").read_text(encoding="utf-8")
+        lenses = orko._lenses(text)
+        assert set(lenses) == {"requirements", "architecture", "testability", "security"}
+        assert lenses["security"].endswith("handled?")
 
 
 class TestEscalations:
