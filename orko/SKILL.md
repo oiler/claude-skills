@@ -69,7 +69,7 @@ Every command in this skill is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/or
 
 ## Analysis engagement
 
-1. **Open** — restate the request. If it is genuinely underspecified, ask 1–2 scoping questions; otherwise proceed. Then `init analysis "<question>" --team <KEY>`, read the paths out of the JSON, and create the Linear Project with `post project` (no `--branch` for an analysis; the run is read-only, and the description records that in place of a branch), sending each emitted payload per [references/linear.md](references/linear.md).
+1. **Open** — restate the request. If it is genuinely underspecified, ask 1–2 scoping questions; otherwise proceed. Then `init analysis "<question>" --team <KEY>`, read the paths out of the JSON, and create the Linear Project with `post project --slug <slug> --goal "<question>" --boundaries "<what the seats may read and what is out of scope>"` (no `--branch` for an analysis; the run is read-only, and the description records that in place of a branch), sending each emitted payload per [references/linear.md](references/linear.md).
 2. **Propose (the gate)** — write `brief.md` to the `brief` path from `init`, then present its seat list (each as *role / model tier / what it investigates*) and dispatch plan for approval; **wait for the user's go** before any expert runs. State the cost shape plainly: verification roughly doubles the dispatch (one verifier per seat), so present it as a cost choice the user opts into — not a silent default. Post it with `post document brief` and run the emitted `then`.
 3. **Dispatch** — run every seat of a round concurrently, then check what came back.
    1. One subagent call (the `Agent`/`Task` tool) per seat, all **in a single message** — that is what makes them parallel.

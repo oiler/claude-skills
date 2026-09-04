@@ -370,7 +370,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         paths = compute_paths(root, slug, existing["date"])
     else:
         ledger.parent.mkdir(parents=True, exist_ok=True)
-        for key in ("findings_dir", "context_dir"):
+        for key in ("findings_dir", "context_dir", "unposted_dir"):
             Path(paths[key]).mkdir(parents=True, exist_ok=True)
         ledger.write_text(
             _header(args.mode, args.team, args.topic, slug, date) + "\n",
@@ -384,6 +384,10 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(json.dumps(payload, indent=2))
     return 0
 
+
+# A `--commit` value is a SHA or a SHA range. Anything with whitespace in it
+# would write a ledger line LEDGER_LINE_RE cannot parse, silently losing the step.
+COMMIT_RE = re.compile(r"[0-9a-f]{7,40}(\.\.[0-9a-f]{7,40})?")
 
 LEDGER_LINE_RE = re.compile(
     r"^step (?P<step>\d+) (?P<status>dispatched|complete|failed|escalated)"
@@ -503,6 +507,9 @@ def cmd_ledger(args: argparse.Namespace) -> int:
         valid = ", ".join(str(step) for step in sorted(MODES[header["mode"]]))
         print(f"orko: step {args.step} is not a step of a {header['mode']} run "
               f"(valid: {valid})", file=sys.stderr)
+        return 2
+    if args.commit and not COMMIT_RE.fullmatch(args.commit):
+        print("orko: --commit must be a short or full SHA", file=sys.stderr)
         return 2
     line = f"step {args.step} {args.status}"
     if args.commit:
@@ -898,7 +905,9 @@ def cmd_post_close(args: argparse.Namespace) -> int:
 
 # Decision outcomes and the JRF team state each maps to. The team has no
 # "Blocked" state, so an out-of-boundaries finding is a Todo carrying the
-# `blocked` label, and the run stops on it (see cmd_post_escalation).
+# `blocked` label, and the run stops on it (see cmd_post_escalation). The label
+# payload carries no team, so `blocked` is created once per workspace and
+# save_issue resolves it by name.
 OUTCOMES: dict[str, str] = {
     "handled": "Done",
     "deferred": "Backlog",
@@ -917,7 +926,7 @@ def _finding_posts(run: dict, seat: str, outcome: str, title: str,
         if not run["linear"].get("blocked_label"):
             posts.append({
                 "tool": "mcp__linear__save_issue_label",
-                "args": {"team": run["team"], **BLOCKED_LABEL},
+                "args": dict(BLOCKED_LABEL),
                 "then": f"linear set blocked_label <returned id> --slug {run['slug']}",
             })
     issue_args: dict = {

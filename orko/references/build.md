@@ -138,7 +138,7 @@ Then decide every finding, one at a time. Four outcomes: handled now, deferred, 
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py post finding --slug <slug> --seat <lens> --outcome handled --title "<title>"
 ```
 
-The body comes from stdin — the finding's evidence and your reasoning, piped in. An empty body exits `2`. Call the tool with the emitted `args`; a `blocked` finding emits a label payload first, and its `then` must be run before the issue payload.
+The body comes from stdin — the finding's evidence and your reasoning, piped in. An empty body exits `2`. Call the tool with the emitted `args`; a `blocked` finding emits a label payload first, and its `then` must be run before the issue payload. Check with `list_issue_labels` whether `blocked` already exists before sending that create — see the Label row and the posting protocol in [linear.md](linear.md).
 
 For a finding that falls outside the boundaries, use `post escalation` and not `post finding --outcome blocked`. The two emit the same issue, but only `post escalation` appends to `escalations.md`, and `escalations.md` is what stops the run and what `preflight` reads on a resume. A blocked issue with no gate file is a decision nothing enforces.
 

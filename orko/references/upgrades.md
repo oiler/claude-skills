@@ -31,4 +31,9 @@ Two constraints pin this as an upgrade, not the everyday baseline. The Workflow 
 The build engagement designed here on 2026-09-04 shipped as orko v1.0.0. The lifecycle lives in `build.md`, the Linear contract in `linear.md`, and the script surface in `scripts/orko.py --help`. Two design points worth keeping in view:
 
 - **Linear is the record, git is for code.** Artifacts never commit. Every decision kicked up to the conductor is one issue with one of four outcomes; reviewer findings are decisions under that rule. Seats never write to Linear; the conductor posts, attributed by seat, from payloads the script emits.
+
+## Not yet built
+
+This is a design note from the 2026-09-04 session, not a shipped mechanism — nothing in `SKILL.md`, `build.md`, or the script implements it, so do not look for it during a run.
+
 - **The judge is tuned per task.** Analysis gets a prose verifier. Code gets a judge that runs the tests: when the conductor dispatches competing implementations for one task, it keeps the candidate whose patch passes the suite and records the other as rejected.

@@ -9,7 +9,7 @@ Linear is the record. Git holds code and nothing else, and the run directory is 
 | Project | One per engagement. Its name is the slug. It lives on the team `init --team` named, and the key is uppercase letters and digits, for example `JRF`. The description is rebuilt from the ledger header on every `post project` call: goal, mode, slug, repository, branch, run directory, boundaries. |
 | Documents | Attached to the Project. A build has `Spec` and `Plan`; an analysis has `Brief` and `Synthesis`. `post document <kind>` sends the file's contents as `content`, and on an update it sends the recorded document id so the document is revised rather than duplicated. |
 | Issues | One per decision kicked up to the conductor. Never one per seat, never one per task. The first line of the description is `Seat: <name>`. |
-| Label | `blocked`, created once per team. `post finding --outcome blocked` and `post escalation` emit the label payload ahead of the issue payload when the ledger does not yet record the label id. |
+| Label | `blocked`, created once per workspace — the payload carries no team, so `save_issue` resolves it by name from any team. `post finding --outcome blocked` and `post escalation` emit the label payload ahead of the issue payload when the ledger does not yet record the label id. The ledger is per run, so before sending that payload call `mcp__linear__list_issue_labels` with `name: "blocked"`; if a label named `blocked` already exists, skip the create and run the payload's `then` with the existing label's id. |
 
 ## Posting protocol
 
@@ -17,6 +17,8 @@ Every `post` subcommand prints one object: `{"posts": [...]}`. Work the list in 
 
 1. Call the tool named in `tool` with exactly the object in `args`. Never add a key, never drop one, never rename one. You could add to a payload and nothing would catch it, which is precisely why doing so is an overt violation of a written contract rather than a judgment call you get to make in the moment.
 2. If `then` is non-null, run it as an `orko.py` command with `<returned id>` replaced by the id the tool just returned. That is what records the Project, document, and label ids in the ledger, and every later `post` fails without them.
+
+One exception to step 1, and only one: a `mcp__linear__save_issue_label` payload is preceded by a `mcp__linear__list_issue_labels` call with `name: "blocked"`. If the label exists, do not send the create — run the payload's `then` with the existing label's id instead. The label is a workspace-level object that outlives any single run, and the ledger that guards the create is per run, so a second engagement would otherwise re-create a label that is already there.
 
 A payload whose `then` you skip is worse than a failed call: the next `post document` creates a second document instead of updating the first, and nothing reports the divergence.
 
