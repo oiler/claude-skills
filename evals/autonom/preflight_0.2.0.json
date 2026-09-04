@@ -1,0 +1,83 @@
+{
+  "skill": "autonom",
+  "repo": "/Users/jrf1039/files/repo/claude-skills",
+  "profile": "claude-code",
+  "change_class": "trivial",
+  "candidate_version": "0.2.0",
+  "skill_content_hash": "61dc75a88c2822b167cac1fa2cf524ca6942b44866205f3b93be51062fd398cc",
+  "repo_commit": "70112c712b2e77976336297a1d592eacd671da63",
+  "preflight_version": "1.1.0",
+  "timestamp": "2026-09-04T20:11:54+00:00",
+  "argv": [
+    "autonom",
+    "--change-class",
+    "trivial",
+    "--candidate-version",
+    "0.2.0",
+    "--out",
+    "/Users/jrf1039/files/repo/claude-skills/evals/autonom/preflight_0.2.0.json"
+  ],
+  "checks": [
+    {
+      "id": "structure",
+      "status": "pass",
+      "detail": "SKILL.md present, name matches, kebab-case"
+    },
+    {
+      "id": "profile",
+      "status": "pass",
+      "detail": "combined description budget 214/1,536"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "invocation: live-engagement report smoke-2026-08-05.md"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "clean-room: clean-room report smoke-2026-08-05.md"
+    },
+    {
+      "id": "binding",
+      "status": "advisory",
+      "detail": "stale: report smoke-2026-08-05.md hash 71de06ea56e0 != current skill hash 61dc75a88c28"
+    },
+    {
+      "id": "binding",
+      "status": "advisory",
+      "detail": "stale: report smoke-2026-08-05.md hash 71de06ea56e0 != current skill hash 61dc75a88c28"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "autonom/ is committed"
+    },
+    {
+      "id": "script-tests",
+      "status": "pass",
+      "detail": "no scripts/ \u2014 nothing to run"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "changelog entry for v0.2.0 present"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "tag autonom-v0.2.0 is free"
+    },
+    {
+      "id": "drift",
+      "status": "advisory",
+      "detail": "upstream unchanged since 690f15c"
+    },
+    {
+      "id": "library-status",
+      "status": "advisory",
+      "detail": "docs/library-status.md drifted \u2014 regenerate (PYTHONPATH=\"$HOME/files/projects/001-claude-skills-creator/tools/skill-evals\" python3 -m scripts.library_status)"
+    }
+  ],
+  "overall": "pass"
+}
