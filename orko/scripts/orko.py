@@ -20,6 +20,7 @@ Usage:
     uv run orko.py prompt plan-write <slug> [--root DIR]
     uv run orko.py prompt {seat|verifier} <slug> --seat NAME --question TEXT --context-file PATH [--root DIR]
     uv run orko.py escalations <slug> [--root DIR]
+    uv run orko.py preflight [--slug SLUG | --mode {analysis|build}] [--root DIR]
     uv run orko.py linear set <key> <id> --slug SLUG | linear get --slug SLUG
     uv run orko.py post project --slug SLUG --goal TEXT --boundaries TEXT [--branch NAME]
     uv run orko.py post document {spec|plan|brief|synthesis} --slug SLUG
@@ -35,6 +36,7 @@ import argparse
 import datetime as _dt
 import json
 import re
+import shutil
 import subprocess
 import sys
 import unicodedata
@@ -680,6 +682,78 @@ def cmd_escalations(args: argparse.Namespace) -> int:
     return 1
 
 
+DEFAULT_BRANCHES = {"master", "main"}
+
+
+def _current_branch(root: Path) -> str | None:
+    # symbolic-ref, not rev-parse --abbrev-ref: the latter fails on a branch
+    # with no commits yet, and a fresh `git init -b master` is exactly the
+    # repo a first build engagement is most likely to start in.
+    result = subprocess.run(
+        ["git", "-C", str(root), "symbolic-ref", "--short", "HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _is_git_repo(root: Path) -> bool:
+    return find_repo_root(root) is not None
+
+
+def cmd_preflight(args: argparse.Namespace) -> int:
+    """Check in code what the prose used to ask the conductor to check.
+
+    Four of autonom's last five review findings were SKILL.md prescribing an
+    action nothing verified. Each condition here is one of those.
+    """
+    root = Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
+    if root is None or not _is_git_repo(root):
+        print(f"orko: not inside a git repository: {root or Path.cwd()}",
+              file=sys.stderr)
+        return 2
+
+    mode = args.mode
+    run = None
+    if args.slug:
+        run = _describe_run(root, args.slug)
+        if run is None:
+            print(f"orko: no run named {args.slug!r}", file=sys.stderr)
+            return 2
+        mode = run["mode"]
+    if mode is None:
+        print("orko: preflight needs --mode or --slug", file=sys.stderr)
+        return 2
+
+    findings: list[str] = []
+    if shutil.which("uv") is None:
+        findings.append("uv-missing: `uv` is not on PATH; every script call needs it")
+    branch = _current_branch(root)
+    if mode == "build" and branch in DEFAULT_BRANCHES:
+        findings.append(f"on-default-branch: HEAD is {branch}; a build runs on "
+                        "orko/<slug>, never on a default branch")
+    gitignore = root / ".gitignore"
+    ignored = gitignore.exists() and any(
+        line.strip() == ".orko/" for line in gitignore.read_text(encoding="utf-8").splitlines()
+    )
+    if not ignored:
+        findings.append("run-dir-not-ignored: .gitignore lacks `.orko/`; init adds it")
+    if run is not None:
+        past_intake = run["mode"] == "build" and run["next_step"] != 0
+        past_open = run["mode"] == "analysis" and run["next_step"] != 1
+        if (past_intake or past_open) and not run["linear"].get("project"):
+            findings.append("project-id-missing: the run is past its first step and "
+                            "no Linear project id is recorded; post project and "
+                            "`linear set project`")
+        gate = Path(run["escalations"])
+        if gate.exists() and gate.read_text(encoding="utf-8").strip():
+            findings.append("blocked-escalation: escalations.md is non-empty; only "
+                            "oiler may empty it, and the run stays stopped until then")
+
+    for finding in findings:
+        print(finding)
+    return 1 if findings else 0
+
+
 def cmd_linear(args: argparse.Namespace) -> int:
     root = _resolved_root(args)
     if root is None:
@@ -929,6 +1003,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_escalations.add_argument("slug")
     p_escalations.add_argument("--root")
     p_escalations.set_defaults(func=cmd_escalations)
+
+    p_pre = sub.add_parser("preflight", help="check repo, branch, tooling, and record state")
+    p_pre.add_argument("--slug")
+    p_pre.add_argument("--mode", choices=sorted(MODES))
+    p_pre.add_argument("--root")
+    p_pre.set_defaults(func=cmd_preflight)
 
     p_post = sub.add_parser("post", help="emit a Linear payload for the conductor to send")
     post_sub = p_post.add_subparsers(dest="entity", required=True)

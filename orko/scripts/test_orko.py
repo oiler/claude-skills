@@ -1,6 +1,7 @@
 """Tests for orko.py — the deterministic spine of the orko skill."""
 import io
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -1095,3 +1096,73 @@ class TestPostEscalation:
         assert "Billing is outside boundaries" in gate
         assert "Scope grows to billing." in gate
         assert orko.main(["escalations", "demo-topic", "--root", str(tmp_path)]) == 1
+
+
+class TestPreflight:
+    def _repo(self, tmp_path, branch="feat/x"):
+        subprocess.run(["git", "init", "-q", "-b", branch, str(tmp_path)], check=True)
+        return tmp_path
+
+    def test_clean_repo_on_feature_branch_passes(self, tmp_path, capsys, monkeypatch):
+        root = self._repo(tmp_path)
+        (root / ".gitignore").write_text(".orko/\n")
+        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
+        assert orko.main(["preflight", "--root", str(root), "--mode", "build"]) == 0
+
+    def test_master_fails_for_build(self, tmp_path, capsys, monkeypatch):
+        root = self._repo(tmp_path, branch="master")
+        (root / ".gitignore").write_text(".orko/\n")
+        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
+        assert orko.main(["preflight", "--root", str(root), "--mode", "build"]) == 1
+        assert "on-default-branch" in capsys.readouterr().out
+
+    def test_master_is_fine_for_analysis(self, tmp_path, capsys, monkeypatch):
+        root = self._repo(tmp_path, branch="master")
+        (root / ".gitignore").write_text(".orko/\n")
+        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
+        assert orko.main(["preflight", "--root", str(root), "--mode", "analysis"]) == 0
+
+    def test_missing_uv_is_reported(self, tmp_path, capsys, monkeypatch):
+        root = self._repo(tmp_path)
+        (root / ".gitignore").write_text(".orko/\n")
+        monkeypatch.setattr(orko.shutil, "which", lambda name: None)
+        assert orko.main(["preflight", "--root", str(root), "--mode", "build"]) == 1
+        assert "uv-missing" in capsys.readouterr().out
+
+    def test_unignored_run_dir_is_reported(self, tmp_path, capsys, monkeypatch):
+        root = self._repo(tmp_path)
+        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
+        assert orko.main(["preflight", "--root", str(root), "--mode", "build"]) == 1
+        assert "run-dir-not-ignored" in capsys.readouterr().out
+
+    def test_run_past_intake_without_project_id_is_reported(self, tmp_path, capsys, monkeypatch):
+        root = self._repo(tmp_path)
+        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
+        orko.main(["init", "build", "Demo", "--team", "JRF", "--root", str(root),
+                   "--date", "2026-09-04"])
+        orko.main(["ledger", "0", "complete", "--slug", "demo", "--root", str(root)])
+        capsys.readouterr()
+        assert orko.main(["preflight", "--root", str(root), "--slug", "demo"]) == 1
+        assert "project-id-missing" in capsys.readouterr().out
+
+    def test_slug_supplies_the_mode(self, tmp_path, capsys, monkeypatch):
+        root = self._repo(tmp_path, branch="master")
+        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
+        orko.main(["init", "build", "Demo", "--team", "JRF", "--root", str(root),
+                   "--date", "2026-09-04"])
+        capsys.readouterr()
+        assert orko.main(["preflight", "--root", str(root), "--slug", "demo"]) == 1
+        assert "on-default-branch" in capsys.readouterr().out
+
+    def test_outstanding_escalation_is_reported(self, tmp_path, capsys, monkeypatch):
+        root = self._repo(tmp_path)
+        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
+        orko.main(["init", "build", "Demo", "--team", "JRF", "--root", str(root),
+                   "--date", "2026-09-04"])
+        (root / ".orko/demo/escalations.md").write_text("## Scope\n\nbody\n")
+        capsys.readouterr()
+        assert orko.main(["preflight", "--root", str(root), "--slug", "demo"]) == 1
+        assert "blocked-escalation" in capsys.readouterr().out
+
+    def test_not_a_repo_is_exit_two(self, tmp_path, capsys):
+        assert orko.main(["preflight", "--root", str(tmp_path), "--mode", "build"]) == 2
