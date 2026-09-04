@@ -1166,3 +1166,22 @@ class TestPreflight:
 
     def test_not_a_repo_is_exit_two(self, tmp_path, capsys):
         assert orko.main(["preflight", "--root", str(tmp_path), "--mode", "build"]) == 2
+
+
+class TestFixtures:
+    """The validators' required shapes derive from real artifacts, not an
+    imagined structure. A rule change that rejects either fixture fails here."""
+
+    def test_spec_fixture_passes(self):
+        text = (Path(orko.__file__).parent / "fixtures/spec.md").read_text(encoding="utf-8")
+        assert orko.validate_spec(text) == []
+
+    def test_plan_fixture_passes(self):
+        text = (Path(orko.__file__).parent / "fixtures/plan.md").read_text(encoding="utf-8")
+        assert orko.validate_plan(text) == []
+
+    def test_fixtures_carry_no_stale_run_paths(self):
+        for name in ("spec.md", "plan.md"):
+            text = (Path(orko.__file__).parent / f"fixtures/{name}").read_text(encoding="utf-8")
+            assert "docs/sessions/" not in orko.strip_code(text).replace(
+                "`docs/sessions/`", ""), name
