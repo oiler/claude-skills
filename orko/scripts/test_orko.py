@@ -15,6 +15,7 @@ import orko
 MCP_PARAMS = {
     "mcp__linear__save_project": {
         "id", "name", "addTeams", "description", "summary", "state", "links",
+        "patch",
     },
     "mcp__linear__save_document": {
         "id", "title", "project", "content",
@@ -971,7 +972,12 @@ class TestPostClose:
         assert post["args"]["state"] == "Completed"
         assert post["args"]["links"] == [{"url": "https://github.com/x/y/pull/1",
                                           "title": "Pull request"}]
-        assert "Two tasks shipped." in post["args"]["description"]
+        # Close appends; it must never send `description`, which save_project
+        # replaces wholesale and which carries the reconstruction block.
+        assert "description" not in post["args"]
+        assert post["args"]["patch"] == [
+            {"op": "append", "text": "\n\n**Closed.** Two tasks shipped.\n"}
+        ]
 
     def test_close_refuses_before_the_project_exists(self, tmp_path, capsys):
         orko.main(["init", "build", "Demo Topic", "--team", "JRF",

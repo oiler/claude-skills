@@ -2,7 +2,7 @@
 
 A build engagement runs from intake to close in one conductor session. You hold the goal and the boundaries, you author the spec, and you decide what happens to every finding that comes back. Seats report and never write. `orko.py` owns the paths, the ledger, the dispatch prompts, and the Linear payloads. Linear holds the record: every decision you make lands there as an issue, so a week later the run is readable without a checkout.
 
-Every script call in this file is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py <subcommand>`. If that substitution resolves to an empty string inside a Bash call, use `~/.claude/skills/orko/scripts/orko.py` instead, which is the machine-wide symlink to the same file. Never use shell command substitution anywhere in a run: the prefix matching behind `allowed-tools` cannot see through it, so a substituted command produces a permission prompt, and a permission prompt in the middle of a long dispatch is invisible. Where autonom wrote one command with a substituted SHA, write two — read the value, then pass it.
+Every script call in this file is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py <subcommand>`. If that substitution resolves to an empty string inside a Bash call, use `~/.claude/skills/orko/scripts/orko.py` instead, which is the machine-wide symlink to the same file. Never use shell command substitution anywhere in a run: the prefix matching behind `allowed-tools` cannot see through it, so a substituted command produces a permission prompt, and a permission prompt in the middle of a long dispatch is invisible. Where a command needs a value another command produces, run two commands: read the value, then pass it.
 
 ## Startup sequence
 
@@ -28,7 +28,7 @@ Ask, in a single message and nothing else:
 
 - Confirmation of the target repository you printed in step 1.
 - The boundaries: what this run may and may not touch.
-- **checkpoint** (stop after the plan review) or **auto** (continue straight into `superpowers:subagent-driven-development`)?
+- **checkpoint** (stop at step 5, after the plan review and before any implementation) or **auto** (continue straight into `superpowers:subagent-driven-development`)?
 
 Every other decision in a build is yours to make afterwards, inside those boundaries. Ask nothing else.
 
@@ -68,7 +68,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py status <slug>
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py escalations <slug>
 ```
 
-A `last_status` of `dispatched` means a round started and the ledger never recorded it finishing. That is what a compaction mid-dispatch looks like, and it is not proof the seats never delivered: list `findings_dir` first and read what is there. Re-dispatching a seat whose findings file already exists spends a second dispatch and produces a second copy of the same review. Run `escalations <slug>` before authoring anything regardless of where you are resuming — `escalated` is recorded alongside `complete`, so `next_step` still points forward past an unresolved scope conflict, and a resume that trusts `next_step` alone walks straight into building against it.
+A `last_status` of `dispatched` means a round started and the ledger never recorded it finishing. That is what a compaction mid-dispatch looks like, and it is not proof the seats never delivered: list `findings_dir` first and read what is there. `status <slug>` also prints `dispatched_base`, the SHA recorded on the most recent `dispatched` line for the resume step; it is both the anchor for deciding whether a round already delivered and the diff base you need if the resume step is 6. Re-dispatching a seat whose findings file already exists spends a second dispatch and produces a second copy of the same review. Run `escalations <slug>` before authoring anything regardless of where you are resuming — `escalated` is recorded alongside `complete`, so `next_step` still points forward past an unresolved scope conflict, and a resume that trusts `next_step` alone walks straight into building against it.
 
 ## Why two stock gates are skipped
 
@@ -165,8 +165,12 @@ The second `post document spec` updates the recorded document in place, because 
 The plan is drafted by a seat, not by you. It is long, mechanical against a fixed spec, and benefits from a reader who has not spent a step arguing with reviewers.
 
 ```bash
+git rev-parse HEAD
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 3 dispatched --slug <slug> --commit <base sha>
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt plan-write <slug>
 ```
+
+Read the SHA from `git rev-parse HEAD` and pass it to `ledger` as its own command, so the base survives a compaction mid-dispatch.
 
 Dispatch one `general-purpose` seat at `opus` with that stdout as the entire prompt. Check delivery: the plan must exist at the `plan` path from `init`. Then read the draft and edit it yourself — the plan is your artifact, and the seat's draft is a draft.
 
@@ -204,9 +208,16 @@ Then `ledger 5 complete`, `ledger 5 escalated`, and stop.
 
 ### 6 Code review
 
-Review the branch diff. The range is `master...HEAD`, or the branch's merge base when the repository's default branch is named something else — resolve it once with `git merge-base` and use the same range for every seat.
+Review the branch diff. The range is `git diff master...HEAD`: three dots, which diffs from the point the branch left `master` rather than against the current tip, so unrelated commits landed on `master` meanwhile do not appear as findings. When the repository's default branch is not named `master`, read its name from `git branch` and use that in place of `master`. Use the same range for every seat.
 
-Dispatch, in one message:
+Record the dispatch first:
+
+```bash
+git rev-parse HEAD
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 6 dispatched --slug <slug> --commit <base sha>
+```
+
+Then dispatch, in one message:
 
 - one `general-purpose` seat at `opus` whose job is to run `/code-review` over that range,
 - one `general-purpose` seat at `opus` whose job is to run `/security-review` over that range,
@@ -226,7 +237,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 6 complete --slug <slug>
 
 ### 7 Close
 
-If the boundaries or the branch changed during the run, re-run `post project` before closing. `save_project` replaces the description on update, and `post close` sends only the closing line — so a `post close` on a stale description is what the Project keeps.
+`post close` appends its closing line to the Project description and leaves the reconstruction block intact, so closing is safe on its own. Re-run `post project` first only when the goal, the boundaries, or the branch actually changed during the run — `post project` re-sends the whole description, and `save_project` replaces it on update, so that call is how a changed field gets corrected.
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py post project --slug <slug> --goal "<goal>" --boundaries "<boundaries>" --branch orko/<slug>
@@ -234,7 +245,9 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py post close --slug <slug> --summary "<
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 7 complete --slug <slug>
 ```
 
-Omit `--pr` when there is no pull request. Run `post close` once per run: `links` on a Linear project is append-only, so a second close carrying `--pr` leaves the Project with the same pull request linked twice.
+Omit `--pr` when there is no pull request. Run `post close` once per run: `links` on a Linear project is append-only, so a second close carrying `--pr` leaves the Project with the same pull request linked twice, and a second closing line appended under the first.
+
+Closing the Project does not close its issues. Everything decided `deferred` stays open in `Backlog` under a `Completed` Project, which is the point: the backlog outlives the engagement that produced it.
 
 Finish by printing the Project URL, the branch, and the count of issues by outcome.
 
@@ -287,7 +300,7 @@ Never treat `2` as a validation failure. `1` means the artifact is wrong; `2` me
 
 ## Ending
 
-**checkpoint mode** — stop after step 4 and print, in one message: the plan path, the Linear Project URL, the lenses that ran and any that were dropped, and the instruction to resume into implementation by invoking `superpowers:subagent-driven-development` with the plan path.
+**checkpoint mode** — stop at step 5, after the plan review and before any implementation, and print, in one message: the plan path, the Linear Project URL, the lenses that ran and any that were dropped, and the instruction to resume into implementation by invoking `superpowers:subagent-driven-development` with the plan path.
 
 **auto mode** — run through step 7 and print the Project URL, the branch, and the count of issues by outcome. SDD's own handoff to `superpowers:finishing-a-development-branch` still applies; do not duplicate it.
 

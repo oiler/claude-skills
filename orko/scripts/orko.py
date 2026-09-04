@@ -882,10 +882,13 @@ def cmd_post_close(args: argparse.Namespace) -> int:
     if not project:
         print("orko: no Linear project recorded for this run", file=sys.stderr)
         return 2
+    # `patch`, never `description`: save_project replaces the description
+    # wholesale, and the description is the reconstruction block a lost run
+    # directory is rebuilt from. Close adds a line; it does not overwrite.
     post_args: dict = {
         "id": project,
         "state": "Completed",
-        "description": f"**Closed.** {args.summary}\n",
+        "patch": [{"op": "append", "text": f"\n\n**Closed.** {args.summary}\n"}],
     }
     if args.pr:
         post_args["links"] = [{"url": args.pr, "title": "Pull request"}]

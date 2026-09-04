@@ -67,9 +67,11 @@ Then `post document synthesis --slug <slug>` and `post close --slug <slug> --sum
 
 A lost run directory costs nothing that matters. The Project description carries the goal, mode, slug, repository, branch, run directory, and boundaries; the documents carry the spec and plan, or the brief and synthesis; the issues carry every decision. `status <slug>` prints the recorded ids, and `get_project` and `get_document` fetch the content back.
 
-The one thing to keep true is the description. `post project` re-sends the whole description on every call, and `save_project` replaces it on update — so when the boundaries or the branch change during a run, re-run `post project` to refresh it. Do that before `post close`, which sends only its closing line: closing over a stale description freezes the stale version as the permanent record.
+The one thing to keep true is the description. `post project` re-sends the whole description on every call, and `save_project` replaces it on update — so when the goal, the boundaries, or the branch changes during a run, re-run `post project` to refresh it. That is the only reason to re-run it: `post close` appends its closing line rather than sending a description, so closing never overwrites the reconstruction block and needs no defensive `post project` ahead of it.
 
-Run `post close` once per run. `links` on a Linear project is append-only, so a second close carrying `--pr` links the same pull request twice.
+Run `post close` once per run. `links` on a Linear project is append-only, so a second close carrying `--pr` links the same pull request twice, and its appended closing line lands under the first.
+
+A `Completed` Project keeps its open issues. Everything recorded `deferred` stays in `Backlog` after close, which is what makes an engagement's leftovers survive it.
 
 ## Smoke engagements
 
