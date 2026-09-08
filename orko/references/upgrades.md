@@ -22,15 +22,16 @@ orko does NOT assume this flag. The entire protocol — one-shot dispatch, paper
 
 ## Deterministic pipeline (Workflow)
 
-Under ultracode, the engagement can be modeled as a Workflow DAG: stages wired as a directed graph with enforced structured output between them. This is the only path to data-level relay fidelity — a stage's findings come back as validated structured data the next stage consumes directly, rather than prose a model reads and relays. It closes the gap the baseline calls out under Limits ("relay fidelity is engineered, not byte-guaranteed").
+Under ultracode, the engagement can be modeled as a Workflow DAG: stages wired as a directed graph with enforced structured output between them. This is the only path to data-level relay fidelity — a stage's findings come back as validated structured data the next stage consumes directly, rather than prose relayed by a model. It closes the gap the baseline calls out under Limits ("relay fidelity is engineered, not byte-guaranteed").
 
 Two constraints pin this as an upgrade, not the everyday baseline. The Workflow tool is ultracode-gated — it is not available in the standard harness. And a Workflow DAG is deterministic and non-conversational: stages execute along fixed edges with no conductor judgment mid-run, which is exactly what buys the fidelity but also removes the adaptive, conversational decomposition the prompt-only conductor provides. Reach for it when the engagement is stable enough to wire as a fixed graph and relay fidelity matters more than adaptability.
 
-## Build engagement (shipped in v1.0.0)
+## Scaffold record and Codex executor (shipped in v2.0.0)
 
-The build engagement designed here on 2026-09-04 shipped as orko v1.0.0. The lifecycle lives in `build.md`, the Linear contract in `linear.md`, and the script surface in `scripts/orko.py --help`. Two design points worth keeping in view:
+orko v1.0.0 shipped the build engagement with Linear as the record. v2.0.0 replaced that record and added a second executor. Both are shipped mechanisms, not design notes, and each has its own reference file:
 
-- **Linear is the record, git is for code.** Artifacts never commit. Every decision kicked up to the conductor is one issue with one of four outcomes; reviewer findings are decisions under that rule. Seats never write to Linear; the conductor posts, attributed by seat, from payloads the script emits.
+- **The scaffold docs repository is the record.** A run targets a workspace holding a `docs/` repository and a `code/` repository, and every decision commits as a spec, plan, review, decision, ADR, or research file with a stable ID. The script owns the write, orko never signs, and the build stops at a human acceptance. The contract is `record.md`.
+- **Codex is an optional executor.** `init build --executor codex` replaces the subagent-driven-development implementers at step 5 with a per-task Codex loop: a script-built dispatch, a delivery check that judges the repository rather than Codex's report, one retry, and two report-only Claude reviewers per task. This is where the retired `codex-orko` skill went. The loop is `codex.md`.
 
 ## Not yet built
 
