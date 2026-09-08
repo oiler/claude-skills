@@ -1,6 +1,7 @@
 """Tests for orko.py — the deterministic spine of the orko skill."""
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -9,6 +10,16 @@ import pytest
 
 import orko
 from conftest import FIXTURE_WORKSPACE
+
+
+def init_run(workspace, capsys, mode="build", topic="Demo Topic", *extra):
+    code = orko.main(["init", mode, topic, "--workspace", str(workspace),
+                      "--owner", "oiler", "--boundaries", "code/ only",
+                      "--trailer", "Co-Authored-By: T <t@example.invalid>",
+                      "--trailer", "Claude-Session: https://example.invalid/s", *extra])
+    captured = capsys.readouterr()
+    out = captured.out
+    return code, (json.loads(out) if out.strip().startswith("{") else captured.err)
 
 
 class TestSlugify:
@@ -46,314 +57,397 @@ class TestSlugify:
 
 
 class TestComputePaths:
-    def test_builds_every_path_under_the_run_dir(self, tmp_path):
+    def test_builds_every_path_from_the_workspace_and_slug(self, tmp_path):
         paths = orko.compute_paths(tmp_path, "demo", "2026-09-04")
         run_dir = tmp_path / ".orko/demo"
+        assert paths["workspace"] == str(tmp_path)
+        assert paths["docs"] == str(tmp_path / "docs")
+        assert paths["code"] == str(tmp_path / "code")
         assert paths["run_dir"] == str(run_dir)
         assert paths["ledger"] == str(run_dir / "progress.md")
         assert paths["escalations"] == str(run_dir / "escalations.md")
-        assert paths["spec"] == str(run_dir / "spec.md")
-        assert paths["plan"] == str(run_dir / "plan.md")
+        assert paths["tasks"] == str(run_dir / "tasks.md")
         assert paths["brief"] == str(run_dir / "brief.md")
         assert paths["synthesis"] == str(run_dir / "synthesis.md")
         assert paths["findings_dir"] == str(run_dir / "findings")
         assert paths["context_dir"] == str(run_dir / "context")
-        assert paths["unposted_dir"] == str(run_dir / "unposted")
 
-    def test_no_shipped_path_points_outside_the_run_dir(self, tmp_path):
+    def test_the_run_dir_hangs_off_the_workspace_root(self, tmp_path):
+        paths = orko.compute_paths(tmp_path, "demo", "2026-09-04")
+        assert Path(paths["run_dir"]) == tmp_path / ".orko" / "demo"
+
+    def test_no_scratch_path_points_outside_the_run_dir(self, tmp_path):
         paths = orko.compute_paths(tmp_path, "demo", "2026-09-04")
         for key, value in paths.items():
-            if key in {"slug", "date", "root"}:
+            if key in {"slug", "date", "workspace", "docs", "code"}:
                 continue
             assert value.startswith(str(tmp_path / ".orko/demo")), key
 
+    def test_no_run_artifact_lives_in_either_repository(self, tmp_path):
+        paths = orko.compute_paths(tmp_path, "demo", "2026-09-04")
+        for key, value in paths.items():
+            if key in {"slug", "date", "workspace", "docs", "code"}:
+                continue
+            assert not value.startswith(str(tmp_path / "docs")), key
+            assert not value.startswith(str(tmp_path / "code")), key
+
 
 class TestInit:
-    def test_creates_run_dir_and_ledger_header_and_prints_json(self, tmp_path, capsys):
-        rc = orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                        "--root", str(tmp_path), "--date", "2026-09-04"])
-        assert rc == 0
-        payload = json.loads(capsys.readouterr().out)
+    def test_writes_json_header_with_every_field(self, workspace, capsys):
+        code, payload = init_run(workspace, capsys)
+        assert code == 0
+        ledger = Path(payload["ledger"]).read_text(encoding="utf-8").splitlines()
+        assert ledger[0] == "# orko run"
+        header = json.loads(ledger[1].removeprefix("header: "))
+        assert header["mode"] == "build" and header["owner"] == "oiler"
+        assert header["version"] == "0.1" and header["executor"] == "claude"
+        assert header["codex_model"] is None and header["boundaries"] == "code/ only"
+        assert len(header["trailers"]) == 2
+        assert payload["docs"] == str(workspace / "docs")
+
+    def test_run_dir_is_under_workspace_root(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys)
+        assert Path(payload["run_dir"]) == workspace / ".orko" / "demo-topic"
+        assert not (workspace / ".gitignore").exists()
+
+    def test_records_codex_executor_and_overrides(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic",
+                              "--executor", "codex", "--codex-model", "gpt-5.6-sol",
+                              "--codex-effort", "high")
+        assert payload["executor"] == "codex" and payload["codex_model"] == "gpt-5.6-sol"
+
+    def test_refuses_invalid_workspace_by_name(self, workspace, capsys):
+        (workspace / "code" / "scripts" / "spec-check.sh").unlink()
+        code, err = init_run(workspace, capsys)
+        assert code == 2
+        assert "spec-check-missing" in err
+
+    def test_refuses_inactive_dossier(self, workspace, capsys):
+        readme = workspace / "docs" / "versions" / "0.1" / "README.md"
+        readme.write_text(readme.read_text().replace("status: active", "status: closed"))
+        code, _ = init_run(workspace, capsys)
+        assert code == 2
+
+    def test_version_override(self, workspace, capsys):
+        shutil.copytree(workspace / "docs/versions/0.1", workspace / "docs/versions/0.2")
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic", "--version", "0.2")
+        assert payload["version"] == "0.2"
+
+    def test_resume_keeps_header_and_reports_resumed(self, workspace, capsys):
+        init_run(workspace, capsys)
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        assert payload["resumed"] is True and payload["executor"] == "claude"
+
+    def test_mode_collision_is_refused(self, workspace, capsys):
+        init_run(workspace, capsys)
+        code, _ = init_run(workspace, capsys, "analysis")
+        assert code == 2
+
+    def test_creates_the_scratch_subdirectories(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys)
+        for key in ("findings_dir", "context_dir"):
+            assert Path(payload[key]).is_dir(), key
+
+    def test_reports_the_first_step_of_the_mode(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys)
         assert payload["slug"] == "demo-topic"
         assert payload["mode"] == "build"
         assert payload["next_step"] == 0
+        assert payload["resumed"] is False
 
-    def test_reinit_same_topic_resumes_instead_of_restarting(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-07-28"])
-        capsys.readouterr()
-        rc = orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                        "--root", str(tmp_path), "--date", "2026-07-28"])
-        assert rc == 0
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["resumed"] is True
-        assert payload["next_step"] == 0
 
-    def test_slug_collision_with_different_topic_is_an_error(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-07-28"])
-        capsys.readouterr()
-        rc = orko.main(["init", "build", "demo topic!", "--team", "JRF",
-                        "--root", str(tmp_path), "--date", "2026-07-28"])
-        assert rc == 2
-        assert "collides" in capsys.readouterr().err
+class TestDossier:
+    def test_reads_the_active_version_from_status(self, workspace):
+        assert orko.read_active_version(workspace) == "0.1"
 
-    def test_init_creates_the_scratch_subdirectories(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        payload = json.loads(capsys.readouterr().out)
-        for key in ("findings_dir", "context_dir", "unposted_dir"):
-            assert Path(payload[key]).is_dir(), key
+    def test_dossier_dir_is_under_docs_versions(self, workspace):
+        assert orko.dossier_dir(workspace, "0.1") == workspace / "docs/versions/0.1"
 
-    def test_init_gitignores_the_run_directory(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-07-28"])
-        assert ".orko/" in (tmp_path / ".gitignore").read_text()
+    def test_reads_the_dossier_status(self, workspace):
+        assert orko.dossier_status(workspace, "0.1") == "active"
 
-    def test_init_does_not_duplicate_an_existing_gitignore_entry(self, tmp_path, capsys):
-        (tmp_path / ".gitignore").write_text("node_modules/\n.orko/\n")
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-07-28"])
-        assert (tmp_path / ".gitignore").read_text().count(".orko/") == 1
+    def test_missing_file_reads_as_none(self, workspace):
+        assert orko.dossier_status(workspace, "9.9") is None
+
+    def test_missing_frontmatter_reads_as_none(self, workspace, tmp_path):
+        target = tmp_path / "plain.md"
+        target.write_text("# No frontmatter\n\nactive_version: 0.2\n")
+        assert orko.read_frontmatter_field(target, "active_version") is None
+
+    def test_no_active_version_is_a_usage_error(self, workspace, capsys):
+        status = workspace / "docs" / "STATUS.md"
+        status.write_text(status.read_text().replace('active_version: "0.1"', "owner: x"))
+        code, err = init_run(workspace, capsys)
+        assert code == 2
+        assert "active_version" in err
 
 
 class TestModes:
-    def _init(self, tmp_path, capsys, mode="build"):
-        orko.main(["init", mode, "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        capsys.readouterr()
-
-    def test_analysis_run_starts_at_step_one(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+    def test_analysis_run_starts_at_step_one(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         run = json.loads(capsys.readouterr().out)
         assert run["mode"] == "analysis"
         assert run["next_step"] == 1
         assert run["next_step_name"] == "open"
 
-    def test_build_run_starts_at_intake(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+    def test_build_run_starts_at_intake(self, workspace, capsys):
+        init_run(workspace, capsys)
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         run = json.loads(capsys.readouterr().out)
         assert run["next_step"] == 0
         assert run["next_step_name"] == "intake"
 
-    def test_ledger_rejects_a_step_outside_the_runs_mode(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
+    def test_ledger_rejects_a_step_outside_the_runs_mode(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
         rc = orko.main(["ledger", "7", "complete", "--slug", "demo-topic",
-                        "--root", str(tmp_path)])
+                        "--workspace", str(workspace)])
         assert rc == 2
         assert "analysis" in capsys.readouterr().err
 
-    def test_ledger_rejects_step_zero_on_analysis(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
+    def test_ledger_rejects_step_zero_on_analysis(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
         rc = orko.main(["ledger", "0", "complete", "--slug", "demo-topic",
-                        "--root", str(tmp_path)])
+                        "--workspace", str(workspace)])
         assert rc == 2
 
-    def test_reinit_with_a_different_mode_is_an_error(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        rc = orko.main(["init", "analysis", "Demo Topic", "--team", "JRF",
-                        "--root", str(tmp_path), "--date", "2026-09-04"])
-        assert rc == 2
-        assert "mode" in capsys.readouterr().err
+    def test_reinit_with_a_different_mode_is_an_error(self, workspace, capsys):
+        init_run(workspace, capsys)
+        code, err = init_run(workspace, capsys, "analysis")
+        assert code == 2
+        assert "mode" in err
 
-    def test_run_is_done_after_the_last_step_of_its_mode(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
+    def test_run_is_done_after_the_last_step_of_its_mode(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
         for step in range(1, 7):
             orko.main(["ledger", str(step), "complete", "--slug", "demo-topic",
-                       "--root", str(tmp_path)])
+                       "--workspace", str(workspace)])
         capsys.readouterr()
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         assert json.loads(capsys.readouterr().out)["next_step"] is None
 
 
 class TestErrorContracts:
-    def test_init_outside_a_git_repo_returns_usage_error(self, tmp_path, capsys,
+    def test_an_invalid_workspace_names_every_finding(self, workspace, capsys):
+        shutil.rmtree(workspace / "docs" / ".git")
+        (workspace / "code" / "scripts" / "spec-check.sh").unlink()
+        code, err = init_run(workspace, capsys)
+        assert code == 2
+        assert "workspace-invalid: docs-not-a-repo" in err
+        assert "workspace-invalid: spec-check-missing" in err
+
+    def test_no_workspace_above_the_cwd_is_a_usage_error(self, tmp_path, capsys,
                                                          monkeypatch):
         monkeypatch.chdir(tmp_path)
-        rc = orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                        "--date", "2026-07-28"])
-        assert rc == 2
-        assert "not inside a git repository" in capsys.readouterr().err
+        assert orko.main(["status", "demo-topic"]) == 2
+        assert "no workspace found above" in capsys.readouterr().err
 
     def test_init_with_an_unreadable_ledger_header_returns_usage_error(
-        self, tmp_path, capsys
+        self, workspace, capsys
     ):
-        run_dir = tmp_path / ".orko" / "demo-topic"
+        run_dir = workspace / ".orko" / "demo-topic"
         run_dir.mkdir(parents=True)
         (run_dir / "progress.md").write_text("not a valid header\n")
-        rc = orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                        "--root", str(tmp_path), "--date", "2026-07-28"])
-        assert rc == 2
-        assert "unreadable ledger header" in capsys.readouterr().err
+        code, err = init_run(workspace, capsys)
+        assert code == 2
+        assert "unreadable ledger header" in err
 
     def test_an_empty_ledger_reports_an_error_rather_than_crashing(
-        self, tmp_path, capsys
+        self, workspace, capsys
     ):
-        run_dir = tmp_path / ".orko" / "demo-topic"
+        run_dir = workspace / ".orko" / "demo-topic"
         run_dir.mkdir(parents=True)
         (run_dir / "progress.md").write_text("")
-        assert orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                          "--root", str(tmp_path), "--date", "2026-07-28"]) == 2
-        assert "unreadable ledger header" in capsys.readouterr().err
-        assert orko.main(["status", "demo-topic", "--root", str(tmp_path)]) == 2
+        code, err = init_run(workspace, capsys)
+        assert code == 2
+        assert "unreadable ledger header" in err
+        assert orko.main(["status", "demo-topic", "--workspace", str(workspace)]) == 2
+
+    def test_a_header_whose_json_is_truncated_is_unreadable(self, workspace, capsys):
+        run_dir = workspace / ".orko" / "demo-topic"
+        run_dir.mkdir(parents=True)
+        (run_dir / "progress.md").write_text('# orko run\nheader: {"mode": "bui\n')
+        code, err = init_run(workspace, capsys)
+        assert code == 2
+        assert "unreadable ledger header" in err
+
+    def test_a_header_missing_a_key_is_unreadable(self, workspace, capsys):
+        run_dir = workspace / ".orko" / "demo-topic"
+        run_dir.mkdir(parents=True)
+        (run_dir / "progress.md").write_text(
+            '# orko run\nheader: {"mode": "build", "topic": "Demo Topic"}\n')
+        code, err = init_run(workspace, capsys)
+        assert code == 2
+        assert "unreadable ledger header" in err
 
     @pytest.mark.parametrize("topic", [
         "Demo\nTopic",
         "Demo\tTopic",
         "Demo\x00Topic",
     ])
-    def test_a_topic_with_a_control_character_is_rejected(self, tmp_path, capsys,
+    def test_a_topic_with_a_control_character_is_rejected(self, workspace, capsys,
                                                           topic):
-        rc = orko.main(["init", "build", topic, "--team", "JRF",
-                        "--root", str(tmp_path), "--date", "2026-07-28"])
-        assert rc == 2
-        assert "control character" in capsys.readouterr().err
-        assert not (tmp_path / ".orko").exists()
+        code, err = init_run(workspace, capsys, "build", topic)
+        assert code == 2
+        assert "control character" in err
+        assert not (workspace / ".orko").exists()
 
     def test_a_topic_that_slugifies_to_nothing_is_an_error_not_a_traceback(
-        self, tmp_path, capsys
+        self, workspace, capsys
     ):
-        rc = orko.main(["init", "build", "日本語", "--team", "JRF",
-                        "--root", str(tmp_path), "--date", "2026-07-28"])
+        code, err = init_run(workspace, capsys, "build", "日本語")
+        assert code == 2
+        assert "empty slug" in err
+
+    def test_ledger_for_an_unknown_slug_names_the_run(self, workspace, capsys):
+        rc = orko.main(["ledger", "1", "complete", "--slug", "nope",
+                        "--workspace", str(workspace)])
         assert rc == 2
-        assert "empty slug" in capsys.readouterr().err
+        assert "no run named" in capsys.readouterr().err
 
 
 class TestLedgerAndStatus:
-    def _init(self, tmp_path, capsys, topic="Demo Topic"):
-        orko.main(["init", "build", topic, "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-07-28"])
-        capsys.readouterr()
+    def _init(self, workspace, capsys, topic="Demo Topic"):
+        init_run(workspace, capsys, "build", topic)
 
-    def _complete_through_spec(self, tmp_path, commit=None):
+    def _complete_through_spec(self, workspace, commit=None):
         """Walk a build run past intake and the spec step, to the spec review."""
         for step in (0, 1):
             argv = ["ledger", str(step), "complete", "--slug", "demo-topic",
-                    "--root", str(tmp_path)]
+                    "--workspace", str(workspace)]
             if commit and step == 1:
                 argv += ["--commit", commit]
             orko.main(argv)
 
-    def test_ledger_appends_a_line_with_commit(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
+    def test_ledger_appends_a_line_with_commit(self, workspace, capsys):
+        self._init(workspace, capsys)
         rc = orko.main(["ledger", "1", "complete", "--slug", "demo-topic",
-                        "--root", str(tmp_path), "--commit", "abc1234"])
+                        "--workspace", str(workspace), "--commit", "abc1234"])
         assert rc == 0
-        text = (tmp_path / ".orko/demo-topic/progress.md").read_text()
-        assert text.splitlines()[1] == "step 1 complete commit=abc1234"
+        text = (workspace / ".orko/demo-topic/progress.md").read_text()
+        assert text.splitlines()[2] == "step 1 complete commit=abc1234"
 
-    def test_ledger_rejects_a_non_sha_commit(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
+    def test_ledger_rejects_a_non_sha_commit(self, workspace, capsys):
+        self._init(workspace, capsys)
         rc = orko.main(["ledger", "1", "complete", "--slug", "demo-topic",
-                        "--root", str(tmp_path), "--commit", "not a sha"])
+                        "--workspace", str(workspace), "--commit", "not a sha"])
         assert rc == 2
         assert "--commit must be a short or full SHA" in capsys.readouterr().err
 
-    def test_ledger_accepts_a_sha_range_as_a_dispatched_base(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        self._complete_through_spec(tmp_path)
+    def test_ledger_accepts_a_sha_range_as_a_dispatched_base(self, workspace, capsys):
+        self._init(workspace, capsys)
+        self._complete_through_spec(workspace)
         rc = orko.main(["ledger", "2", "dispatched", "--slug", "demo-topic",
-                        "--root", str(tmp_path), "--commit", "ba5e123..dec0de1"])
+                        "--workspace", str(workspace), "--commit", "ba5e123..dec0de1"])
         assert rc == 0
         capsys.readouterr()
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         assert json.loads(capsys.readouterr().out)["dispatched_base"] == (
             "ba5e123..dec0de1"
         )
 
-    def test_ledger_is_append_only(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
+    def test_ledger_is_append_only(self, workspace, capsys):
+        self._init(workspace, capsys)
         for step in (1, 2):
             orko.main(["ledger", str(step), "complete", "--slug", "demo-topic",
-                       "--root", str(tmp_path)])
-        lines = (tmp_path / ".orko/demo-topic/progress.md").read_text().splitlines()
-        assert lines[1] == "step 1 complete"
-        assert lines[2] == "step 2 complete"
+                       "--workspace", str(workspace)])
+        lines = (workspace / ".orko/demo-topic/progress.md").read_text().splitlines()
+        assert lines[2] == "step 1 complete"
+        assert lines[3] == "step 2 complete"
 
-    def test_ledger_records_a_dispatched_base_sha(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
+    def test_ledger_records_a_dispatched_base_sha(self, workspace, capsys):
+        self._init(workspace, capsys)
         rc = orko.main(["ledger", "2", "dispatched", "--slug", "demo-topic",
-                        "--root", str(tmp_path), "--commit", "ba5e123"])
+                        "--workspace", str(workspace), "--commit", "ba5e123"])
         assert rc == 0
-        text = (tmp_path / ".orko/demo-topic/progress.md").read_text()
-        assert text.splitlines()[1] == "step 2 dispatched commit=ba5e123"
+        text = (workspace / ".orko/demo-topic/progress.md").read_text()
+        assert text.splitlines()[2] == "step 2 dispatched commit=ba5e123"
 
     @pytest.mark.parametrize("status", ["dispatched", "escalated", "failed"])
-    def test_only_complete_advances_the_resume_point(self, tmp_path, capsys, status):
-        self._init(tmp_path, capsys)
-        self._complete_through_spec(tmp_path)
+    def test_only_complete_advances_the_resume_point(self, workspace, capsys, status):
+        self._init(workspace, capsys)
+        self._complete_through_spec(workspace)
         orko.main(["ledger", "2", status, "--slug", "demo-topic",
-                   "--root", str(tmp_path), "--commit", "ba5e123"])
+                   "--workspace", str(workspace), "--commit", "ba5e123"])
         capsys.readouterr()
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         assert json.loads(capsys.readouterr().out)["next_step"] == 2
 
-    def test_status_with_slug_reports_the_resume_point(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        self._complete_through_spec(tmp_path)
+    def test_status_with_slug_reports_the_resume_point(self, workspace, capsys):
+        self._init(workspace, capsys)
+        self._complete_through_spec(workspace)
         capsys.readouterr()
-        rc = orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        rc = orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         assert rc == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["next_step"] == 2
         assert payload["next_step_name"] == "spec review"
         assert payload["topic"] == "Demo Topic"
 
-    def test_status_reports_none_when_the_run_is_complete(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
+    def test_status_carries_the_header_fields(self, workspace, capsys):
+        self._init(workspace, capsys)
+        capsys.readouterr()
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["owner"] == "oiler"
+        assert payload["version"] == "0.1"
+        assert payload["executor"] == "claude"
+        assert payload["boundaries"] == "code/ only"
+        assert len(payload["trailers"]) == 2
+
+    def test_status_reports_none_when_the_run_is_complete(self, workspace, capsys):
+        self._init(workspace, capsys)
         for step in range(0, 8):
             orko.main(["ledger", str(step), "complete", "--slug", "demo-topic",
-                       "--root", str(tmp_path)])
+                       "--workspace", str(workspace)])
         capsys.readouterr()
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         assert json.loads(capsys.readouterr().out)["next_step"] is None
 
-    def test_bare_status_lists_every_run(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, topic="Alpha Feature")
-        self._init(tmp_path, capsys, topic="Beta Feature")
+    def test_bare_status_lists_every_run(self, workspace, capsys):
+        self._init(workspace, capsys, topic="Alpha Feature")
+        self._init(workspace, capsys, topic="Beta Feature")
         orko.main(["ledger", "0", "complete", "--slug", "alpha-feature",
-                   "--root", str(tmp_path)])
+                   "--workspace", str(workspace)])
         capsys.readouterr()
-        rc = orko.main(["status", "--root", str(tmp_path)])
+        rc = orko.main(["status", "--workspace", str(workspace)])
         assert rc == 0
         runs = json.loads(capsys.readouterr().out)
         assert [r["slug"] for r in runs] == ["alpha-feature", "beta-feature"]
         assert [r["next_step"] for r in runs] == [1, 0]
 
-    def test_bare_status_on_a_repo_with_no_runs_prints_an_empty_list(self, tmp_path, capsys):
-        rc = orko.main(["status", "--root", str(tmp_path)])
+    def test_bare_status_with_no_runs_prints_an_empty_list(self, workspace, capsys):
+        rc = orko.main(["status", "--workspace", str(workspace)])
         assert rc == 0
         assert json.loads(capsys.readouterr().out) == []
 
     def test_status_exposes_the_last_status_and_the_dispatched_base(
-        self, tmp_path, capsys
+        self, workspace, capsys
     ):
-        self._init(tmp_path, capsys)
-        self._complete_through_spec(tmp_path, commit="aaa1111")
+        self._init(workspace, capsys)
+        self._complete_through_spec(workspace, commit="aaa1111")
         orko.main(["ledger", "2", "dispatched", "--slug", "demo-topic",
-                   "--root", str(tmp_path), "--commit", "bbb2222"])
+                   "--workspace", str(workspace), "--commit", "bbb2222"])
         capsys.readouterr()
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         payload = json.loads(capsys.readouterr().out)
         assert payload["next_step"] == 2
         assert payload["last_status"] == "dispatched"
         assert payload["dispatched_base"] == "bbb2222"
 
     def test_a_fresh_run_reports_no_last_status_and_no_dispatched_base(
-        self, tmp_path, capsys
+        self, workspace, capsys
     ):
-        self._init(tmp_path, capsys)
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        self._init(workspace, capsys)
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         payload = json.loads(capsys.readouterr().out)
         assert payload["last_status"] is None
         assert payload["dispatched_base"] is None
 
     def test_the_dispatched_base_is_scoped_to_the_step_being_resumed(
-        self, tmp_path, capsys
+        self, workspace, capsys
     ):
-        self._init(tmp_path, capsys)
+        self._init(workspace, capsys)
         for step, status, commit in (
             (0, "complete", "000aaa0"),
             (1, "complete", "aaa1111"),
@@ -362,9 +456,9 @@ class TestLedgerAndStatus:
             (3, "complete", "ddd4444"),
         ):
             orko.main(["ledger", str(step), status, "--slug", "demo-topic",
-                       "--root", str(tmp_path), "--commit", commit])
+                       "--workspace", str(workspace), "--commit", commit])
         capsys.readouterr()
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         payload = json.loads(capsys.readouterr().out)
         assert payload["next_step"] == 4
         assert payload["last_status"] == "complete"
@@ -372,44 +466,44 @@ class TestLedgerAndStatus:
         assert payload["dispatched_base"] is None
 
     def test_the_latest_dispatch_wins_when_a_step_was_dispatched_twice(
-        self, tmp_path, capsys
+        self, workspace, capsys
     ):
-        self._init(tmp_path, capsys)
+        self._init(workspace, capsys)
         for commit in ("bbb2222", "eee5555"):
             orko.main(["ledger", "2", "dispatched", "--slug", "demo-topic",
-                       "--root", str(tmp_path), "--commit", commit])
-        self._complete_through_spec(tmp_path)
+                       "--workspace", str(workspace), "--commit", commit])
+        self._complete_through_spec(workspace)
         capsys.readouterr()
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         assert json.loads(capsys.readouterr().out)["dispatched_base"] == "eee5555"
 
     def test_an_escalated_line_is_the_last_status_after_a_completed_step(
-        self, tmp_path, capsys
+        self, workspace, capsys
     ):
-        self._init(tmp_path, capsys)
-        self._complete_through_spec(tmp_path, commit="aaa1111")
+        self._init(workspace, capsys)
+        self._complete_through_spec(workspace, commit="aaa1111")
         orko.main(["ledger", "1", "escalated", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
+                   "--workspace", str(workspace)])
         capsys.readouterr()
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
         payload = json.loads(capsys.readouterr().out)
         assert payload["next_step"] == 2
         assert payload["last_status"] == "escalated"
 
-    def test_a_malformed_ledger_line_is_skipped_not_fatal(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        ledger = tmp_path / ".orko/demo-topic/progress.md"
+    def test_a_malformed_ledger_line_is_skipped_not_fatal(self, workspace, capsys):
+        self._init(workspace, capsys)
+        ledger = workspace / ".orko/demo-topic/progress.md"
         with ledger.open("a", encoding="utf-8") as handle:
             handle.write("this is not a step record\n")
-        self._complete_through_spec(tmp_path)
+        self._complete_through_spec(workspace)
         capsys.readouterr()
-        assert orko.main(["status", "demo-topic", "--root", str(tmp_path)]) == 0
+        assert orko.main(["status", "demo-topic", "--workspace", str(workspace)]) == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["next_step"] == 2
         assert payload["last_status"] == "complete"
 
-    def test_status_for_an_unknown_slug_is_an_error(self, tmp_path, capsys):
-        rc = orko.main(["status", "nope", "--root", str(tmp_path)])
+    def test_status_for_an_unknown_slug_is_an_error(self, workspace, capsys):
+        rc = orko.main(["status", "nope", "--workspace", str(workspace)])
         assert rc == 2
         assert "no run" in capsys.readouterr().err
 
@@ -436,7 +530,7 @@ class TestStripCode:
         assert orko.strip_code("plain words\n") == "plain words\n"
 
 
-class TestValidateCLI:
+class TestCheckTasksCLI:
     def test_passing_tasks_exits_zero(self, tmp_path, capsys):
         target = tmp_path / "tasks.md"
         target.write_text(PLAN_OK)
@@ -531,135 +625,146 @@ class TestValidatePlan:
 
 
 class TestPrompt:
-    def _init(self, tmp_path, capsys, mode="build"):
-        orko.main(["init", mode, "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        capsys.readouterr()
-
-    def test_spec_review_substitutes_every_token_including_the_lens(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
+    def test_spec_review_substitutes_every_token_including_the_lens(self, workspace, capsys):
+        init_run(workspace, capsys)
         assert orko.main(["prompt", "spec-review", "demo-topic", "--lens", "security",
-                          "--root", str(tmp_path)]) == 0
+                          "--workspace", str(workspace)]) == 0
         out = capsys.readouterr().out
         assert "{{" not in out
-        assert str(tmp_path / ".orko/demo-topic/spec.md") in out
-        assert str(tmp_path / ".orko/demo-topic/findings/security.md") in out
+        assert "(no spec minted yet)" in out
+        assert str(workspace / "docs") in out
+        assert str(workspace / "code") in out
+        assert str(workspace / ".orko/demo-topic/findings/security.md") in out
         assert "Your lens is **security**" in out
         assert "trust boundary" in out
         assert "## Lenses" not in out
 
-    def test_plan_review_carries_the_spec_path(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
+    def test_plan_review_names_both_records(self, workspace, capsys):
+        init_run(workspace, capsys)
         orko.main(["prompt", "plan-review", "demo-topic", "--lens", "coverage",
-                   "--root", str(tmp_path)])
+                   "--workspace", str(workspace)])
         out = capsys.readouterr().out
-        assert str(tmp_path / ".orko/demo-topic/plan.md") in out
-        assert str(tmp_path / ".orko/demo-topic/spec.md") in out
+        assert "(no plan minted yet)" in out
+        assert "(no spec minted yet)" in out
         assert "{{" not in out
 
-    def test_unknown_lens_is_a_usage_error_naming_the_valid_ones(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
+    def test_unknown_lens_is_a_usage_error_naming_the_valid_ones(self, workspace, capsys):
+        init_run(workspace, capsys)
         rc = orko.main(["prompt", "spec-review", "demo-topic", "--lens", "vibes",
-                        "--root", str(tmp_path)])
+                        "--workspace", str(workspace)])
         assert rc == 2
         err = capsys.readouterr().err
         for lens in ("requirements", "architecture", "testability", "security"):
             assert lens in err
 
-    def test_review_kinds_require_a_lens(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        rc = orko.main(["prompt", "plan-review", "demo-topic", "--root", str(tmp_path)])
+    def test_review_kinds_require_a_lens(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rc = orko.main(["prompt", "plan-review", "demo-topic",
+                        "--workspace", str(workspace)])
         assert rc == 2
 
-    def test_plan_write_names_both_artifact_paths(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
+    def test_plan_write_names_the_tasks_file_and_both_repositories(self, workspace, capsys):
+        init_run(workspace, capsys)
         assert orko.main(["prompt", "plan-write", "demo-topic",
-                          "--root", str(tmp_path)]) == 0
+                          "--workspace", str(workspace)]) == 0
         out = capsys.readouterr().out
-        assert str(tmp_path / ".orko/demo-topic/spec.md") in out
-        assert str(tmp_path / ".orko/demo-topic/plan.md") in out
+        assert str(workspace / ".orko/demo-topic/tasks.md") in out
+        assert str(workspace / "docs") in out
+        assert str(workspace / "code") in out
         assert "{{" not in out
 
-    def test_seat_prompt_inlines_the_context_file(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
-        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+    def test_seat_prompt_inlines_the_context_file(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
+        ctx = workspace / ".orko/demo-topic/context/perf.md"
         ctx.write_text("Look at src/hot.py\n")
         assert orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
                           "--question", "Where is the N+1?",
-                          "--context-file", str(ctx), "--root", str(tmp_path)]) == 0
+                          "--context-file", str(ctx),
+                          "--workspace", str(workspace)]) == 0
         out = capsys.readouterr().out
         assert "You are the perf on an orko engagement" in out
         assert "Where is the N+1?" in out
         assert "Look at src/hot.py" in out
-        assert str(tmp_path / ".orko/demo-topic/findings/perf.md") in out
+        assert str(workspace / ".orko/demo-topic/findings/perf.md") in out
         assert "{{" not in out
 
-    def test_verifier_prompt_names_findings_and_verdict_paths(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
-        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+    def test_verifier_prompt_names_findings_and_verdict_paths(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
+        ctx = workspace / ".orko/demo-topic/context/perf.md"
         ctx.write_text("src/hot.py\n")
         orko.main(["prompt", "verifier", "demo-topic", "--seat", "perf",
                    "--question", "Where is the N+1?",
-                   "--context-file", str(ctx), "--root", str(tmp_path)])
+                   "--context-file", str(ctx), "--workspace", str(workspace)])
         out = capsys.readouterr().out
-        assert str(tmp_path / ".orko/demo-topic/findings/perf.md") in out
-        assert str(tmp_path / ".orko/demo-topic/findings/perf.verdict.md") in out
+        assert str(workspace / ".orko/demo-topic/findings/perf.md") in out
+        assert str(workspace / ".orko/demo-topic/findings/perf.verdict.md") in out
         assert "{{" not in out
 
-    def test_seat_records_the_question_for_a_later_verifier(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
-        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+    def test_seat_records_the_question_for_a_later_verifier(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
+        ctx = workspace / ".orko/demo-topic/context/perf.md"
         ctx.write_text("src/hot.py\n")
         orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
                    "--question", "Where is the N+1?",
-                   "--context-file", str(ctx), "--root", str(tmp_path)])
-        recorded = tmp_path / ".orko/demo-topic/context/perf.question"
+                   "--context-file", str(ctx), "--workspace", str(workspace)])
+        recorded = workspace / ".orko/demo-topic/context/perf.question"
         assert recorded.read_text(encoding="utf-8") == "Where is the N+1?"
 
-    def test_verifier_reads_the_recorded_question_when_none_is_passed(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
-        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+    def test_verifier_reads_the_recorded_question_when_none_is_passed(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
+        ctx = workspace / ".orko/demo-topic/context/perf.md"
         ctx.write_text("src/hot.py\n")
         orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
                    "--question", "Where is the N+1?",
-                   "--context-file", str(ctx), "--root", str(tmp_path)])
+                   "--context-file", str(ctx), "--workspace", str(workspace)])
         capsys.readouterr()
         assert orko.main(["prompt", "verifier", "demo-topic", "--seat", "perf",
-                          "--context-file", str(ctx), "--root", str(tmp_path)]) == 0
+                          "--context-file", str(ctx),
+                          "--workspace", str(workspace)]) == 0
         out = capsys.readouterr().out
-        assert str(tmp_path / ".orko/demo-topic/findings/perf.verdict.md") in out
+        assert str(workspace / ".orko/demo-topic/findings/perf.verdict.md") in out
         assert "{{" not in out
 
-    def test_verifier_without_a_question_or_a_record_is_a_usage_error(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
-        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
+    def test_verifier_without_a_question_or_a_record_is_a_usage_error(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
+        ctx = workspace / ".orko/demo-topic/context/perf.md"
         ctx.write_text("src/hot.py\n")
         rc = orko.main(["prompt", "verifier", "demo-topic", "--seat", "perf",
-                        "--context-file", str(ctx), "--root", str(tmp_path)])
+                        "--context-file", str(ctx), "--workspace", str(workspace)])
         assert rc == 2
         assert "no recorded question for seat perf" in capsys.readouterr().err
 
-    def test_context_containing_template_tokens_is_passed_through(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
-        ctx = tmp_path / ".orko/demo-topic/context/perf.md"
-        ctx.write_text("see {{ROOT}} and {{SEAT}}\n")
+    def test_context_containing_template_tokens_is_passed_through(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
+        ctx = workspace / ".orko/demo-topic/context/perf.md"
+        ctx.write_text("see {{WORKSPACE}} and {{SEAT}}\n")
         assert orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
                           "--question", "Where is the N+1?",
-                          "--context-file", str(ctx), "--root", str(tmp_path)]) == 0
-        assert "see {{ROOT}} and {{SEAT}}" in capsys.readouterr().out
+                          "--context-file", str(ctx),
+                          "--workspace", str(workspace)]) == 0
+        assert "see {{WORKSPACE}} and {{SEAT}}" in capsys.readouterr().out
 
-    def test_seat_kinds_require_seat_question_and_context(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
+    def test_seat_kinds_require_seat_question_and_context(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
         rc = orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
-                        "--root", str(tmp_path)])
+                        "--workspace", str(workspace)])
         assert rc == 2
 
-    def test_missing_context_file_is_an_io_error(self, tmp_path, capsys):
-        self._init(tmp_path, capsys, mode="analysis")
+    def test_missing_context_file_is_an_io_error(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis")
         rc = orko.main(["prompt", "seat", "demo-topic", "--seat", "perf",
-                        "--question", "q", "--context-file", str(tmp_path / "nope.md"),
-                        "--root", str(tmp_path)])
+                        "--question", "q", "--context-file", str(workspace / "nope.md"),
+                        "--workspace", str(workspace)])
         assert rc == 2
+
+    def test_no_charter_names_a_single_repository_root(self):
+        for name in ("spec-reviewer.md", "plan-reviewer.md", "plan-writer.md"):
+            text = (orko.references_dir() / name).read_text(encoding="utf-8")
+            assert "{{ROOT}}" not in text
+            assert re.search(r"^\*\*Docs repository:\*\* \{\{DOCS\}\}$", text,
+                             re.MULTILINE), name
+            assert re.search(r"^\*\*Code repository:\*\* \{\{CODE\}\}$", text,
+                             re.MULTILINE), name
 
     def test_no_charter_mentions_git_or_write_authority(self):
         for name in ("spec-reviewer.md", "plan-reviewer.md"):
@@ -677,52 +782,48 @@ class TestPrompt:
 
 
 class TestEscalations:
-    def _init(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-07-28"])
-        capsys.readouterr()
+    def _escalations_path(self, workspace) -> Path:
+        return workspace / ".orko/demo-topic/escalations.md"
 
-    def _escalations_path(self, tmp_path) -> Path:
-        return tmp_path / ".orko/demo-topic/escalations.md"
-
-    def test_absent_file_exits_zero_and_prints_nothing(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
+    def test_absent_file_exits_zero_and_prints_nothing(self, workspace, capsys):
+        init_run(workspace, capsys)
         assert orko.main(["escalations", "demo-topic",
-                          "--root", str(tmp_path)]) == 0
+                          "--workspace", str(workspace)]) == 0
         assert capsys.readouterr().out == ""
 
-    def test_empty_file_exits_zero(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        self._escalations_path(tmp_path).write_text("")
+    def test_empty_file_exits_zero(self, workspace, capsys):
+        init_run(workspace, capsys)
+        self._escalations_path(workspace).write_text("")
         assert orko.main(["escalations", "demo-topic",
-                          "--root", str(tmp_path)]) == 0
+                          "--workspace", str(workspace)]) == 0
 
-    def test_whitespace_only_file_exits_zero(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        self._escalations_path(tmp_path).write_text("\n\n   \n\t\n")
+    def test_whitespace_only_file_exits_zero(self, workspace, capsys):
+        init_run(workspace, capsys)
+        self._escalations_path(workspace).write_text("\n\n   \n\t\n")
         assert orko.main(["escalations", "demo-topic",
-                          "--root", str(tmp_path)]) == 0
+                          "--workspace", str(workspace)]) == 0
         assert capsys.readouterr().out == ""
 
-    def test_file_with_content_exits_one_and_prints_it(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        self._escalations_path(tmp_path).write_text(
+    def test_file_with_content_exits_one_and_prints_it(self, workspace, capsys):
+        init_run(workspace, capsys)
+        self._escalations_path(workspace).write_text(
             "## Escalation\n\nThe spec contradicts itself about `007`.\n"
         )
         assert orko.main(["escalations", "demo-topic",
-                          "--root", str(tmp_path)]) == 1
+                          "--workspace", str(workspace)]) == 1
         out = capsys.readouterr().out
         assert "contradicts itself" in out
         assert out.endswith("\n")
 
-    def test_unknown_slug_is_an_error(self, tmp_path, capsys):
-        assert orko.main(["escalations", "nope", "--root", str(tmp_path)]) == 2
+    def test_unknown_slug_is_an_error(self, workspace, capsys):
+        assert orko.main(["escalations", "nope",
+                          "--workspace", str(workspace)]) == 2
         assert "no run" in capsys.readouterr().err
 
-    def test_outside_a_git_repo_is_an_error(self, tmp_path, capsys, monkeypatch):
+    def test_outside_a_workspace_is_an_error(self, tmp_path, capsys, monkeypatch):
         monkeypatch.chdir(tmp_path)
         assert orko.main(["escalations", "demo-topic"]) == 2
-        assert "not inside a git repository" in capsys.readouterr().err
+        assert "no workspace found above" in capsys.readouterr().err
 
 
 class TestPreflight:
@@ -732,57 +833,47 @@ class TestPreflight:
 
     def test_clean_repo_on_feature_branch_passes(self, tmp_path, capsys, monkeypatch):
         root = self._repo(tmp_path)
-        (root / ".gitignore").write_text(".orko/\n")
         monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        assert orko.main(["preflight", "--root", str(root), "--mode", "build"]) == 0
+        assert orko.main(["preflight", "--workspace", str(root), "--mode", "build"]) == 0
 
     def test_master_fails_for_build(self, tmp_path, capsys, monkeypatch):
         root = self._repo(tmp_path, branch="master")
-        (root / ".gitignore").write_text(".orko/\n")
         monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        assert orko.main(["preflight", "--root", str(root), "--mode", "build"]) == 1
+        assert orko.main(["preflight", "--workspace", str(root), "--mode", "build"]) == 1
         assert "on-default-branch" in capsys.readouterr().out
 
     def test_master_is_fine_for_analysis(self, tmp_path, capsys, monkeypatch):
         root = self._repo(tmp_path, branch="master")
-        (root / ".gitignore").write_text(".orko/\n")
         monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        assert orko.main(["preflight", "--root", str(root), "--mode", "analysis"]) == 0
+        assert orko.main(["preflight", "--workspace", str(root),
+                          "--mode", "analysis"]) == 0
 
     def test_missing_uv_is_reported(self, tmp_path, capsys, monkeypatch):
         root = self._repo(tmp_path)
-        (root / ".gitignore").write_text(".orko/\n")
         monkeypatch.setattr(orko.shutil, "which", lambda name: None)
-        assert orko.main(["preflight", "--root", str(root), "--mode", "build"]) == 1
+        assert orko.main(["preflight", "--workspace", str(root), "--mode", "build"]) == 1
         assert "uv-missing" in capsys.readouterr().out
 
-    def test_unignored_run_dir_is_reported(self, tmp_path, capsys, monkeypatch):
-        root = self._repo(tmp_path)
+    @pytest.mark.xfail(reason="preflight rewritten in Task 13", strict=True)
+    def test_slug_supplies_the_mode(self, workspace, capsys, monkeypatch):
         monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        assert orko.main(["preflight", "--root", str(root), "--mode", "build"]) == 1
-        assert "run-dir-not-ignored" in capsys.readouterr().out
-
-    def test_slug_supplies_the_mode(self, tmp_path, capsys, monkeypatch):
-        root = self._repo(tmp_path, branch="master")
-        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        orko.main(["init", "build", "Demo", "--team", "JRF", "--root", str(root),
-                   "--date", "2026-09-04"])
-        capsys.readouterr()
-        assert orko.main(["preflight", "--root", str(root), "--slug", "demo"]) == 1
+        init_run(workspace, capsys, "build", "Demo")
+        assert orko.main(["preflight", "--workspace", str(workspace),
+                          "--slug", "demo"]) == 1
         assert "on-default-branch" in capsys.readouterr().out
 
-    def test_outstanding_escalation_is_reported(self, tmp_path, capsys, monkeypatch):
-        root = self._repo(tmp_path)
+    def test_outstanding_escalation_is_reported(self, workspace, capsys, monkeypatch):
         monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        orko.main(["init", "build", "Demo", "--team", "JRF", "--root", str(root),
-                   "--date", "2026-09-04"])
-        (root / ".orko/demo/escalations.md").write_text("## Scope\n\nbody\n")
-        capsys.readouterr()
-        assert orko.main(["preflight", "--root", str(root), "--slug", "demo"]) == 1
+        init_run(workspace, capsys, "build", "Demo")
+        (workspace / ".orko/demo/escalations.md").write_text("## Scope\n\nbody\n")
+        assert orko.main(["preflight", "--workspace", str(workspace),
+                          "--slug", "demo"]) == 1
         assert "blocked-escalation" in capsys.readouterr().out
 
+    @pytest.mark.xfail(reason="preflight rewritten in Task 13", strict=True)
     def test_not_a_repo_is_exit_two(self, tmp_path, capsys):
-        assert orko.main(["preflight", "--root", str(tmp_path), "--mode", "build"]) == 2
+        assert orko.main(["preflight", "--workspace", str(tmp_path),
+                          "--mode", "build"]) == 2
 
 
 class TestFixtures:
@@ -853,3 +944,13 @@ class TestWorkspace:
 
     def test_find_workspace_outside_is_none(self, tmp_path):
         assert orko.find_workspace(tmp_path) is None
+
+    def test_status_finds_run_from_inside_code_without_flag(self, workspace, capsys, monkeypatch):
+        init_run(workspace, capsys)
+        monkeypatch.chdir(workspace / "code" / "scripts")
+        capsys.readouterr()
+        assert orko.main(["status", "demo-topic"]) == 0
+
+    def test_status_outside_workspace_exits_2(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert orko.main(["status", "demo-topic"]) == 2

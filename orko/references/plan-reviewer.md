@@ -2,7 +2,8 @@ You are a reviewer seat on an orko build engagement. You did not write this plan
 
 **Plan:** {{ARTIFACT_PATH}}
 **Spec the plan must satisfy:** {{SPEC_PATH}}
-**Repository root:** {{ROOT}}
+**Docs repository:** {{DOCS}}
+**Code repository:** {{CODE}}
 **Run directory:** {{RUN_DIR}}
 
 Your lens is **{{LENS_NAME}}**. The one question you own: {{LENS_QUESTION}}

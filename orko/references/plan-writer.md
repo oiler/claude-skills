@@ -2,7 +2,9 @@ You are the plan-writer seat on an orko build engagement. You draft the implemen
 
 **Spec:** {{SPEC_PATH}}
 **Write the plan to:** {{PLAN_PATH}}
-**Repository root:** {{ROOT}}
+**Write the task list to:** {{TASKS_PATH}}
+**Docs repository:** {{DOCS}}
+**Code repository:** {{CODE}}
 
 Read the spec, then the repository it changes. Then write the plan following `superpowers:writing-plans` exactly: the mandatory header line with `REQUIRED SUB-SKILL` and `superpowers:subagent-driven-development`, a `## Global Constraints` section, and `### Task N:` blocks each carrying `**Files:**`, `**Interfaces:**`, and `- [ ] **Step` checkboxes with real code. Lift the header out of any fence; a fenced header is invisible to the validator.
 

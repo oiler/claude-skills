@@ -12,7 +12,10 @@ priming a reviewer with the authoring session's context turns a fresh critique
 into an echo of the author.
 
 Usage:
-    uv run orko.py init {analysis|build} <topic> --team KEY --workspace DIR [--date YYYY-MM-DD]
+    uv run orko.py init {analysis|build} <topic> --workspace DIR --owner NAME
+        --boundaries TEXT --trailer LINE [--trailer LINE] [--version V]
+        [--executor claude|codex] [--codex-model M] [--codex-effort E]
+        [--date YYYY-MM-DD]
     uv run orko.py ledger <step> <status> --slug SLUG [--commit SHA] [--workspace DIR]
     uv run orko.py status [<slug>] [--workspace DIR]
     uv run orko.py check tasks <path>
@@ -39,6 +42,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 SLUG_MAX = 60
+
+HEADER_TITLE = "# orko run"
+HEADER_KEYS = ("mode", "topic", "slug", "date", "workspace", "version", "owner",
+               "executor", "codex_model", "codex_effort", "boundaries", "trailers")
+EXECUTORS = ("claude", "codex")
+FRONTMATTER_FIELD_RE = r'^[ \t]*{key}:[ \t]*"?(?P<value>[^"\n]*)"?[ \t]*$'
 
 # Steps per engagement type. Only `complete` advances a run; the names are what
 # `status` prints so a resumed conductor knows where it is without the table.
@@ -172,8 +181,8 @@ def slugify(topic: str) -> str:
     )
     slug = "-".join(re.findall(r"[a-z0-9]+", ascii_only.lower()))
     if len(slug) > SLUG_MAX:
-        # The slug is the Linear Project name and the branch name, so a cut
-        # landing mid-word reads as a typo forever. Drop the partial word —
+        # The slug is the branch name the run works on, so a cut landing
+        # mid-word reads as a typo forever. Drop the partial word —
         # unless the first word alone overruns, where a hard cut is all there is.
         cut = slug[:SLUG_MAX]
         if slug[SLUG_MAX] != "-" and "-" in cut:
@@ -227,67 +236,73 @@ def resolve_workspace(args: argparse.Namespace) -> Path | None:
     return found
 
 
-def compute_paths(root: Path, slug: str, date: str) -> dict[str, str]:
-    """Every path a run touches, derived from root and slug alone.
+def read_frontmatter_field(path: Path, key: str) -> str | None:
+    """First `key: value` line inside the leading --- block, quotes stripped."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not text.startswith("---"):
+        return None
+    block = text.split("---", 2)[1]
+    match = re.search(FRONTMATTER_FIELD_RE.format(key=re.escape(key)), block, re.MULTILINE)
+    return match.group("value").strip() if match else None
 
-    The run directory is scratch and Linear is the record, so artifacts need
-    no date in their filename; stability for the validators and seats is all
-    that matters.
+
+def read_active_version(ws: Path) -> str | None:
+    return read_frontmatter_field(ws / "docs" / "STATUS.md", "active_version")
+
+
+def dossier_dir(ws: Path, version: str) -> Path:
+    return ws / "docs" / "versions" / version
+
+
+def dossier_status(ws: Path, version: str) -> str | None:
+    return read_frontmatter_field(dossier_dir(ws, version) / "README.md", "status")
+
+
+def compute_paths(ws: Path, slug: str, date: str) -> dict[str, str]:
+    """Every path a run touches, derived from the workspace and slug alone.
+
+    The run directory is scratch and the scaffold docs repository is the
+    record, so artifacts need no date in their filename; stability for the
+    validators and seats is all that matters.
     """
-    run_dir = root / ".orko" / slug
+    run_dir = ws / ".orko" / slug
     return {
-        "slug": slug,
-        "date": date,
-        "root": str(root),
+        "slug": slug, "date": date, "workspace": str(ws),
+        "docs": str(ws / "docs"), "code": str(ws / "code"),
         "run_dir": str(run_dir),
         "ledger": str(run_dir / "progress.md"),
         "escalations": str(run_dir / "escalations.md"),
-        "spec": str(run_dir / "spec.md"),
-        "plan": str(run_dir / "plan.md"),
+        "tasks": str(run_dir / "tasks.md"),
         "brief": str(run_dir / "brief.md"),
         "synthesis": str(run_dir / "synthesis.md"),
         "findings_dir": str(run_dir / "findings"),
         "context_dir": str(run_dir / "context"),
-        "unposted_dir": str(run_dir / "unposted"),
     }
 
 
-def ensure_gitignored(root: Path) -> None:
-    """Append `.orko/` to the target's .gitignore once. The run directory is
-    scratch; a trail that commits by accident is the failure this prevents."""
-    gitignore = root / ".gitignore"
-    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
-    if any(line.strip() == ".orko/" for line in existing.splitlines()):
-        return
-    prefix = "" if not existing or existing.endswith("\n") else "\n"
-    with gitignore.open("a", encoding="utf-8") as handle:
-        handle.write(f"{prefix}.orko/\n")
+def _header_line(fields: dict) -> str:
+    return "header: " + json.dumps({key: fields.get(key) for key in HEADER_KEYS})
 
 
-def _header(mode: str, topic: str, slug: str, date: str) -> str:
-    # `X` is a placeholder: the team field is a leftover of the Linear record
-    # and Task 4 rewrites the header without it.
-    return (f"# orko run — mode: {mode} — team: X — topic: {topic} "
-            f"— slug: {slug} — date: {date}")
+def _parse_header(ledger: Path) -> dict | None:
+    """The run's header fields, or None when the ledger cannot supply them.
 
-
-HEADER_LINE_RE = re.compile(
-    r"# orko run — mode: (?P<mode>analysis|build) — team: (?P<team>[A-Z0-9]+) "
-    r"— topic: (?P<topic>.*) — slug: (?P<slug>[a-z0-9-]+) "
-    r"— date: (?P<date>\d{4}-\d{2}-\d{2})$"
-)
-
-
-def _parse_header(ledger: Path) -> dict[str, str] | None:
-    """Read mode/team/topic/slug/date out of a ledger's first line, or None if
-    unreadable. Empty is unreadable, not a crash: callers turn None into exit 2."""
+    Empty, truncated, and short-of-a-key are all unreadable rather than a
+    crash: callers turn None into exit 2.
+    """
     if not ledger.exists():
         return None
     lines = ledger.read_text(encoding="utf-8").splitlines()
-    if not lines:
+    if len(lines) < 2 or lines[0] != HEADER_TITLE or not lines[1].startswith("header: "):
         return None
-    match = HEADER_LINE_RE.match(lines[0])
-    return match.groupdict() if match else None
+    try:
+        fields = json.loads(lines[1].removeprefix("header: "))
+    except json.JSONDecodeError:
+        return None
+    return fields if set(HEADER_KEYS) <= set(fields) else None
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -295,11 +310,19 @@ def cmd_init(args: argparse.Namespace) -> int:
     findings = validate_workspace(ws)
     if findings:
         for finding in findings:
-            print(f"orko: {finding}", file=sys.stderr)
+            print(f"workspace-invalid: {finding}", file=sys.stderr)
         return 2
     if CONTROL_RE.search(args.topic):
-        print("orko: topic contains a newline or control character; the ledger "
-              "header is a single line and could not be read back", file=sys.stderr)
+        print("orko: topic contains a control character", file=sys.stderr)
+        return 2
+    version = args.version or read_active_version(ws)
+    if not version:
+        print("orko: docs/STATUS.md has no active_version; pass --version", file=sys.stderr)
+        return 2
+    status = dossier_status(ws, version)
+    if status not in ("active", "proposed"):
+        print(f"orko: dossier {version} status is {status!r}; needs active or proposed",
+              file=sys.stderr)
         return 2
     date = args.date or _dt.date.today().isoformat()
     try:
@@ -309,38 +332,31 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 2
     paths = compute_paths(ws, slug, date)
     ledger = Path(paths["ledger"])
-    ensure_gitignored(ws)
-
     resumed = False
     if ledger.exists():
         existing = _parse_header(ledger)
         if existing is None:
             print(f"orko: unreadable ledger header in {ledger}", file=sys.stderr)
             return 2
-        if existing["topic"] != args.topic:
-            print(f"orko: topic {args.topic!r} collides with the existing run "
-                  f"{existing['topic']!r} (both slugify to {slug!r}). Choose a "
-                  "distinct topic or resume the existing run.", file=sys.stderr)
-            return 2
-        if existing["mode"] != args.mode:
-            print(f"orko: run {slug!r} is a {existing['mode']} engagement; "
-                  f"cannot resume it as {args.mode}. A run's mode is fixed at init.",
+        if existing["topic"] != args.topic or existing["mode"] != args.mode:
+            print(f"orko: run {slug!r} exists as a {existing['mode']} run for "
+                  f"{existing['topic']!r}; resume it with the same mode and topic",
                   file=sys.stderr)
             return 2
         resumed = True
+        header = existing
         paths = compute_paths(ws, slug, existing["date"])
     else:
+        header = dict(mode=args.mode, topic=args.topic, slug=slug, date=date,
+                      workspace=str(ws), version=version, owner=args.owner,
+                      executor=args.executor, codex_model=args.codex_model,
+                      codex_effort=args.codex_effort, boundaries=args.boundaries,
+                      trailers=list(args.trailer))
         ledger.parent.mkdir(parents=True, exist_ok=True)
-        for key in ("findings_dir", "context_dir", "unposted_dir"):
+        for key in ("findings_dir", "context_dir"):
             Path(paths[key]).mkdir(parents=True, exist_ok=True)
-        ledger.write_text(
-            _header(args.mode, args.topic, slug, date) + "\n",
-            encoding="utf-8",
-        )
-
-    header = _parse_header(ledger)
-    payload = dict(paths, mode=header["mode"], team=header["team"],
-                   topic=args.topic, resumed=resumed,
+        ledger.write_text(f"{HEADER_TITLE}\n{_header_line(header)}\n", encoding="utf-8")
+    payload = dict(paths, **header, resumed=resumed,
                    next_step=_next_step(ledger, header["mode"]))
     print(json.dumps(payload, indent=2))
     return 0
@@ -362,7 +378,7 @@ def _ledger_entries(ledger: Path) -> list[dict[str, str | None]]:
     if not ledger.exists():
         return []
     entries: list[dict[str, str | None]] = []
-    for line in ledger.read_text(encoding="utf-8").splitlines()[1:]:
+    for line in ledger.read_text(encoding="utf-8").splitlines()[2:]:
         match = LEDGER_LINE_RE.match(line.strip())
         if match:
             entries.append(match.groupdict())
@@ -401,13 +417,13 @@ def _dispatched_base(entries: list[dict[str, str | None]],
     return None
 
 
-def _run_dir_root(root: Path) -> Path:
-    return root / ".orko"
+def _run_dir_root(ws: Path) -> Path:
+    return ws / ".orko"
 
 
-def _describe_run(root: Path, slug: str) -> dict | None:
+def _describe_run(ws: Path, slug: str) -> dict | None:
     """Run summary for `slug`, or None when its ledger header is unreadable."""
-    ledger = _run_dir_root(root) / slug / "progress.md"
+    ledger = _run_dir_root(ws) / slug / "progress.md"
     header = _parse_header(ledger)
     if header is None:
         return None
@@ -415,10 +431,8 @@ def _describe_run(root: Path, slug: str) -> dict | None:
     next_step = _next_step(ledger, header["mode"])
     steps = MODES[header["mode"]]
     return dict(
-        compute_paths(root, slug, header["date"]),
-        mode=header["mode"],
-        team=header["team"],
-        topic=header["topic"],
+        compute_paths(ws, slug, header["date"]),
+        **header,
         next_step=next_step,
         # `is not None`: build starts at step 0, and a falsy test would report
         # the intake step as already done.
@@ -524,6 +538,15 @@ def _strip_lenses(text: str) -> str:
     return head.rstrip() + "\n"
 
 
+def record_for(ledger, type_, role):  # replaced in Task 5
+    return None
+
+
+def _record_path_or(run: dict, type_: str, role: str, fallback: str) -> str:
+    entry = record_for(Path(run["ledger"]), type_, role)
+    return str(Path(run["workspace"]) / entry["path"]) if entry else fallback
+
+
 def cmd_prompt(args: argparse.Namespace) -> int:
     loaded = _load_run(args)
     if loaded is None:
@@ -538,10 +561,13 @@ def cmd_prompt(args: argparse.Namespace) -> int:
 
     findings_dir = Path(run["findings_dir"])
     subs = {
-        "{{SPEC_PATH}}": run["spec"],
-        "{{PLAN_PATH}}": run["plan"],
+        "{{SPEC_PATH}}": _record_path_or(run, "spec", "spec", "(no spec minted yet)"),
+        "{{PLAN_PATH}}": _record_path_or(run, "plan", "plan", "(no plan minted yet)"),
+        "{{TASKS_PATH}}": run["tasks"],
         "{{RUN_DIR}}": run["run_dir"],
-        "{{ROOT}}": run["root"],
+        "{{WORKSPACE}}": run["workspace"],
+        "{{DOCS}}": run["docs"],
+        "{{CODE}}": run["code"],
         "{{SLUG}}": run["slug"],
     }
 
@@ -554,7 +580,8 @@ def cmd_prompt(args: argparse.Namespace) -> int:
             print(f"orko: unknown lens {args.lens!r}; valid: {', '.join(lenses)}",
                   file=sys.stderr)
             return 2
-        subs["{{ARTIFACT_PATH}}"] = run["spec" if args.kind == "spec-review" else "plan"]
+        subs["{{ARTIFACT_PATH}}"] = subs[
+            "{{SPEC_PATH}}" if args.kind == "spec-review" else "{{PLAN_PATH}}"]
         subs["{{LENS_NAME}}"] = args.lens
         subs["{{LENS_QUESTION}}"] = lenses[args.lens]
         subs["{{FINDINGS_PATH}}"] = str(findings_dir / f"{args.lens}.md")
@@ -592,7 +619,7 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         subs["{{VERDICT_PATH}}"] = str(findings_dir / f"{args.seat}.verdict.md")
 
     # Scanned on the raw template, before splicing: a context file or question
-    # that happens to quote `{{ROOT}}` is operator text to pass through, not a
+    # that happens to quote `{{WORKSPACE}}` is operator text to pass through, not a
     # template defect, and a post-substitution scan would blame the charter for
     # it. `_strip_lenses` has already run for review kinds, so what is scanned
     # is exactly what gets emitted.
@@ -687,12 +714,6 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     if mode == "build" and branch in DEFAULT_BRANCHES:
         findings.append(f"on-default-branch: HEAD is {branch}; a build runs on "
                         "orko/<slug>, never on a default branch")
-    gitignore = ws / ".gitignore"
-    ignored = gitignore.exists() and any(
-        line.strip() == ".orko/" for line in gitignore.read_text(encoding="utf-8").splitlines()
-    )
-    if not ignored:
-        findings.append("run-dir-not-ignored: .gitignore lacks `.orko/`; init adds it")
     if run is not None:
         gate = Path(run["escalations"])
         if gate.exists() and gate.read_text(encoding="utf-8").strip():
@@ -722,9 +743,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_init = sub.add_parser("init", help="start or resume a run")
     p_init.add_argument("mode", choices=sorted(MODES))
     p_init.add_argument("topic")
-    p_init.add_argument("--team", required=True, help="Linear team key, e.g. JRF")
     p_init.add_argument("--workspace", required=True,
                         help="scaffold workspace root holding docs/ and code/")
+    p_init.add_argument("--owner", required=True)
+    p_init.add_argument("--boundaries", required=True)
+    p_init.add_argument("--trailer", action="append", default=[])
+    p_init.add_argument("--version")
+    p_init.add_argument("--executor", choices=EXECUTORS, default="claude")
+    p_init.add_argument("--codex-model")
+    p_init.add_argument("--codex-effort")
     p_init.add_argument("--date", help="YYYY-MM-DD (default: today)")
     p_init.set_defaults(func=cmd_init)
 
