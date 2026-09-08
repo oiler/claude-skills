@@ -1,5 +1,41 @@
 # orko — Changelog
 
+## v2.0.0 — 2026-09-08
+
+The record moves out of Linear and into the project's scaffold workspace: a `docs/` repository for product intent and a `code/` repository for implementation. The build engagement gains an optional Codex executor, which retires the `codex-orko` skill. Breaking: v1 runs are not resumable, because a v1 run directory lives inside the target repository and its ledger header names a Linear team.
+
+### Added
+
+- `record spec|plan|review|disposition|status|amendment|decision|adr|research|delivery-decision|risk|close`: the script mints every record in `docs/` with a stable ID and script-owned frontmatter.
+- `commit docs` and `commit code`: script-owned commits into the two repositories, with the run's trailer.
+- `check spec [--require-plan]`, `check tasks`, and `check delivery`: contract checks for the spec, the task list, and the delivery record.
+- `codex wait`: blocks on a dispatched Codex task so the conductor does not poll.
+- `prompt task` and `prompt task-review`: script-emitted per-task implementer and reviewer prompts.
+- `--executor codex` on `init` and on `/orko build <goal>`: the per-task loop, defaults, and resume rules live in `references/codex.md`.
+- A per-finding FINDINGS schema. Each finding is a `#### F<n>` block, and a verifier returns one verdict per finding rather than one verdict per seat.
+- `references/record.md` (what the record is, the record table, block sequences, commits, close), `references/codex.md`, `references/task-reviewer.md`, and `references/templates/research.md`.
+- A scaffold workspace test fixture, so the validators run against a real two-repository layout.
+- `touched` and `hash` ledger lines, plus an overwrite guard that refuses to replace a record the run did not write.
+
+### Changed
+
+- The record is the scaffold's `docs/` repository. Every artifact is a committed file with a stable ID, written by the script rather than transcribed by the conductor.
+- The run directory moves from `.orko/` inside the target repository to `<workspace>/.orko/<slug>/`. Nothing edits a `.gitignore`.
+- `init` takes `--workspace`, `--owner`, `--boundaries`, and `--trailer`. `--team` and `--root` are gone.
+- The ledger header is a JSON line.
+- `preflight` findings are `uv-missing`, `workspace-invalid`, `docs-dirty`, `code-dirty`, `docs-on-default-branch`, `code-on-default-branch`, `dossier-inactive`, `spec-not-accepted`, `codex-unavailable`, and `blocked-escalation`.
+- The `checkpoint` and `auto` modes are replaced by the scaffold's human `accepted` gate. orko drafts and never signs: a build stops until a named human accepts the spec.
+- Findings files live under `findings/<step>/`.
+- Step summaries are no longer posted anywhere. The committed record is the only trail.
+- `validate plan` is renamed `check tasks`, and it now requires an `**Acceptance:**` line on every task.
+
+### Removed
+
+- The Linear layer: `linear set|get`, every `post` subcommand, the `mcp__linear__*` tool grants, and `references/linear.md`.
+- `validate spec`, superseded by `check spec`.
+- `ensure_gitignored` and `find_repo_root`, both of which existed only for a run directory inside the target repository.
+
+
 ## v1.0.0 — 2026-09-04
 
 Build engagement and a Linear record. Folds the `autonom` skill into orko. Breaking: the run directory moves from `docs/sessions/<slug>/` to `.orko/<slug>/`, and Linear replaces the disk trail as the record for both engagement types.
