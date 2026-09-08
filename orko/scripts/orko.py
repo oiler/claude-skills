@@ -1043,6 +1043,37 @@ def codex_setup_ready() -> tuple[bool, str]:
     return payload.get("ready") is True, json.dumps(payload.get("codex", {}))
 
 
+def run_companion(args: list[str]) -> subprocess.CompletedProcess:
+    """One call to the openai-codex companion. Isolated so tests can stand in
+    for a plugin this machine may not have installed."""
+    companion = codex_companion_path()
+    if companion is None:
+        raise FileNotFoundError("openai-codex plugin not installed")
+    return subprocess.run(["node", str(companion), *args],
+                          capture_output=True, text=True, check=False)
+
+
+def cmd_codex_wait(args: argparse.Namespace) -> int:
+    """Block until a background Codex job settles, then print its result."""
+    if _load_run(args) is None:
+        return 2
+    try:
+        status = run_companion(["status", args.job_id, "--wait",
+                                "--timeout-ms", str(args.timeout_ms), "--json"])
+        result = run_companion(["result", args.job_id, "--json"])
+    except FileNotFoundError as error:
+        print(f"orko: {error}", file=sys.stderr)
+        return 2
+    try:
+        payload = json.loads(result.stdout or status.stdout)
+    except json.JSONDecodeError:
+        print(f"orko: companion returned no JSON: {result.stderr.strip()}",
+              file=sys.stderr)
+        return 1
+    print(json.dumps(payload, indent=2))
+    return 0 if payload.get("status") == "completed" else 1
+
+
 def _dirty(repo: Path) -> bool:
     return bool(_git(repo, "status", "--porcelain").stdout.strip())
 
@@ -1733,6 +1764,54 @@ def cmd_commit(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_acceptance(cmd: str, cwd: Path) -> int:
+    """The task's own acceptance command, run as written.
+
+    The only `shell=True` in the script: the command is a shell line from a
+    `tasks.md` the plan validator has already accepted, never a flag.
+    """
+    return subprocess.run(cmd, shell=True, cwd=str(cwd), check=False).returncode
+
+
+def cmd_check_delivery(args: argparse.Namespace) -> int:
+    """Judge one Codex delivery in code, not by reading its report.
+
+    Each condition is one finding, so a test can remove exactly one and see
+    exactly one test go red.
+    """
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    task = _task_or_exit(run, args.task)
+    if task is None:
+        return 2
+    base = _dispatched_base(_ledger_entries(Path(run["ledger"])), f"5.{args.task}")
+    # No base means no recorded dispatch: there is no diff to judge, and
+    # guessing one would grade somebody else's work.
+    if base is None:
+        print(f"orko: no `ledger 5.{args.task} dispatched --commit` line", file=sys.stderr)
+        return 2
+    code = ws / "code"
+    findings: list[str] = []
+    if _dirty(code):
+        findings.append("tree-dirty: uncommitted or untracked files in code/")
+    changed = [line for line in
+               _git(code, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines() if line]
+    if not changed:
+        findings.append("diff-empty: no commits since the dispatch base")
+    outside = sorted(set(changed) - set(task["files"]))
+    if changed and outside:
+        findings.append("diff-outside-allowlist: " + ", ".join(outside))
+    if task["acceptance"]:
+        rc = run_acceptance(task["acceptance"], code)
+        if rc != 0:
+            findings.append(f"acceptance-failed: exit {rc}")
+    for finding in findings:
+        print(finding)
+    return 1 if findings else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orko")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1778,6 +1857,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_cs.add_argument("--workspace")
     p_cs.add_argument("--require-plan", action="store_true")
     p_cs.set_defaults(func=cmd_check_spec)
+
+    p_cd = check_sub.add_parser("delivery")
+    p_cd.add_argument("--slug", required=True)
+    p_cd.add_argument("--workspace")
+    p_cd.add_argument("--task", type=int, required=True)
+    p_cd.set_defaults(func=cmd_check_delivery)
 
     p_record = sub.add_parser("record", help="mint or update a scaffold record")
     record_sub = p_record.add_subparsers(dest="kind", required=True)
@@ -1881,6 +1966,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_commit.add_argument("--path", action="append", default=[],
                           help="extra repo-relative path to stage, repeatable")
     p_commit.set_defaults(func=cmd_commit)
+
+    p_codex = sub.add_parser("codex", help="drive a background Codex job")
+    codex_sub = p_codex.add_subparsers(dest="codex_command", required=True)
+    p_wait = codex_sub.add_parser("wait")
+    p_wait.add_argument("job_id")
+    p_wait.add_argument("--slug", required=True)
+    p_wait.add_argument("--workspace")
+    p_wait.add_argument("--timeout-ms", type=int, default=1800000)
+    p_wait.set_defaults(func=cmd_codex_wait)
 
     p_pre = sub.add_parser("preflight", help="check repos, branches, tooling, and record state")
     p_pre.add_argument("--slug", required=True)

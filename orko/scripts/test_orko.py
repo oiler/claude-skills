@@ -1690,3 +1690,118 @@ class TestRecordClose:
         code, _ = rec(workspace, capsys, "close", "--slug", "demo-topic",
                       "--summary", "x", "--changelog", "Bogus: y")
         assert code == 2
+
+
+class TestCheckDelivery:
+    def _task_run(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        shutil.copy(Path(orko.__file__).parent / "fixtures/tasks.md", payload["tasks"])
+        base = git_out(workspace / "code", "rev-parse", "HEAD").strip()
+        orko.main(["ledger", "5.1", "dispatched", "--commit", base,
+                   "--slug", "demo-topic", "--workspace", str(workspace)])
+        return payload
+
+    def _cd(self, workspace, capsys):
+        capsys.readouterr()
+        code = orko.main(["check", "delivery", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)])
+        return code, capsys.readouterr().out
+
+    def _commit_task_file(self, workspace, content="x = 1\n"):
+        f = workspace / "code" / orko.parse_tasks(
+            (workspace / ".orko/demo-topic/tasks.md").read_text())[0]["files"][0]
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(content)
+        subprocess.run(["git", "-C", str(workspace / "code"), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(workspace / "code"), "commit", "-qm", "task"], check=True)
+
+    def test_clean_committed_task_passes(self, workspace, capsys, monkeypatch):
+        self._task_run(workspace, capsys)
+        self._commit_task_file(workspace)
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        assert self._cd(workspace, capsys) == (0, "")
+
+    def test_fails_tree_dirty(self, workspace, capsys, monkeypatch):
+        self._task_run(workspace, capsys)
+        self._commit_task_file(workspace)
+        (workspace / "code/stray").write_text("s")
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        assert "tree-dirty" in self._cd(workspace, capsys)[1]
+
+    def test_fails_diff_empty(self, workspace, capsys, monkeypatch):
+        self._task_run(workspace, capsys)
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        assert "diff-empty" in self._cd(workspace, capsys)[1]
+
+    def test_fails_diff_outside_allowlist(self, workspace, capsys, monkeypatch):
+        self._task_run(workspace, capsys)
+        (workspace / "code/other.py").write_text("y\n")
+        subprocess.run(["git", "-C", str(workspace / "code"), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(workspace / "code"), "commit", "-qm", "t"], check=True)
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        assert "diff-outside-allowlist: other.py" in self._cd(workspace, capsys)[1]
+
+    def test_fails_acceptance(self, workspace, capsys, monkeypatch):
+        self._task_run(workspace, capsys)
+        self._commit_task_file(workspace)
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 1)
+        assert "acceptance-failed: exit 1" in self._cd(workspace, capsys)[1]
+
+    def test_missing_dispatch_base_exits_2(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        shutil.copy(Path(orko.__file__).parent / "fixtures/tasks.md", payload["tasks"])
+        assert self._cd(workspace, capsys)[0] == 2
+
+
+class TestCodexWait:
+    def test_completed_job_prints_result(self, workspace, capsys, monkeypatch):
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        calls = []
+
+        def fake(args):
+            calls.append(args)
+            payload = ({"status": "completed"} if args[0] == "status"
+                       else {"status": "completed", "output": "done"})
+            return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+        monkeypatch.setattr(orko, "run_companion", fake)
+        capsys.readouterr()
+        assert orko.main(["codex", "wait", "job-1", "--slug", "demo-topic",
+                          "--workspace", str(workspace)]) == 0
+        assert json.loads(capsys.readouterr().out)["output"] == "done"
+        assert calls[0][:2] == ["status", "job-1"] and "--wait" in calls[0]
+
+    def test_status_call_carries_the_timeout(self, workspace, capsys, monkeypatch):
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        calls = []
+
+        def fake(args):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, json.dumps({"status": "completed"}), "")
+
+        monkeypatch.setattr(orko, "run_companion", fake)
+        orko.main(["codex", "wait", "job-1", "--slug", "demo-topic",
+                   "--workspace", str(workspace)])
+        assert calls[0][calls[0].index("--timeout-ms") + 1] == "1800000"
+        orko.main(["codex", "wait", "job-1", "--slug", "demo-topic",
+                   "--timeout-ms", "5000", "--workspace", str(workspace)])
+        assert calls[2][calls[2].index("--timeout-ms") + 1] == "5000"
+
+    def test_failed_job_exits_1(self, workspace, capsys, monkeypatch):
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        monkeypatch.setattr(orko, "run_companion",
+                            lambda a: subprocess.CompletedProcess(a, 0, json.dumps({"status": "failed"}), ""))
+        assert orko.main(["codex", "wait", "job-1", "--slug", "demo-topic",
+                          "--workspace", str(workspace)]) == 1
+
+    def test_missing_companion_exits_2(self, workspace, capsys, monkeypatch):
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        monkeypatch.setattr(orko, "codex_companion_path", lambda: None)
+        assert orko.main(["codex", "wait", "job-1", "--slug", "demo-topic",
+                          "--workspace", str(workspace)]) == 2
+
+    def test_unknown_run_exits_2(self, workspace, capsys, monkeypatch):
+        monkeypatch.setattr(orko, "run_companion",
+                            lambda a: subprocess.CompletedProcess(a, 0, json.dumps({"status": "completed"}), ""))
+        assert orko.main(["codex", "wait", "job-1", "--slug", "nope",
+                          "--workspace", str(workspace)]) == 2
