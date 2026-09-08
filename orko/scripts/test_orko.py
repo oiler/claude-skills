@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import orko
+from conftest import FIXTURE_WORKSPACE
 
 
 # Documented parameter names of the Linear MCP tools orko posts to. A payload
@@ -1280,3 +1281,26 @@ class TestFixtures:
             text = (Path(orko.__file__).parent / f"fixtures/{name}").read_text(encoding="utf-8")
             assert "docs/sessions/" not in orko.strip_code(text).replace(
                 "`docs/sessions/`", ""), name
+
+
+class TestFixtureWorkspace:
+    def test_both_repos_on_master_with_one_commit(self, workspace):
+        for repo in ("docs", "code"):
+            out = subprocess.run(["git", "-C", str(workspace / repo), "log", "--oneline"],
+                                 capture_output=True, text=True, check=True).stdout
+            assert len(out.splitlines()) == 1
+            branch = subprocess.run(["git", "-C", str(workspace / repo), "symbolic-ref", "--short", "HEAD"],
+                                    capture_output=True, text=True, check=True).stdout.strip()
+            assert branch == "master"
+
+    def test_spec_check_is_executable(self, workspace):
+        script = workspace / "code" / "scripts" / "spec-check.sh"
+        result = subprocess.run([str(script)], capture_output=True, text=True)
+        assert result.returncode == 2  # usage: no SPEC id given
+
+    def test_spec_check_matches_scaffold_when_present(self):
+        scaffold = Path.home() / "files/repo/project-scaffold-ai/project-name/code/scripts/spec-check.sh"
+        if not scaffold.exists():
+            pytest.skip("scaffold not checked out")
+        ours = FIXTURE_WORKSPACE / "code/scripts/spec-check.sh"
+        assert hashlib.sha256(ours.read_bytes()).hexdigest() == hashlib.sha256(scaffold.read_bytes()).hexdigest()
