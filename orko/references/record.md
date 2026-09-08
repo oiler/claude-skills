@@ -14,22 +14,24 @@ One row per orko event. `<slug>` is the run slug from `init`, `<v>` is the activ
 
 | orko event | Record | Repository | Status | Human field | Command |
 |---|---|---|---|---|---|
-| Build intake | `STATUS.md` In progress line; version README index row per minted ID | `docs/` | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py init build "<topic>" --workspace <path> --owner <name> --boundaries "<text>"` |
+| Build intake | `STATUS.md` In progress line and `as_of`; version README index row per minted ID | `docs/` | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py init build "<topic>" --workspace <path> --owner <name> --boundaries "<text>" --trailer "<line>" --trailer "<line>"` |
 | Spec drafted | `versions/<v>/specs/SPEC-NNN-<slug>.md` | `docs/` | `draft` | `approved_at` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record spec --slug <slug> --title "<title>"` |
-| Spec review round | `versions/<v>/reviews/REVIEW-NNN-<slug>-spec.md`, `reviews:` naming `SPEC-NNN`, `revision:` the `docs/` commit reviewed | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role spec --reviews SPEC-NNN --revision <sha> --from-findings findings/2` |
+| Spec review round | `versions/<v>/reviews/REVIEW-NNN-<slug>-spec.md`, `reviews:` naming `SPEC-NNN`, `revision:` the `docs/` commit reviewed | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role spec --reviews SPEC-NNN --revision <sha> --from-findings .orko/<slug>/findings/2` |
 | Plan drafted | `versions/<v>/plans/PLAN-NNN-<slug>.md`, `implements:` naming `SPEC-NNN` | `docs/` | `draft` | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record plan --slug <slug> --title "<title>" --implements SPEC-NNN` |
-| Plan review round | `REVIEW-NNN-<slug>-plan.md`, `reviews:` naming `PLAN-NNN` | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role plan --reviews PLAN-NNN --revision <sha> --from-findings findings/4` |
-| Gate handoff | spec and plan set to `in_review` | `docs/` | `in_review` | spec `accepted` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record status --slug <slug> --id SPEC-NNN --status in_review` |
+| Plan review round | `REVIEW-NNN-<slug>-plan.md`, `reviews:` naming `PLAN-NNN` | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role plan --reviews PLAN-NNN --revision <sha> --from-findings .orko/<slug>/findings/4` |
+| Gate handoff | spec and plan set to `in_review` | `docs/` | `in_review` | spec `accepted` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record status --slug <slug> --id SPEC-NNN --status in_review`, then again with `--id PLAN-NNN` |
 | Implementation | commits on `orko/<slug>` citing `SPEC-NNN` and `PLAN-NNN`; testing rows written by the implementer | `code/` | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "<subject>"` |
 | Post-gate behavior change | dated entry under the spec's `## Amendments` | `docs/` | unchanged | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record amendment --slug <slug> --id SPEC-NNN --text "<text>"` |
-| Code review round | `REVIEW-NNN-<slug>-code.md`, `reviews:` naming `SPEC-NNN`, `revision:` the `code/` commit | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role code --reviews SPEC-NNN --revision <sha> --from-findings findings/6` |
+| Code review round | `REVIEW-NNN-<slug>-code.md`, `reviews:` naming `SPEC-NNN`, `revision:` the `code/` commit | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role code --reviews SPEC-NNN --revision <sha> --from-findings .orko/<slug>/findings/6` |
 | Escalation, product | `docs/decisions/DEC-NNN-<slug>.md` and the decisions index row | `docs/` | `proposed` | `decided_at` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record decision --slug <slug> --title "<title>"` |
 | Escalation, technical | `code/docs/adr/ADR-NNN-<slug>.md`, from the fenced template in the ADR README | `code/` | `proposed` | `decided_at` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record adr --slug <slug> --title "<title>"` |
 | Escalation, delivery | a row in the plan's Delivery decisions table, `Approved by` empty | `docs/` | inherits plan | `Approved by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record delivery-decision --slug <slug> --decision "<decision>" --rationale "<why>"` |
 | Deferred code-review finding | the finding stays `Disposition: open`, plus a bullet under the version README's Risks, blockers, and open decisions | `docs/` | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record risk --slug <slug> --text "<text>"` |
 | Close | `STATUS.md`, both `CHANGELOG.md` files, the version README index, two PR bodies in the run directory | both | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record close --slug <slug> --summary "<text>" --changelog "Added: <text>"` |
-| Analysis of an artifact or revision | `REVIEW-NNN-<slug>.md` in the active dossier | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role analysis --revision <sha> --from-findings findings/<step>` |
+| Analysis of an artifact or revision | `REVIEW-NNN-<slug>.md` in the active dossier | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role analysis --revision <sha> --from-findings .orko/<slug>/findings/<step>` |
 | Analysis of an open question | `docs/research/<date>-<slug>.md`, stamped as AI-generated plus unverified | `docs/` | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record research --slug <slug> --title "<title>"` |
+
+Every path in these commands is relative to the workspace root, which is where you run them. The run directory is `.orko/<slug>` below it, so a findings directory is `.orko/<slug>/findings/<step>`; `init`'s JSON prints the absolute `findings_dir`, and reading it from there beats building the path by hand.
 
 Close does not move the work to Recently completed. `RELEASE.md` places that after the tag, which orko does not cut.
 
@@ -52,6 +54,8 @@ The failure is silent. `spec-check.sh` reports a warning rather than a failure a
 `release-check.sh` selects one review per implemented spec: the first file under `reviews/` whose block list names the spec, chosen with `head -1` at line 81, and it requires `approved_by` on that file. orko mints the spec review before the code review, so the spec review is the file that gets selected.
 
 That is why the gate asks the human to approve the spec review and the plan review as well as accept the spec. It is consistent with the scaffold, because a review's dispositions are proposals until a human sets `approved_by`. It is also a scaffold fragility worth a follow-up: `release-check.sh` could check every review that names the spec rather than the first. Report it to oiler at the gate. Do not change the scaffold's scripts from inside a run.
+
+So the gate asks a human for four fields in total: `status: accepted` and `approved_at` on the spec, `approved_by` on the spec review, and `approved_by` on the plan review. Name all four when you stop. `preflight` at step 5 confirms the spec is `accepted` and then re-records its hash, so the human's edit is not reported as tampering on the next write.
 
 ## Findings to F blocks
 
@@ -93,7 +97,7 @@ Once the human accepts the spec, a choice you make during implementation is rout
 
 `record amendment` appends a dated line inside the spec's `## Amendments` section. `record delivery-decision` appends a table row with `Approved by` empty, which the plan template says inherits the plan's status. `record risk` appends a bullet under the version README's Risks, blockers, and open decisions heading.
 
-Every one of these four is an escalation. Write the escalation into `<run_dir>/escalations.md` yourself. Name the record ID. State the decision you need. Then stop the run. `escalations` exits `1` while that file is non-empty, and `preflight` reports `blocked-escalation` until oiler empties it. An amendment is the only one you may take without a human when the boundaries recorded at intake already authorize the behavior; even then, record it and report it.
+Every one of these four is an escalation. Write the escalation into `<run_dir>/escalations.md` yourself. Name the record ID. State the decision you need. Then stop the run. `escalations` exits `1` while that file is non-empty, and `preflight` reports `blocked-escalation` until oiler empties it. An amendment is what you record when the boundaries recorded at intake already authorize the behavior, and a `DEC-NNN` is what you record when they do not; the choice between them is yours, but the stop is not. Recording an amendment does not resume the run. Only the human does.
 
 ## Commits
 
