@@ -19,6 +19,9 @@ Usage:
     uv run orko.py ledger <step> <status> --slug SLUG [--commit SHA] [--workspace DIR]
     uv run orko.py status [<slug>] [--workspace DIR]
     uv run orko.py check tasks <path>
+    uv run orko.py record spec --slug SLUG --title TEXT [--workspace DIR]
+    uv run orko.py record plan --slug SLUG --title TEXT --implements SPEC-NNN
+        [--workspace DIR]
     uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--workspace DIR]
     uv run orko.py prompt plan-write <slug> [--workspace DIR]
     uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--workspace DIR]
@@ -32,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import re
 import shutil
@@ -891,6 +895,154 @@ def _load_run(args: argparse.Namespace) -> tuple[Path, dict] | None:
     return ws, run
 
 
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def rel(ws: Path, path: Path) -> str:
+    return str(path.resolve().relative_to(ws.resolve()))
+
+
+def record_path(ws: Path, type_: str, version: str, id_: str | None,
+                slug: str, role: str, date: str = "") -> Path:
+    """`<type dir>/<ID>-<slug>[-<role>].md`, or `<date>-<slug>[-<role>].md` for
+    a type that mints no ID — a research note needs the date to sort."""
+    parts = (date if not id_ else None, id_, slug, role if role != type_ else None)
+    stem = "-".join(part for part in parts if part)
+    return _type_dir(ws, type_, version) / f"{stem}.md"
+
+
+def overwrite_guard(ledger: Path, ws: Path, path: Path) -> str | None:
+    """A finding when the file changed since its hash was recorded — the record
+    carries hand edits the run never saw, so a rewrite would destroy them."""
+    recorded = hashes(ledger).get(rel(ws, path))
+    if recorded is None:
+        return None
+    if not path.exists():
+        return None
+    if sha256_file(path) == recorded:
+        return None
+    return f"edited-since-commit: {rel(ws, path)} differs from its last committed hash"
+
+
+def update_index(index_path: Path, row: list[str], id_cell: str) -> None:
+    """Replace or append a row in the first table under the index heading.
+
+    The table is the run of consecutive `|` lines: the version README has a
+    Release index table right after the Artifact index, and a scan that does
+    not stop at the first blank line overwrites the release row.
+    """
+    lines = index_path.read_text(encoding="utf-8").split("\n")
+    heading = "## Artifact index" if "versions" in index_path.parts else None
+    start = 0
+    if heading:
+        start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
+        if start is None:
+            raise ValueError(f"{index_path} has no '{heading}' heading")
+    first = next(i for i in range(start, len(lines)) if lines[i].startswith("|"))
+    table = []
+    for i in range(first, len(lines)):
+        if not lines[i].startswith("|"):
+            break
+        table.append(i)
+    rendered = "| " + " | ".join(row) + " |"
+    body = table[2:]  # skip header and separator
+    for i in body:
+        cell = lines[i].split("|")[1].strip()
+        if cell.startswith("[") or cell == id_cell:
+            lines[i] = rendered
+            break
+    else:
+        lines.insert(body[-1] + 1 if body else table[-1] + 1, rendered)
+    index_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _load_template(ws: Path, type_: str) -> str:
+    """The scaffold's own template for a record type. The ADR template lives in
+    a fenced block inside the ADR README; research has no scaffold template, so
+    the skill ships one."""
+    rt = RECORD_TYPES[type_]
+    if rt.template == "adr-readme":
+        text = (ws / "code/docs/adr/README.md").read_text(encoding="utf-8")
+        return text.split("```markdown\n", 1)[1].split("```", 1)[0]
+    if rt.template == "orko-research":
+        return (references_dir() / "templates/research.md").read_text(encoding="utf-8")
+    return (ws / "docs" / rt.template).read_text(encoding="utf-8")
+
+
+def _mint(ws: Path, run: dict, type_: str, role: str, title: str,
+          updates: dict, index_row: list[str] | None) -> tuple[int, dict]:
+    """Write one record from its template, index it, and log it to the ledger.
+
+    Resumable by construction: a role already in the ledger is returned as-is
+    rather than minted twice, so a rerun of an interrupted run is a no-op.
+    """
+    ledger = Path(run["ledger"])
+    existing = record_for(ledger, type_, role)
+    if existing:
+        return 0, dict(id=existing["id"], type=type_, role=role,
+                       path=str(ws / existing["path"]), resumed=True)
+    rt = RECORD_TYPES[type_]
+    id_ = next_id(ws, type_) if rt.prefix else None
+    path = record_path(ws, type_, run["version"], id_, run["slug"], role, run["date"])
+    guard = overwrite_guard(ledger, ws, path)
+    if guard:
+        print(f"orko: {guard}", file=sys.stderr)
+        return 2, {}
+    try:
+        text = _load_template(ws, type_)
+        fields = dict(updates)
+        if id_:
+            fields["id"] = id_
+            text = text.replace(f"{rt.prefix}-NNN — [", f"{id_} — [", 1)
+        text = set_frontmatter(text, fields)
+        if id_:
+            text = re.sub(rf"^# {id_} — \[.*\]$", lambda m: f"# {id_} — {title}",
+                          text, count=1, flags=re.MULTILINE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        append_ledger(ledger, f"record {type_} {role} {id_ or '-'} {rel(ws, path)}")
+        if rt.index and index_row:
+            row = [id_ if cell == "ID" else cell for cell in index_row]
+            index_path = ws / rt.repo / rt.index.replace("<v>", run["version"])
+            update_index(index_path, row, id_ or "")
+            append_ledger(ledger, f"touched {rel(ws, index_path)}")
+    except ValueError as error:
+        print(f"orko: {error}", file=sys.stderr)
+        return 2, {}
+    return 0, dict(id=id_, type=type_, role=role, path=str(path), resumed=False)
+
+
+def cmd_record_spec(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    code, out = _mint(ws, run, "spec", "spec", args.title,
+                      {"title": args.title, "status": "draft",
+                       "product_version": run["version"], "owner": run["owner"],
+                       "approved_at": None, "supersedes": None},
+                      ["ID", "Specification", args.title, "draft", run["owner"]])
+    if code == 0:
+        print(json.dumps(out, indent=2))
+    return code
+
+
+def cmd_record_plan(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    code, out = _mint(ws, run, "plan", "plan", args.title,
+                      {"title": args.title, "status": "draft",
+                       "product_version": run["version"],
+                       "implements": [args.implements], "owner": run["owner"]},
+                      ["ID", "Delivery plan", args.title, "draft", run["owner"]])
+    if code == 0:
+        print(json.dumps(out, indent=2))
+    return code
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orko")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -929,6 +1081,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_ct = check_sub.add_parser("tasks")
     p_ct.add_argument("path")
     p_ct.set_defaults(func=cmd_check_tasks)
+
+    p_record = sub.add_parser("record", help="mint or update a scaffold record")
+    record_sub = p_record.add_subparsers(dest="kind", required=True)
+    for kind, func, extra in (("spec", cmd_record_spec, ()),
+                              ("plan", cmd_record_plan, ("--implements",))):
+        p = record_sub.add_parser(kind)
+        p.add_argument("--slug", required=True)
+        p.add_argument("--workspace")
+        p.add_argument("--title", required=True)
+        for flag in extra:
+            p.add_argument(flag, required=True)
+        p.set_defaults(func=func)
 
     p_prompt = sub.add_parser("prompt", help="emit a dispatch prompt")
     p_prompt.add_argument("kind", choices=sorted(PROMPT_SOURCES))

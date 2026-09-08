@@ -1069,3 +1069,59 @@ class TestMintId:
         (workspace / "code/docs/adr/ADR-002-x.md").write_text("x")
         assert orko.next_id(workspace, "decision") == "DEC-008"
         assert orko.next_id(workspace, "adr") == "ADR-003"
+
+
+def rec(workspace, capsys, *args):
+    capsys.readouterr()
+    code = orko.main(["record", *args, "--workspace", str(workspace)])
+    out = capsys.readouterr()
+    return code, (json.loads(out.out) if out.out.strip().startswith("{") else out.err)
+
+
+class TestRecordSpecPlan:
+    def test_spec_mints_001_with_frontmatter(self, workspace, capsys):
+        init_run(workspace, capsys)
+        code, out = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo capability")
+        assert code == 0 and out["id"] == "SPEC-001"
+        path = Path(out["path"])
+        assert path == workspace / "docs/versions/0.1/specs/SPEC-001-demo-topic.md"
+        text = path.read_text()
+        assert "id: SPEC-001\n" in text and 'title: "Demo capability"' in text
+        assert "status: draft\n" in text and 'product_version: "0.1"' in text
+        assert 'owner: "oiler"' in text and "approved_at: null" in text
+        assert "# SPEC-001 — Demo capability" in text
+
+    def test_spec_row_replaces_readme_placeholder(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo capability")
+        readme = (workspace / "docs/versions/0.1/README.md").read_text()
+        assert "| [SPEC-001] |" not in readme
+        assert "| SPEC-001 | Specification | Demo capability | draft | oiler |" in readme
+
+    def test_plan_writes_block_sequence(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo capability")
+        code, out = rec(workspace, capsys, "plan", "--slug", "demo-topic", "--title", "Demo plan", "--implements", "SPEC-001")
+        text = Path(out["path"]).read_text()
+        assert "implements:\n  - SPEC-001\n" in text
+        assert "[SPEC" not in text.split("---")[1]
+
+    def test_second_mint_of_same_role_returns_existing(self, workspace, capsys):
+        init_run(workspace, capsys)
+        _, first = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        code, second = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        assert code == 0 and second["path"] == first["path"] and second["resumed"] is True
+        assert not (workspace / "docs/versions/0.1/specs/SPEC-002-demo-topic.md").exists()
+
+    def test_release_index_survives_three_mints(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        rec(workspace, capsys, "plan", "--slug", "demo-topic", "--title", "Plan", "--implements", "SPEC-001")
+        readme = (workspace / "docs/versions/0.1/README.md").read_text()
+        assert "| [0.1.0] | planned |" in readme
+        assert "| PLAN-001 | Delivery plan | Plan | draft | oiler |" in readme
+
+    def test_record_line_in_ledger(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        assert orko.record_for(Path(payload["ledger"]), "spec", "spec")["id"] == "SPEC-001"
