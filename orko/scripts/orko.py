@@ -1195,10 +1195,10 @@ def cmd_record_disposition(args: argparse.Namespace) -> int:
         return 2
 
     def transform(text: str) -> str | None:
-        # Non-greedy to the finding's own Disposition line: the next `### F`
-        # block would otherwise absorb the match.
+        # `(?!^### )` keeps the match inside this finding's own block: a plain
+        # `.*?` runs past an already-dispositioned F1 and rewrites F2 instead.
         pattern = re.compile(
-            rf"(^### {re.escape(args.finding)} — .*?- Disposition: `)open(`)",
+            rf"(^### {re.escape(args.finding)} — (?:(?!^### ).)*?- Disposition: `)open(`)",
             re.MULTILINE | re.DOTALL)
         new, n = pattern.subn(
             lambda m: m.group(1) + args.disposition + m.group(2), text, count=1)
@@ -1230,12 +1230,9 @@ def cmd_record_amendment(args: argparse.Namespace) -> int:
     if path is None or "## Amendments" not in path.read_text(encoding="utf-8"):
         print(f"orko: {args.id} has no Amendments section", file=sys.stderr)
         return 2
-    line = f"- {_dt.date.today().isoformat()}: {args.text}\n"
-
-    def transform(text: str) -> str:
-        head, sep, tail = text.rpartition("## Amendments\n")
-        return head + sep + tail.rstrip("\n") + "\n\n" + line
-    return _guarded_edit(ws, run, path, transform)
+    line = f"- {_dt.date.today().isoformat()}: {args.text}"
+    return _guarded_edit(ws, run, path, lambda text: _append_after_heading_text(
+        text, "## Amendments", line, table=False, blank_before=True))
 
 
 def cmd_record_decision(args: argparse.Namespace) -> int:
@@ -1277,10 +1274,15 @@ def cmd_record_research(args: argparse.Namespace) -> int:
     return code
 
 
-def _append_after_heading(path: Path, heading: str, line: str, table: bool) -> None:
+def _append_after_heading_text(text: str, heading: str, line: str, table: bool,
+                               blank_before: bool = False) -> str:
     """Append `line` at the end of the section under `heading`: after the last
-    `|` row when `table`, else after the last non-blank line of the section."""
-    lines = path.read_text(encoding="utf-8").split("\n")
+    `|` row when `table`, else after the last non-blank line of the section.
+
+    The section ends at the next `## ` heading, so an append never spills into
+    whatever follows.
+    """
+    lines = text.split("\n")
     start = lines.index(heading)
     end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
     section = range(start + 1, end)
@@ -1289,7 +1291,15 @@ def _append_after_heading(path: Path, heading: str, line: str, table: bool) -> N
     else:
         anchor = max((i for i in section if lines[i].strip()), default=start)
     lines.insert(anchor + 1, line)
-    path.write_text("\n".join(lines), encoding="utf-8")
+    if blank_before:
+        lines.insert(anchor + 1, "")
+    return "\n".join(lines)
+
+
+def _append_after_heading(path: Path, heading: str, line: str, table: bool) -> None:
+    path.write_text(
+        _append_after_heading_text(path.read_text(encoding="utf-8"), heading, line, table),
+        encoding="utf-8")
 
 
 def cmd_record_delivery_decision(args: argparse.Namespace) -> int:

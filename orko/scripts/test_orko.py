@@ -1258,3 +1258,23 @@ class TestRecordOthers:
         _, out = rec(workspace, capsys, "research", "--slug", "why-is-it-slow", "--title", "Why is it slow")
         text = Path(out["path"]).read_text()
         assert "AI-generated" in text and out["path"].endswith("-why-is-it-slow.md")
+
+    def test_disposition_twice_refuses_and_leaves_neighbors(self, workspace, capsys):
+        review = self._spec_and_review(workspace, capsys)
+        assert rec(workspace, capsys, "disposition", "--slug", "demo-topic", "--review", "REVIEW-001",
+                   "--finding", "F1", "--disposition", "rejected")[0] == 0
+        assert rec(workspace, capsys, "disposition", "--slug", "demo-topic", "--review", "REVIEW-001",
+                   "--finding", "F1", "--disposition", "accepted")[0] == 2
+        text = review.read_text()
+        assert "- Disposition: `accepted`" not in text
+        assert "- Disposition: `open`" in text.split("### F2")[1].split("### F3")[0]
+
+    def test_amendment_stays_inside_its_section(self, workspace, capsys):
+        self._spec_and_review(workspace, capsys)
+        spec = workspace / "docs/versions/0.1/specs/SPEC-001-demo-topic.md"
+        spec.write_text(spec.read_text().rstrip("\n") + "\n\n## Trailing notes\n\n- keep me last\n")
+        rec(workspace, capsys, "amendment", "--slug", "demo-topic", "--id", "SPEC-001", "--text", "R2 now returns 404")
+        text = spec.read_text()
+        amendments = text.split("## Amendments")[1].split("## Trailing notes")[0]
+        assert re.search(r"\n\n- \d{4}-\d{2}-\d{2}: R2 now returns 404\n", amendments)
+        assert text.rstrip().endswith("- keep me last")
