@@ -957,6 +957,9 @@ class TestPreflight:
         if orko._dirty(workspace / "docs"):
             orko.main(["commit", "docs", "--slug", "why-slow", "--message", "intake",
                        "--workspace", str(workspace)])
+        # On feature branches: this test isolates the spec gate's mode guard,
+        # so the branch checks must not be able to redden it too.
+        self._branch(workspace)
         for step in "1234":
             orko.main(["ledger", step, "complete", "--slug", "why-slow",
                        "--workspace", str(workspace)])
