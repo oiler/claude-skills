@@ -139,9 +139,10 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record disposition --slug <slug> --re
 
 `accepted`, `rejected`, or `resolved`, once per finding. A finding whose fix belongs in the other artifact is `resolved` with the target named in your edit, and applied when that artifact's step runs. Do not edit an artifact outside its own step: the ledger has no line for it.
 
-A seat's `scope:` mark is a recommendation to escalate, not a determination. A finding is outside boundaries only when acting on it would touch a file or behavior the intake boundaries excluded. When one genuinely is, route it per *Routing a change after acceptance* in [record.md](record.md), write the escalation into `.orko/<slug>/escalations.md` yourself, and stop:
+A seat's `scope:` mark is a recommendation to escalate, not a determination. A finding is outside boundaries only when acting on it would touch a file or behavior the intake boundaries excluded. When one genuinely is, route it per *Routing a change after acceptance* in [record.md](record.md), write the escalation into `.orko/<slug>/escalations.md` yourself, and stop. Commit before the ledger lines, or the minted review and its dispositions stay uncommitted, the ledger carries no hash for them, and the resume opens on `docs-dirty`:
 
 ```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "REVIEW-NNN: spec review"
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 2 complete --slug <slug>
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 2 escalated --slug <slug>
 ```
@@ -180,7 +181,7 @@ Use `--require-plan` from here on. Without it, a spec whose plan is missing or w
 
 ### 4 Plan review
 
-Identical to step 2, against the plan plus `tasks.md`. The command is `prompt plan-review`, the default lenses are the four in [plan-reviewer.md](plan-reviewer.md), `coverage`, `interfaces`, `placeholders`, and `tests`, and the findings land in `findings/4/`. The record is `record review --role plan --reviews PLAN-NNN --revision <docs sha> --from-findings .orko/<slug>/findings/4`. After your edits, re-run both `check spec SPEC-NNN --slug <slug> --require-plan` and `check tasks .orko/<slug>/tasks.md`, then `commit docs`, then `ledger 4 complete`, and `ledger 4 escalated` after it when a finding escalated. The plan reviewer's prompt already carries the spec path: it judges the plan against the spec, not against your intent for it.
+Identical to step 2, against the plan plus `tasks.md`. The command is `prompt plan-review`, the default lenses are the four in [plan-reviewer.md](plan-reviewer.md), `coverage`, `interfaces`, `placeholders`, and `tests`, and the findings land in `findings/4/`. Read the revision with `git -C docs rev-parse HEAD` as its own command, then mint `record review --slug <slug> --title "<title>" --role plan --reviews PLAN-NNN --revision <sha> --from-findings .orko/<slug>/findings/4`. After your edits, re-run both `check spec SPEC-NNN --slug <slug> --require-plan` and `check tasks .orko/<slug>/tasks.md`, then `commit docs`, then `ledger 4 complete`, and `ledger 4 escalated` after it when a finding escalated. `commit docs` comes before the ledger lines on the escalation path too. The plan reviewer's prompt already carries the spec path: it judges the plan against the spec, not against your intent for it.
 
 ### The gate
 
@@ -192,7 +193,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record status --slug <slug> --id PLAN
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "SPEC-NNN, PLAN-NNN: ready for review"
 ```
 
-Then report, in one message: the spec path, the plan path, both review paths, and the four fields a human sets, which are `status: accepted` and `approved_at` on the spec, `approved_by` on the spec review, and `approved_by` on the plan review. Name all four. Say that resuming means running the same `init build` command with the same goal from the workspace root. Report the `release-check.sh` selection fragility described in [record.md](record.md) to oiler here, and change nothing about the scaffold's scripts from inside a run.
+Then report, in one message: the spec path, the plan path, both review paths, and the four fields a human sets, which are `status: accepted` and `approved_at` on the spec, `approved_by` on the spec review, and `approved_by` on the plan review. Name all four. Say that the human commits the acceptance edit on `orko/<slug>` in `docs/` and then resumes by running the same `init build` command with the same goal from the workspace root. An uncommitted edit stops the resume at `docs-dirty` before `preflight` ever reaches `spec-not-accepted`. Report the `release-check.sh` selection fragility described in [record.md](record.md) to oiler here, and change nothing about the scaffold's scripts from inside a run.
 
 ### 5 Execute
 
@@ -217,11 +218,11 @@ A requirement whose plan row says `Performed by: owner` is reported as pending a
 
 ### 6 Code review
 
-The diff range is the branch's own work in the code repository. Read the default branch name, then the point the branch left it:
+The diff range is the branch's own work in the code repository. Read the default branch ref, then the point the branch left it. `symbolic-ref` prints `origin/<name>`; when it prints nothing, fall back to `master`:
 
 ```bash
-git -C code branch
-git -C code merge-base <default branch> HEAD
+git -C code symbolic-ref --short refs/remotes/origin/HEAD
+git -C code merge-base <origin/default> HEAD
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 6 dispatched --slug <slug> --commit <base>
 ```
 
@@ -237,9 +238,7 @@ A domain seat needs a context file. Write it to `<context_dir>/<seat>.md` first,
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt seat <slug> --seat <name> --question "<one question>" --context-file <run_dir>/context/<name>.md
 ```
 
-Findings land in `findings/6/`. Mint the review over them with `record review --role code --reviews SPEC-NNN --revision <code sha> --from-findings .orko/<slug>/findings/6`, reading the SHA from `git -C code rev-parse HEAD` first. Decide every finding as in step 2, with one difference: an accepted finding is fixed on the branch by dispatching an implementer, or by re-dispatching Codex, not by you editing code. The conductor decides and records; it does not implement. A deferred finding keeps `Disposition: open` and gets a `record risk` bullet under the version README's risks, so it outlives the run.
-
-Two duties before you close the step. Check whether `code/ARCHITECTURE.md` or `code/DESIGN.md` describes something the branch changed materially, and update it. Write an `ADR-NNN` with `record adr` for any consequential in-bounds technical choice the implementation made; an in-bounds choice recorded as an ADR is not an escalation and does not stop the run.
+Findings land in `findings/6/`. Mint the review over them with `record review --role code --reviews SPEC-NNN --revision <code sha> --from-findings .orko/<slug>/findings/6`, reading the SHA from `git -C code rev-parse HEAD` first. Decide every finding as in step 2, with one difference: an accepted finding is fixed on the branch by dispatching an implementer, or by re-dispatching Codex, not by you editing code. The conductor decides and records; it does not implement. A deferred finding keeps `Disposition: open` and gets a `record risk` bullet under the version README's risks, so it outlives the run. Two duties before you close the step. Check whether `code/ARCHITECTURE.md` or `code/DESIGN.md` describes something the branch changed materially, and update it. Write an `ADR-NNN` with `record adr` for any consequential in-bounds technical choice the implementation made; an in-bounds choice recorded as an ADR is not an escalation and does not stop the run. When a finding does escalate, write `escalations.md`, run `commit docs`, then add `ledger 6 escalated --slug <slug>` after the `complete` line, and stop.
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "<subject>"
@@ -257,17 +256,17 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "
 
 `record close` sets `STATUS.md` `as_of` and rewrites the run's In progress line to "awaiting acceptance", inserts each `--changelog` entry under its subheading in both changelogs, refreshes the version README index, and writes the two pull request bodies. `--changelog` is repeatable and its section is `Added`, `Changed`, `Fixed`, `Removed`, or `Security`. It is idempotent, so a rerun after an interruption is safe.
 
-Then open both pull requests, each from inside its own repository:
+Then push both branches and open both pull requests, each `gh` call from inside its own repository:
 
 ```bash
-cd docs && gh pr create --title "<topic> (SPEC-NNN)" --body-file ../.orko/<slug>/pr-docs.md
-cd ..
-cd code && gh pr create --title "<topic> (SPEC-NNN)" --body-file ../.orko/<slug>/pr-code.md
-cd ..
+git -C docs push -u origin orko/<slug>
+git -C code push -u origin orko/<slug>
+cd docs && gh pr create --title "<topic> (SPEC-NNN)" --body-file ../.orko/<slug>/pr-docs.md && cd ..
+cd code && gh pr create --title "<topic> (SPEC-NNN)" --body-file ../.orko/<slug>/pr-code.md && cd ..
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 7 complete --slug <slug>
 ```
 
-If `gh` is missing or unauthenticated, nothing is lost: the body files are already written. Report both paths and both commands for the human to run.
+Push first: `gh pr create` on an unpushed branch asks the question interactively, and an interactive question inside a Bash call stalls the run with no visible prompt. If a push fails for want of a remote or credentials, or `gh` is missing or unauthenticated, nothing is lost: the body files are already written. Report both paths, both push commands, and both `gh` commands for the human to run.
 
 ## What check spec and check tasks require
 
@@ -312,7 +311,7 @@ Never treat `2` as a findings result. `1` means the artifact is wrong; `2` means
 | A finding is outside boundaries | Route it to an amendment, `DEC-NNN`, `ADR-NNN`, or a delivery decision row, append to `escalations.md`, record `complete` then `escalated`, and stop. |
 | A human edited a record orko wrote | `record` refuses to overwrite a file whose hash differs from the last committed one. Read the change, report it, and continue from the human's version. The gate's expected edit is exempt because `preflight` re-records it. |
 | The human sets `accepted` and later returns the spec to `draft` | `preflight` at step 5 reports `spec-not-accepted`. Stop and report. |
-| `gh` is missing or unauthenticated at close | The body files are already written. Report their paths and both `gh pr create` commands for the human. |
+| A push fails, or `gh` is missing or unauthenticated at close | The body files are already written. Report their paths, both push commands, and both `gh pr create` commands for the human. |
 | `preflight` exits `1` | Stop and print the findings. A build never starts on a default branch, in a dirty repository, or without `uv`. |
 | The session compacts mid-run | Re-invoke `/orko build` from the workspace root. `status` names the resume step, `next_task`, the executor, and every record path. Reconcile `dispatched` entries against the findings directory and run the escalation gate before writing anything. |
 | `${CLAUDE_SKILL_DIR}` is empty in Bash | Fall back to `~/.claude/skills/orko/scripts/orko.py`. |
@@ -320,7 +319,7 @@ Never treat `2` as a findings result. `1` means the artifact is wrong; `2` means
 
 ## Ending
 
-**At the gate**, after step 4, report the spec path, the plan path, both review paths, the lenses that ran and any you dropped, the four human fields by name, and the `init build` command that resumes the run. Do not start implementation. **After close**, report the two pull request URLs, both branches, the count of findings by disposition, and what stays human: `approved_by` on the code review, `ACCEPT-NNN`, the release record, and the tag. orko performs none of those, and `RELEASE.md` places the move to Recently completed after the tag.
+**At the gate**, after step 4, report the spec path, the plan path, both review paths, the lenses that ran and any you dropped, the four human fields by name, the instruction to commit that edit in `docs/` on `orko/<slug>`, and the `init build` command that resumes the run. Do not start implementation. **After close**, report the two pull request URLs, both branches, the count of findings by disposition, and what stays human: `approved_by` on the code review, `ACCEPT-NNN`, the release record, and the tag. orko performs none of those, and `RELEASE.md` places the move to Recently completed after the tag.
 
 **An outstanding escalation overrides both.** Print the record ID you raised, the artifact paths, and the escalation contents. State that the run is blocked and that clearing it means oiler emptying `escalations.md`, then stop. Do not print a resume instruction and do not invoke an executor: implementation is precisely what the escalation is blocking, and an ending that offers a resume line beside an unresolved conflict invites someone to take it.
 
