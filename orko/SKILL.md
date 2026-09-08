@@ -180,6 +180,7 @@ What orko cannot do, as distinct from what it asks you to do:
 - **Seats and verifiers are prompted, not enforced.** A dispatch can return good analysis and still skip its file. The delivery checks in steps 3 and 4 are the only thing making the trail dependable, and they are not optional polish.
 - **Seats are unreliable narrators in two specific ways.** Cheap seats make arithmetic and counting errors; every seat overstates the severity of what it finds, because it reproduces a problem under conditions it chose and never asks whether normal usage reaches it. Verification exists for exactly these two failures.
 - **orko never signs.** It cannot set `accepted`, `approved_by`, `approved_at`, or `decided_at`, it doesn't write `ACCEPT-NNN` or the release record, and it doesn't cut the tag. A run ends with work waiting on a human, by design.
+- **Relay fidelity is engineered, not byte-guaranteed.** Expert-authored files and verbatim relay, not a data contract.
 - **A fan-out plus a verifier round costs real tokens and minutes.** Spend it when breadth and isolation earn it, not by default.
 
 ## More
