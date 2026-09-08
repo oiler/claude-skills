@@ -527,6 +527,60 @@ class TestLedgerAndStatus:
         assert "no run" in capsys.readouterr().err
 
 
+class TestLedgerSubSteps:
+    def test_substep_accepted_on_codex_build(self, workspace, capsys):
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        assert orko.main(["ledger", "5.1", "complete", "--slug", "demo-topic",
+                          "--workspace", str(workspace)]) == 0
+
+    def test_substep_rejected_on_claude_build(self, workspace, capsys):
+        init_run(workspace, capsys)
+        assert orko.main(["ledger", "5.1", "complete", "--slug", "demo-topic",
+                          "--workspace", str(workspace)]) == 2
+
+    def test_next_step_ignores_substeps(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic",
+                              "--executor", "codex")
+        ledger = Path(payload["ledger"])
+        for step in ("0", "1", "2", "3", "4"):
+            orko.main(["ledger", step, "complete", "--slug", "demo-topic",
+                       "--workspace", str(workspace)])
+        orko.main(["ledger", "5.1", "complete", "--slug", "demo-topic",
+                   "--workspace", str(workspace)])
+        orko.main(["ledger", "5.2", "complete", "--slug", "demo-topic",
+                   "--workspace", str(workspace)])
+        assert orko._next_step(ledger, "build") == 5
+        assert orko.next_task(ledger) == 3
+
+    def test_status_reports_next_task_and_records(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic",
+                              "--executor", "codex")
+        ledger = Path(payload["ledger"])
+        orko.append_ledger(
+            ledger,
+            "record spec spec SPEC-001 docs/versions/0.1/specs/SPEC-001-demo-topic.md",
+        )
+        orko.append_ledger(
+            ledger,
+            "hash docs/versions/0.1/specs/SPEC-001-demo-topic.md " + "a" * 64,
+        )
+        capsys.readouterr()
+        assert orko.main(["status", "demo-topic", "--workspace", str(workspace)]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["next_task"] == 1
+        assert out["records"] == [{"type": "spec", "role": "spec", "id": "SPEC-001",
+                                   "path": "docs/versions/0.1/specs/SPEC-001-demo-topic.md",
+                                   "sha": "a" * 64}]
+
+    def test_touched_paths_are_deduplicated_in_order(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic",
+                              "--executor", "codex")
+        ledger = Path(payload["ledger"])
+        orko.append_ledger(ledger, "touched docs/STATUS.md")
+        orko.append_ledger(ledger, "touched docs/STATUS.md")
+        assert orko.touched(ledger) == ["docs/STATUS.md"]
+
+
 class TestStripCode:
     def test_blanks_inline_code_but_keeps_line_count(self):
         out = orko.strip_code("alpha `TODO` omega\nsecond line\n")

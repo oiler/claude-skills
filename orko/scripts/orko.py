@@ -369,23 +369,76 @@ def cmd_init(args: argparse.Namespace) -> int:
 # would write a ledger line LEDGER_LINE_RE cannot parse, silently losing the step.
 COMMIT_RE = re.compile(r"[0-9a-f]{7,40}(\.\.[0-9a-f]{7,40})?")
 
+# A ledger step is either a whole step of the mode's table or a `5.n` sub-step
+# — one execute task under a codex executor. Sub-steps never advance the run.
+STEP_RE = re.compile(r"^\d+(\.\d+)?$")
 LEDGER_LINE_RE = re.compile(
-    r"^step (?P<step>\d+) (?P<status>dispatched|complete|failed|escalated)"
+    r"^step (?P<step>\d+(?:\.\d+)?) (?P<status>dispatched|complete|failed|escalated)"
     r"(?: commit=(?P<commit>\S+))?$"
 )
+RECORD_LINE_RE = re.compile(
+    r"^record (?P<type>[a-z]+) (?P<role>[a-z-]+) (?P<id>[A-Z]+-\d{3}|-) (?P<path>\S+)$"
+)
+HASH_LINE_RE = re.compile(r"^hash (?P<path>\S+) (?P<sha>[0-9a-f]{64})$")
+# Files a `record` command edited besides the record itself — index READMEs,
+# STATUS.md, changelogs — so `commit` knows what else to stage.
+TOUCHED_LINE_RE = re.compile(r"^touched (?P<path>\S+)$")
+
+
+def append_ledger(ledger: Path, line: str) -> None:
+    with ledger.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+
+
+def _ledger_lines(ledger: Path) -> list[str]:
+    """Every ledger line after the two header lines, stripped."""
+    if not ledger.exists():
+        return []
+    return [line.strip() for line in ledger.read_text(encoding="utf-8").splitlines()[2:]]
+
 
 def _ledger_entries(ledger: Path) -> list[dict[str, str | None]]:
     """Parsed step records in order, header excluded. Unparseable lines are
     skipped: the ledger is append-only, so a malformed line is damage to
     inspect, never a reason to refuse to report the rest of the run."""
-    if not ledger.exists():
-        return []
     entries: list[dict[str, str | None]] = []
-    for line in ledger.read_text(encoding="utf-8").splitlines()[2:]:
-        match = LEDGER_LINE_RE.match(line.strip())
+    for line in _ledger_lines(ledger):
+        match = LEDGER_LINE_RE.match(line)
         if match:
             entries.append(match.groupdict())
     return entries
+
+
+def records(ledger: Path) -> list[dict[str, str]]:
+    """Minted records in ledger order: spec, plan, findings, decisions."""
+    return [match.groupdict() for line in _ledger_lines(ledger)
+            if (match := RECORD_LINE_RE.match(line))]
+
+
+def record_for(ledger: Path, type_: str, role: str) -> dict[str, str] | None:
+    for entry in records(ledger):
+        if entry["type"] == type_ and entry["role"] == role:
+            return entry
+    return None
+
+
+def hashes(ledger: Path) -> dict[str, str]:
+    """Path to its last recorded sha — a re-hash of the same path supersedes."""
+    out: dict[str, str] = {}
+    for line in _ledger_lines(ledger):
+        match = HASH_LINE_RE.match(line)
+        if match:
+            out[match.group("path")] = match.group("sha")
+    return out
+
+
+def touched(ledger: Path) -> list[str]:
+    seen: list[str] = []
+    for line in _ledger_lines(ledger):
+        match = TOUCHED_LINE_RE.match(line)
+        if match and match.group("path") not in seen:
+            seen.append(match.group("path"))
+    return seen
 
 
 def _next_step(ledger: Path, mode: str) -> int | None:
@@ -398,10 +451,17 @@ def _next_step(ledger: Path, mode: str) -> int | None:
     done = {
         int(entry["step"])
         for entry in _ledger_entries(ledger)
-        if entry["status"] == "complete"
+        if entry["status"] == "complete" and "." not in entry["step"]
     }
     remaining = [step for step in sorted(MODES[mode]) if step not in done]
     return remaining[0] if remaining else None
+
+
+def next_task(ledger: Path) -> int:
+    """1 + the highest `5.n` recorded complete: the next execute task to dispatch."""
+    done = [int(entry["step"].split(".")[1]) for entry in _ledger_entries(ledger)
+            if entry["status"] == "complete" and entry["step"].startswith("5.")]
+    return max(done, default=0) + 1
 
 
 def _dispatched_base(entries: list[dict[str, str | None]],
@@ -415,7 +475,7 @@ def _dispatched_base(entries: list[dict[str, str | None]],
     if step is None:
         return None
     for entry in reversed(entries):
-        if int(entry["step"]) == step and entry["status"] == "dispatched":
+        if entry["step"] == str(step) and entry["status"] == "dispatched":
             return entry["commit"]
     return None
 
@@ -442,6 +502,9 @@ def _describe_run(ws: Path, slug: str) -> dict | None:
         next_step_name=steps.get(next_step) if next_step is not None else None,
         last_status=entries[-1]["status"] if entries else None,
         dispatched_base=_dispatched_base(entries, next_step),
+        next_task=next_task(ledger),
+        records=[dict(entry, sha=hashes(ledger).get(entry["path"]))
+                 for entry in records(ledger)],
     )
 
 
@@ -454,7 +517,19 @@ def cmd_ledger(args: argparse.Namespace) -> int:
     if header is None:
         print(f"orko: no run named {args.slug!r}; run init first", file=sys.stderr)
         return 2
-    if args.step not in MODES[header["mode"]]:
+    if not STEP_RE.fullmatch(args.step):
+        print(f"orko: step {args.step!r} must be a number or a sub-step like 5.1",
+              file=sys.stderr)
+        return 2
+    if "." in args.step:
+        # Sub-steps exist only for the execute step of a codex-executed build:
+        # that is the one place orko dispatches a numbered series of tasks.
+        if (header["mode"] != "build" or header["executor"] != "codex"
+                or args.step.split(".")[0] != "5"):
+            print(f"orko: sub-step {args.step} is only valid for step 5 of a "
+                  "build run with --executor codex", file=sys.stderr)
+            return 2
+    elif int(args.step) not in MODES[header["mode"]]:
         valid = ", ".join(str(step) for step in sorted(MODES[header["mode"]]))
         print(f"orko: step {args.step} is not a step of a {header['mode']} run "
               f"(valid: {valid})", file=sys.stderr)
@@ -465,8 +540,7 @@ def cmd_ledger(args: argparse.Namespace) -> int:
     line = f"step {args.step} {args.status}"
     if args.commit:
         line += f" commit={args.commit}"
-    with ledger.open("a", encoding="utf-8") as handle:
-        handle.write(line + "\n")
+    append_ledger(ledger, line)
     return 0
 
 
@@ -539,10 +613,6 @@ def _strip_lenses(text: str) -> str:
     the last section of a review charter: everything from it on is dropped."""
     head, _, _ = text.partition("\n## Lenses")
     return head.rstrip() + "\n"
-
-
-def record_for(ledger, type_, role):  # replaced in Task 5
-    return None
 
 
 def _record_path_or(run: dict, type_: str, role: str, fallback: str) -> str:
@@ -759,7 +829,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.set_defaults(func=cmd_init)
 
     p_ledger = sub.add_parser("ledger", help="append a step record")
-    p_ledger.add_argument("step", type=int)
+    p_ledger.add_argument("step")
     p_ledger.add_argument(
         "status", choices=["dispatched", "complete", "failed", "escalated"])
     p_ledger.add_argument("--slug", required=True)
