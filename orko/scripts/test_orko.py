@@ -1293,9 +1293,19 @@ class TestCommit:
         body = git_out(workspace / "docs", "log", "-1", "--format=%B")
         assert body.startswith("draft spec\n\nRefs: SPEC-001\n")
         assert "Co-Authored-By: T <t@example.invalid>" in body and "Claude-Session:" in body
-        assert git_out(workspace / "docs", "status", "--porcelain") == ""  # index README and STATUS.md staged too
+        assert git_out(workspace / "docs", "status", "--porcelain") == ""  # the version README index row is staged too
         assert orko.hashes(Path(payload["ledger"]))["docs/versions/0.1/specs/SPEC-001-demo-topic.md"]
         assert "versions/0.1/README.md" in git_out(workspace / "docs", "show", "--name-only", "HEAD")
+
+    def test_commit_leaves_pre_staged_unrelated_files_out(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        (workspace / "docs/UNRELATED.md").write_text("mine\n")
+        subprocess.run(["git", "-C", str(workspace / "docs"), "add", "UNRELATED.md"], check=True)
+        assert orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "draft spec",
+                          "--workspace", str(workspace)]) == 0
+        assert "UNRELATED.md" not in git_out(workspace / "docs", "show", "--name-only", "HEAD")
+        assert "A  UNRELATED.md" in git_out(workspace / "docs", "status", "--porcelain")
 
     def test_code_commit_never_stages_docs(self, workspace, capsys):
         init_run(workspace, capsys)

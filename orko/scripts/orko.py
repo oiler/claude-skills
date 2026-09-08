@@ -1364,13 +1364,16 @@ def cmd_commit(args: argparse.Namespace) -> int:
     if result.returncode != 0:
         print(f"orko: git add failed: {result.stderr.strip()}", file=sys.stderr)
         return 2
-    if _git(repo, "diff", "--cached", "--quiet").returncode == 0:
+    if _git(repo, "diff", "--cached", "--quiet", "--", *staged).returncode == 0:
         print(f"orko: nothing changed in {args.repo}", file=sys.stderr)
         return 2
     ids = sorted({e["id"] for e in records(ledger) if e["id"] != "-"})
     message = args.message.rstrip() + "\n\n" + (f"Refs: {', '.join(ids)}\n" if ids else "")
     message += "\n" + "\n".join(run["trailers"]) + "\n"
-    result = subprocess.run(["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+    # `-- *staged` scopes the commit to orko's own paths: anything the user had
+    # already staged in this repo stays staged rather than riding along under
+    # orko's message and Refs line with no hash line to prove it.
+    result = subprocess.run(["git", "-C", str(repo), "commit", "-q", "-F", "-", "--", *staged],
                             input=message, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         print(f"orko: git commit failed: {result.stderr.strip()}", file=sys.stderr)
