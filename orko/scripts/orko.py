@@ -261,6 +261,88 @@ def dossier_status(ws: Path, version: str) -> str | None:
     return read_frontmatter_field(dossier_dir(ws, version) / "README.md", "status")
 
 
+class RecordType(NamedTuple):
+    prefix: str | None
+    repo: str          # "docs" or "code"
+    subdir: str        # relative to the repo; "versions/<v>/specs" uses the run's version
+    template: str      # relative to docs/, or "adr-readme", or "orko-research"
+    index: str | None  # relative to the repo; None when the type has no index
+
+
+RECORD_TYPES: dict[str, RecordType] = {
+    "spec": RecordType("SPEC", "docs", "versions/<v>/specs", "templates/spec.md", "versions/<v>/README.md"),
+    "plan": RecordType("PLAN", "docs", "versions/<v>/plans", "templates/plan.md", "versions/<v>/README.md"),
+    "review": RecordType("REVIEW", "docs", "versions/<v>/reviews", "templates/review.md", "versions/<v>/README.md"),
+    "decision": RecordType("DEC", "docs", "decisions", "templates/decision.md", "decisions/README.md"),
+    "adr": RecordType("ADR", "code", "docs/adr", "adr-readme", None),
+    "research": RecordType(None, "docs", "research", "orko-research", None),
+}
+ID_RE = re.compile(r"^(?P<prefix>[A-Z]+)-(?P<n>\d{3})$")
+FM_KEY_RE = re.compile(r"^(?P<key>[A-Za-z_]+):(?P<rest>.*)$")
+
+
+def _split_frontmatter(text: str) -> tuple[list[str], str]:
+    if not text.startswith("---\n"):
+        raise ValueError("template has no frontmatter")
+    head, _, body = text[4:].partition("\n---\n")
+    return head.split("\n"), body
+
+
+def _render_value(key: str, value, quoted: bool) -> list[str]:
+    if value is None:
+        return [f"{key}: null"]
+    if isinstance(value, list):
+        return [f"{key}:"] + [f"  - {item}" for item in value]
+    return [f'{key}: "{value}"' if quoted else f"{key}: {value}"]
+
+
+def set_frontmatter(text: str, updates: dict) -> str:
+    """Rewrite top-level keys inside the leading --- block, body untouched."""
+    lines, body = _split_frontmatter(text)
+    out: list[str] = []
+    seen: set[str] = set()
+    index = 0
+    while index < len(lines):
+        match = FM_KEY_RE.match(lines[index])
+        if not match:
+            out.append(lines[index])
+            index += 1
+            continue
+        key = match.group("key")
+        block_end = index + 1
+        while block_end < len(lines) and lines[block_end].startswith((" ", "\t", "-")):
+            block_end += 1
+        if key in updates:
+            quoted = match.group("rest").strip().startswith('"')
+            out.extend(_render_value(key, updates[key], quoted))
+            seen.add(key)
+        else:
+            out.extend(lines[index:block_end])
+        index = block_end
+    for key, value in updates.items():
+        if key not in seen:
+            out.extend(_render_value(key, value, False))
+    return "---\n" + "\n".join(out) + "\n---\n" + body
+
+
+def _type_dir(ws: Path, type_: str, version: str) -> Path:
+    rt = RECORD_TYPES[type_]
+    return ws / rt.repo / rt.subdir.replace("<v>", version)
+
+
+def next_id(ws: Path, type_: str) -> str:
+    """One past the highest existing ID of this type, across every dossier."""
+    rt = RECORD_TYPES[type_]
+    assert rt.prefix, f"{type_} has no ID"
+    pattern = rt.subdir.replace("<v>", "*")
+    highest = 0
+    for path in (ws / rt.repo).glob(f"{pattern}/{rt.prefix}-*.md"):
+        match = re.match(rf"{rt.prefix}-(\d{{3}})", path.name)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"{rt.prefix}-{highest + 1:03d}"
+
+
 def compute_paths(ws: Path, slug: str, date: str) -> dict[str, str]:
     """Every path a run touches, derived from the workspace and slug alone.
 

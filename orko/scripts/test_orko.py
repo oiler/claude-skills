@@ -1027,3 +1027,45 @@ class TestWorkspace:
     def test_status_outside_workspace_exits_2(self, tmp_path, capsys, monkeypatch):
         monkeypatch.chdir(tmp_path)
         assert orko.main(["status", "demo-topic"]) == 2
+
+
+class TestFrontmatter:
+    TEMPLATE = '---\nid: SPEC-NNN\ntitle: "[Capability]"\nstatus: draft\nimplements:\n  - SPEC-NNN\napproved_at: null\n---\n\n# body\n'
+
+    def test_replaces_scalar_and_keeps_quotes(self):
+        out = orko.set_frontmatter(self.TEMPLATE, {"id": "SPEC-004", "title": "Demo"})
+        assert "id: SPEC-004\n" in out and 'title: "Demo"\n' in out
+
+    def test_list_renders_as_block_sequence(self):
+        out = orko.set_frontmatter(self.TEMPLATE, {"implements": ["SPEC-002"]})
+        assert "implements:\n  - SPEC-002\napproved_at" in out
+        assert "[SPEC" not in out.split("---")[1]
+
+    def test_none_renders_null_and_body_untouched(self):
+        out = orko.set_frontmatter(self.TEMPLATE, {"approved_at": None})
+        assert "approved_at: null\n" in out and out.endswith("# body\n")
+
+    def test_missing_key_is_appended(self):
+        out = orko.set_frontmatter(self.TEMPLATE, {"reviewer": "orko (a, b)"})
+        assert "reviewer: orko (a, b)\n---\n\n# body" in out
+
+    def test_no_frontmatter_raises(self):
+        with pytest.raises(ValueError):
+            orko.set_frontmatter("# body only\n", {"id": "SPEC-001"})
+
+
+class TestMintId:
+    def test_first_spec_is_001(self, workspace):
+        assert orko.next_id(workspace, "spec") == "SPEC-001"
+
+    def test_scans_every_dossier(self, workspace):
+        other = workspace / "docs/versions/0.2/specs"
+        other.mkdir(parents=True)
+        (other / "SPEC-003-old.md").write_text("x")
+        assert orko.next_id(workspace, "spec") == "SPEC-004"
+
+    def test_decision_and_adr_scan_their_own_dirs(self, workspace):
+        (workspace / "docs/decisions/DEC-007-x.md").write_text("x")
+        (workspace / "code/docs/adr/ADR-002-x.md").write_text("x")
+        assert orko.next_id(workspace, "decision") == "DEC-008"
+        assert orko.next_id(workspace, "adr") == "ADR-003"
