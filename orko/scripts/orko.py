@@ -129,6 +129,28 @@ PLAN_RED_FLAGS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 TASK_HEADING_RE = re.compile(r"^###\s+Task\s+\d+\s*:", re.MULTILINE)
+ACCEPTANCE_RE = re.compile(r"^\*\*Acceptance:\*\*\s*`?(?P<cmd>[^`\n]+)`?\s*$", re.MULTILINE)
+FILES_RE = re.compile(r"^-\s+(?:Create|Modify|Test|Delete):\s*`(?P<path>[^`]+)`", re.MULTILINE)
+
+
+def parse_tasks(text: str) -> list[dict]:
+    """One dict per `### Task N:` block of a `superpowers:writing-plans` file.
+
+    Parsed from the raw text, not `strip_code` output: the acceptance command
+    and the file paths live in backticks, and the Codex dispatch needs them.
+    """
+    heads = list(re.finditer(r"^### Task (?P<n>\d+):\s*(?P<title>.+)$", text, re.MULTILINE))
+    tasks = []
+    for index, head in enumerate(heads):
+        end = heads[index + 1].start() if index + 1 < len(heads) else len(text)
+        block = text[head.start():end].rstrip() + "\n"
+        acceptance = ACCEPTANCE_RE.search(block)
+        tasks.append(dict(
+            n=int(head.group("n")), title=head.group("title").strip(), body=block,
+            files=[match.group("path").split(":")[0] for match in FILES_RE.finditer(block)],
+            acceptance=acceptance.group("cmd").strip() if acceptance else None,
+        ))
+    return tasks
 
 
 def validate_plan(text: str) -> list[Finding]:
@@ -166,6 +188,10 @@ def validate_plan(text: str) -> list[Finding]:
             findings.append(Finding(line_no, "task block has no '**Files:**' subsection"))
         if not re.search(r"^\s*-\s*\[ \]\s*\*\*Step", block, re.MULTILINE):
             findings.append(Finding(line_no, "task block has no '- [ ] **Step' checkbox"))
+        # The Codex loop dispatches one command per task and judges delivery on
+        # its exit code. A task without one has no definition of done.
+        if not ACCEPTANCE_RE.search(block):
+            findings.append(Finding(line_no, "task block has no '**Acceptance:**' line"))
 
     return sorted(findings)
 
@@ -593,7 +619,7 @@ def next_task(ledger: Path) -> int:
 
 
 def _dispatched_base(entries: list[dict[str, str | None]],
-                     step: int | None) -> str | None:
+                     step: int | str | None) -> str | None:
     """Base SHA of the most recent `dispatched` line for `step`.
 
     This is what makes the resume rule actionable: after a compaction between a
@@ -709,9 +735,14 @@ PROMPT_SOURCES = {
     "plan-write": "plan-writer.md",
     "seat": "seat-prompt.md",
     "verifier": "verifier-prompt.md",
+    "task-review": "task-reviewer.md",
+    # `task` is assembled by `render_task_prompt`, not spliced from a charter:
+    # its routing line and its trailers are executor state, not prose.
+    "task": None,
 }
 REVIEW_KINDS = ("spec-review", "plan-review")
 SEAT_KINDS = ("seat", "verifier")
+TASK_KINDS = ("task", "task-review")
 LENS_ROW_RE = re.compile(r"^\|\s*([a-z][a-z0-9-]*)\s*\|\s*(.+?)\s*\|\s*$")
 
 
@@ -748,11 +779,69 @@ def _record_path_or(run: dict, type_: str, role: str, fallback: str) -> str:
     return str(Path(run["workspace"]) / entry["path"]) if entry else fallback
 
 
+def _task_or_exit(run: dict, n: int) -> dict | None:
+    try:
+        tasks = parse_tasks(Path(run["tasks"]).read_text(encoding="utf-8"))
+    except OSError:
+        print(f"orko: no tasks.md at {run['tasks']}", file=sys.stderr)
+        return None
+    for task in tasks:
+        if task["n"] == n:
+            return task
+    print(f"orko: tasks.md has no Task {n}", file=sys.stderr)
+    return None
+
+
+def render_task_prompt(run: dict, task: dict, attempt: str, failure: str | None) -> str:
+    """The whole Codex dispatch: routing line, then the task.
+
+    The routing flags lead the text rather than riding on the dispatching tool's
+    parameters, because the `Agent` tool's `model` cannot carry a Codex slug.
+    """
+    flags = ["--background", "--write", "--fresh" if attempt == "fresh" else "--resume"]
+    if run["codex_model"]:
+        flags += ["--model", run["codex_model"]]
+    if run["codex_effort"]:
+        flags += ["--effort", run["codex_effort"]]
+    spec_id = (record_for(Path(run["ledger"]), "spec", "spec") or {}).get("id", "SPEC-?")
+    plan_id = (record_for(Path(run["ledger"]), "plan", "plan") or {}).get("id", "PLAN-?")
+    lines = [
+        " ".join(flags), "",
+        f"Implement Task {task['n']} of the orko build for {run['topic']}.",
+        f"Refs: {spec_id}, {plan_id}. Cite both in the commit message.",
+        f"Boundaries: {run['boundaries']}",
+        f"Working directory: {run['code']} (the code repository). Do not touch {run['docs']}.",
+        f"Branch: orko/{run['slug']} (already checked out).",
+        "",
+        task["body"],
+        f"Acceptance: run `{task['acceptance']}` and make it exit 0.",
+        "For every requirement row this task satisfies, add or update a row in "
+        "docs/testing/README.md (in the code repository) mapping `SPEC-NNN R<n>` "
+        "to the test that proves it.",
+    ]
+    if failure:
+        lines += ["", f"The previous attempt failed: {failure}. Fix that first."]
+    lines += ["", "When the acceptance command passes, commit every change with a message that "
+              "starts with the task title, cites the Refs line, and ends with these trailers verbatim:",
+              *run["trailers"], "", "Leave the tree clean. Report the commit sha."]
+    return "\n".join(lines) + "\n"
+
+
 def cmd_prompt(args: argparse.Namespace) -> int:
     loaded = _load_run(args)
     if loaded is None:
         return 2
     _, run = loaded
+    if args.kind in TASK_KINDS:
+        if args.task is None:
+            print(f"orko: {args.kind} needs --task N", file=sys.stderr)
+            return 2
+        task = _task_or_exit(run, args.task)
+        if task is None:
+            return 2
+    if args.kind == "task":
+        sys.stdout.write(render_task_prompt(run, task, args.attempt, args.failure))
+        return 0
     source = references_dir() / PROMPT_SOURCES[args.kind]
     try:
         text = source.read_text(encoding="utf-8")
@@ -760,7 +849,12 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         print(f"orko: cannot read {source}: {error}", file=sys.stderr)
         return 2
 
-    findings_dir = Path(run["findings_dir"])
+    # Findings are filed under the step that asked for them: a task's two
+    # reviewers and a plan reviewer of the same lens name would otherwise
+    # overwrite each other in one flat directory.
+    findings_dir = Path(run["findings_dir"]) / (
+        f"5.{args.task}" if args.kind == "task-review" else str(run["next_step"]))
+    findings_dir.mkdir(parents=True, exist_ok=True)
     subs = {
         "{{SPEC_PATH}}": _record_path_or(run, "spec", "spec", "(no spec minted yet)"),
         "{{PLAN_PATH}}": _record_path_or(run, "plan", "plan", "(no plan minted yet)"),
@@ -783,6 +877,30 @@ def cmd_prompt(args: argparse.Namespace) -> int:
             return 2
         subs["{{ARTIFACT_PATH}}"] = subs[
             "{{SPEC_PATH}}" if args.kind == "spec-review" else "{{PLAN_PATH}}"]
+        subs["{{LENS_NAME}}"] = args.lens
+        subs["{{LENS_QUESTION}}"] = lenses[args.lens]
+        subs["{{FINDINGS_PATH}}"] = str(findings_dir / f"{args.lens}.md")
+        text = _strip_lenses(text)
+    elif args.kind == "task-review":
+        if not args.lens:
+            print(f"orko: {args.kind} needs --lens", file=sys.stderr)
+            return 2
+        lenses = _lenses(text)
+        if args.lens not in lenses:
+            print(f"orko: unknown lens {args.lens!r}; valid: {', '.join(lenses)}",
+                  file=sys.stderr)
+            return 2
+        entries = _ledger_entries(Path(run["ledger"]))
+        base = _dispatched_base(entries, f"5.{args.task}")
+        # No base means no recorded dispatch for this task. Guessing one would
+        # hand the reviewer somebody else's diff, so refuse instead.
+        if base is None:
+            print(f"orko: no ledger 5.{args.task} dispatched --commit line",
+                  file=sys.stderr)
+            return 2
+        subs["{{TASK_N}}"] = str(task["n"])
+        subs["{{TASK_BODY}}"] = task["body"].rstrip()
+        subs["{{DIFF_BASE}}"] = base
         subs["{{LENS_NAME}}"] = args.lens
         subs["{{LENS_QUESTION}}"] = lenses[args.lens]
         subs["{{FINDINGS_PATH}}"] = str(findings_dir / f"{args.lens}.md")
@@ -1726,6 +1844,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_prompt.add_argument("--seat")
     p_prompt.add_argument("--question")
     p_prompt.add_argument("--context-file")
+    p_prompt.add_argument("--task", type=int)
+    p_prompt.add_argument("--attempt", choices=["fresh", "resume"], default="fresh")
+    p_prompt.add_argument("--failure")
     p_prompt.add_argument("--workspace")
     p_prompt.set_defaults(func=cmd_prompt)
 

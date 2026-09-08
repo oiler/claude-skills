@@ -639,6 +639,8 @@ PLAN_OK = """# Demo Implementation Plan
 **Files:**
 - Create: `src/demo.py`
 
+**Acceptance:** `uv run pytest -q`
+
 - [ ] **Step 1: Write the failing test**
 
 - [ ] **Step 2: Commit**
@@ -708,7 +710,7 @@ class TestPrompt:
         assert "(no spec minted yet)" in out
         assert str(workspace / "docs") in out
         assert str(workspace / "code") in out
-        assert str(workspace / ".orko/demo-topic/findings/security.md") in out
+        assert str(workspace / ".orko/demo-topic/findings/0/security.md") in out
         assert "Your lens is **security**" in out
         assert "trust boundary" in out
         assert "## Lenses" not in out
@@ -759,7 +761,7 @@ class TestPrompt:
         assert "You are the perf on an orko engagement" in out
         assert "Where is the N+1?" in out
         assert "Look at src/hot.py" in out
-        assert str(workspace / ".orko/demo-topic/findings/perf.md") in out
+        assert str(workspace / ".orko/demo-topic/findings/1/perf.md") in out
         assert "{{" not in out
 
     def test_verifier_prompt_names_findings_and_verdict_paths(self, workspace, capsys):
@@ -770,8 +772,8 @@ class TestPrompt:
                    "--question", "Where is the N+1?",
                    "--context-file", str(ctx), "--workspace", str(workspace)])
         out = capsys.readouterr().out
-        assert str(workspace / ".orko/demo-topic/findings/perf.md") in out
-        assert str(workspace / ".orko/demo-topic/findings/perf.verdict.md") in out
+        assert str(workspace / ".orko/demo-topic/findings/1/perf.md") in out
+        assert str(workspace / ".orko/demo-topic/findings/1/perf.verdict.md") in out
         assert "{{" not in out
 
     def test_seat_records_the_question_for_a_later_verifier(self, workspace, capsys):
@@ -796,7 +798,7 @@ class TestPrompt:
                           "--context-file", str(ctx),
                           "--workspace", str(workspace)]) == 0
         out = capsys.readouterr().out
-        assert str(workspace / ".orko/demo-topic/findings/perf.verdict.md") in out
+        assert str(workspace / ".orko/demo-topic/findings/1/perf.verdict.md") in out
         assert "{{" not in out
 
     def test_verifier_without_a_question_or_a_record_is_a_usage_error(self, workspace, capsys):
@@ -853,6 +855,88 @@ class TestPrompt:
         lenses = orko._lenses(text)
         assert set(lenses) == {"requirements", "architecture", "testability", "security"}
         assert lenses["security"].endswith("handled?")
+
+
+class TestPromptTask:
+    def _codex_run(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex",
+                              "--codex-model", "gpt-5.6-sol", "--codex-effort", "high")
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        rec(workspace, capsys, "plan", "--slug", "demo-topic", "--title", "Plan", "--implements", "SPEC-001")
+        shutil.copy(Path(orko.__file__).parent / "fixtures/tasks.md", payload["tasks"])
+        return payload
+
+    def test_task_prompt_carries_every_input(self, workspace, capsys):
+        self._codex_run(workspace, capsys)
+        capsys.readouterr()
+        assert orko.main(["prompt", "task", "demo-topic", "--task", "1", "--workspace", str(workspace)]) == 0
+        text = capsys.readouterr().out
+        assert text.startswith("--background --write --fresh --model gpt-5.6-sol --effort high\n")
+        for needle in ("SPEC-001", "PLAN-001", "code/ only", str(workspace / "code"), "orko/demo-topic",
+                       "Co-Authored-By: T", "Claude-Session:", "### Task 1", "docs/testing/README.md"):
+            assert needle in text, needle
+        assert "{{" not in text
+
+    def test_resume_attempt_names_failure(self, workspace, capsys):
+        self._codex_run(workspace, capsys)
+        capsys.readouterr()
+        orko.main(["prompt", "task", "demo-topic", "--task", "1", "--attempt", "resume",
+                   "--failure", "acceptance command exited 1", "--workspace", str(workspace)])
+        text = capsys.readouterr().out
+        assert text.startswith("--background --write --resume") and "acceptance command exited 1" in text
+
+    def test_unknown_task_exits_2(self, workspace, capsys):
+        self._codex_run(workspace, capsys)
+        assert orko.main(["prompt", "task", "demo-topic", "--task", "99", "--workspace", str(workspace)]) == 2
+
+    def test_task_review_prompt_and_findings_path(self, workspace, capsys):
+        payload = self._codex_run(workspace, capsys)
+        orko.main(["ledger", "5.1", "dispatched", "--commit", "a" * 40, "--slug", "demo-topic", "--workspace", str(workspace)])
+        capsys.readouterr()
+        assert orko.main(["prompt", "task-review", "demo-topic", "--task", "1", "--lens", "code-quality",
+                          "--workspace", str(workspace)]) == 0
+        text = capsys.readouterr().out
+        assert "{{" not in text and "## Lenses" not in text
+        assert f"{payload['findings_dir']}/5.1/code-quality.md" in text and ("a" * 40) in text
+        assert (Path(payload["findings_dir"]) / "5.1").is_dir()
+
+    def test_task_review_unknown_lens_exits_2(self, workspace, capsys):
+        self._codex_run(workspace, capsys)
+        assert orko.main(["prompt", "task-review", "demo-topic", "--task", "1", "--lens", "vibes",
+                          "--workspace", str(workspace)]) == 2
+
+    def test_task_kinds_require_a_task_number(self, workspace, capsys):
+        self._codex_run(workspace, capsys)
+        capsys.readouterr()
+        assert orko.main(["prompt", "task", "demo-topic", "--workspace", str(workspace)]) == 2
+        assert "needs --task" in capsys.readouterr().err
+
+    def test_task_review_requires_a_lens(self, workspace, capsys):
+        self._codex_run(workspace, capsys)
+        capsys.readouterr()
+        assert orko.main(["prompt", "task-review", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 2
+        assert "needs --lens" in capsys.readouterr().err
+
+    def test_task_review_without_a_dispatched_base_exits_2(self, workspace, capsys):
+        self._codex_run(workspace, capsys)
+        capsys.readouterr()
+        assert orko.main(["prompt", "task-review", "demo-topic", "--task", "1",
+                          "--lens", "code-quality", "--workspace", str(workspace)]) == 2
+        assert "no ledger 5.1 dispatched" in capsys.readouterr().err
+
+    def test_check_tasks_requires_acceptance_line(self, tmp_path):
+        text = (Path(orko.__file__).parent / "fixtures/tasks.md").read_text().replace("**Acceptance:**", "**Accept:**")
+        p = tmp_path / "t.md"; p.write_text(text)
+        assert orko.main(["check", "tasks", str(p)]) == 1
+
+    def test_parse_tasks_reads_files_and_acceptance(self):
+        text = (Path(orko.__file__).parent / "fixtures/tasks.md").read_text()
+        tasks = orko.parse_tasks(text)
+        assert [task["n"] for task in tasks] == list(range(1, 12))
+        assert tasks[0]["acceptance"] == "uv run pytest -q"
+        assert "orko/scripts/orko.py" in tasks[0]["files"]
+        assert tasks[0]["body"].startswith("### Task 1:")
 
 
 class TestEscalations:
