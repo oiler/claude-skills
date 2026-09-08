@@ -184,6 +184,32 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
     return 1
 
 
+SPEC_ID_RE = re.compile(r"^[A-Z]+-[0-9]{3}$")
+
+
+def cmd_check_spec(args: argparse.Namespace) -> int:
+    """Run the scaffold's own spec-check.sh and pass its verdict through."""
+    if not SPEC_ID_RE.fullmatch(args.id):
+        print(f"orko: {args.id!r} is not an ID like SPEC-001", file=sys.stderr)
+        return 2
+    ws = resolve_workspace(args)
+    if ws is None:
+        return 2
+    docs, script = ws / "docs", ws / "code/scripts/spec-check.sh"
+    if not docs.is_dir() or not script.is_file():
+        print("orko: workspace lacks docs/ or code/scripts/spec-check.sh", file=sys.stderr)
+        return 2
+    result = subprocess.run([str(script), args.id, "--docs", str(docs)],
+                            capture_output=True, text=True, check=False)
+    sys.stdout.write(result.stdout)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    if args.require_plan and result.returncode == 0 and "no PLAN" in result.stdout:
+        print(f"plan-missing: spec-check found no plan implementing {args.id}")
+        return 1
+    return result.returncode
+
+
 def slugify(topic: str) -> str:
     """Lowercase ASCII slug. Raises ValueError if nothing survives."""
     ascii_only = (
@@ -1423,6 +1449,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_ct = check_sub.add_parser("tasks")
     p_ct.add_argument("path")
     p_ct.set_defaults(func=cmd_check_tasks)
+
+    p_cs = check_sub.add_parser("spec")
+    p_cs.add_argument("id")
+    p_cs.add_argument("--slug")
+    p_cs.add_argument("--workspace")
+    p_cs.add_argument("--require-plan", action="store_true")
+    p_cs.set_defaults(func=cmd_check_spec)
 
     p_record = sub.add_parser("record", help="mint or update a scaffold record")
     record_sub = p_record.add_subparsers(dest="kind", required=True)

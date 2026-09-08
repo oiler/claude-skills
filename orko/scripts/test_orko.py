@@ -1352,3 +1352,50 @@ class TestOverwriteGuard:
         ledger, path = self._committed_spec(workspace, capsys)
         path.write_text(path.read_text() + "\nhuman edit\n")
         assert rec(workspace, capsys, "status", "--slug", "demo-topic", "--id", "SPEC-001", "--status", "in_review")[0] == 2
+
+
+def apply_body(path: Path, body_fixture: str) -> None:
+    text = path.read_text()
+    head = text.split("\n## ", 1)[0]          # frontmatter + title
+    body = (Path(orko.__file__).parent / "fixtures" / body_fixture).read_text()
+    path.write_text(head + "\n" + body)
+
+
+class TestCheckSpec:
+    def _spec(self, workspace, capsys):
+        init_run(workspace, capsys)
+        _, out = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        apply_body(Path(out["path"]), "spec-body.md")
+        return out
+
+    def test_fixture_spec_passes_without_plan(self, workspace, capsys):
+        self._spec(workspace, capsys)
+        capsys.readouterr()
+        assert orko.main(["check", "spec", "SPEC-001", "--slug", "demo-topic", "--workspace", str(workspace)]) == 0
+        assert "READY SPEC-001" in capsys.readouterr().out
+
+    def test_plan_mapping_is_asserted_positively(self, workspace, capsys):
+        self._spec(workspace, capsys)
+        _, plan = rec(workspace, capsys, "plan", "--slug", "demo-topic", "--title", "Plan", "--implements", "SPEC-001")
+        apply_body(Path(plan["path"]), "plan-body.md")
+        capsys.readouterr()
+        assert orko.main(["check", "spec", "SPEC-001", "--slug", "demo-topic", "--workspace", str(workspace)]) == 0
+        out = capsys.readouterr().out
+        assert "ok   plan maps R1" in out and "no PLAN" not in out
+
+    def test_require_plan_fails_without_plan(self, workspace, capsys):
+        self._spec(workspace, capsys)
+        capsys.readouterr()
+        assert orko.main(["check", "spec", "SPEC-001", "--require-plan", "--slug", "demo-topic", "--workspace", str(workspace)]) == 1
+        assert "plan-missing" in capsys.readouterr().out
+
+    def test_bad_id_and_missing_docs_exit_2(self, workspace, capsys):
+        init_run(workspace, capsys)
+        assert orko.main(["check", "spec", "spec-1", "--slug", "demo-topic", "--workspace", str(workspace)]) == 2
+        shutil.rmtree(workspace / "docs")
+        assert orko.main(["check", "spec", "SPEC-001", "--slug", "demo-topic", "--workspace", str(workspace)]) == 2
+
+    def test_failing_spec_exits_1(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")  # template body, placeholders remain
+        assert orko.main(["check", "spec", "SPEC-001", "--slug", "demo-topic", "--workspace", str(workspace)]) == 1
