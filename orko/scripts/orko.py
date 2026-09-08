@@ -12,16 +12,16 @@ priming a reviewer with the authoring session's context turns a fresh critique
 into an echo of the author.
 
 Usage:
-    uv run orko.py init {analysis|build} <topic> --team KEY [--root DIR] [--date YYYY-MM-DD]
-    uv run orko.py ledger <step> <status> --slug SLUG [--commit SHA] [--root DIR]
-    uv run orko.py status [<slug>] [--root DIR]
+    uv run orko.py init {analysis|build} <topic> --team KEY --workspace DIR [--date YYYY-MM-DD]
+    uv run orko.py ledger <step> <status> --slug SLUG [--commit SHA] [--workspace DIR]
+    uv run orko.py status [<slug>] [--workspace DIR]
     uv run orko.py check tasks <path>
-    uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--root DIR]
-    uv run orko.py prompt plan-write <slug> [--root DIR]
-    uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--root DIR]
-    uv run orko.py prompt verifier <slug> --seat NAME [--question TEXT] --context-file PATH [--root DIR]
-    uv run orko.py escalations <slug> [--root DIR]
-    uv run orko.py preflight [--slug SLUG | --mode {analysis|build}] [--root DIR]
+    uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--workspace DIR]
+    uv run orko.py prompt plan-write <slug> [--workspace DIR]
+    uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--workspace DIR]
+    uv run orko.py prompt verifier <slug> --seat NAME [--question TEXT] --context-file PATH [--workspace DIR]
+    uv run orko.py escalations <slug> [--workspace DIR]
+    uv run orko.py preflight [--slug SLUG | --mode {analysis|build}] [--workspace DIR]
 
 Exit codes: 0 success / all checks pass; 1 validation failures; 2 usage or IO error.
 """
@@ -185,15 +185,46 @@ def slugify(topic: str) -> str:
     return slug
 
 
-def find_repo_root(start: Path) -> Path | None:
-    """Git toplevel of `start`, or None when `start` is not inside a repo."""
+def is_git_repo(path: Path) -> bool:
     result = subprocess.run(
-        ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
         capture_output=True, text=True, check=False,
     )
-    if result.returncode != 0:
-        return None
-    return Path(result.stdout.strip())
+    return result.returncode == 0 and Path(result.stdout.strip()) == path.resolve()
+
+
+# Each condition is one finding, so a test can remove exactly one and see
+# exactly one test go red (mutation rule in the spec's Testing section).
+def validate_workspace(ws: Path) -> list[str]:
+    findings: list[str] = []
+    if not is_git_repo(ws / "docs"):
+        findings.append("docs-not-a-repo")
+    if not is_git_repo(ws / "code"):
+        findings.append("code-not-a-repo")
+    if not (ws / "docs" / "versions").is_dir():
+        findings.append("versions-missing")
+    if not (ws / "code" / "scripts" / "spec-check.sh").is_file():
+        findings.append("spec-check-missing")
+    return findings
+
+
+def find_workspace(start: Path) -> Path | None:
+    """Nearest ancestor holding docs/, code/, and .orko/. The workspace root
+    is not a repository, so git cannot find it; the run directory can."""
+    for candidate in (start.resolve(), *start.resolve().parents):
+        if all((candidate / name).is_dir() for name in ("docs", "code", ".orko")):
+            return candidate
+    return None
+
+
+def resolve_workspace(args: argparse.Namespace) -> Path | None:
+    if getattr(args, "workspace", None):
+        return Path(args.workspace).resolve()
+    found = find_workspace(Path.cwd())
+    if found is None:
+        print(f"orko: no workspace found above {Path.cwd()}; pass --workspace",
+              file=sys.stderr)
+    return found
 
 
 def compute_paths(root: Path, slug: str, date: str) -> dict[str, str]:
@@ -260,9 +291,11 @@ def _parse_header(ledger: Path) -> dict[str, str] | None:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    root = Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+    ws = Path(args.workspace).resolve()
+    findings = validate_workspace(ws)
+    if findings:
+        for finding in findings:
+            print(f"orko: {finding}", file=sys.stderr)
         return 2
     if CONTROL_RE.search(args.topic):
         print("orko: topic contains a newline or control character; the ledger "
@@ -274,9 +307,9 @@ def cmd_init(args: argparse.Namespace) -> int:
     except ValueError as error:
         print(f"orko: {error}", file=sys.stderr)
         return 2
-    paths = compute_paths(root, slug, date)
+    paths = compute_paths(ws, slug, date)
     ledger = Path(paths["ledger"])
-    ensure_gitignored(root)
+    ensure_gitignored(ws)
 
     resumed = False
     if ledger.exists():
@@ -295,7 +328,7 @@ def cmd_init(args: argparse.Namespace) -> int:
                   file=sys.stderr)
             return 2
         resumed = True
-        paths = compute_paths(root, slug, existing["date"])
+        paths = compute_paths(ws, slug, existing["date"])
     else:
         ledger.parent.mkdir(parents=True, exist_ok=True)
         for key in ("findings_dir", "context_dir", "unposted_dir"):
@@ -395,17 +428,11 @@ def _describe_run(root: Path, slug: str) -> dict | None:
     )
 
 
-def _resolved_root(args: argparse.Namespace) -> Path | None:
-    """Shared root resolution. None means: not a repo, report exit 2."""
-    return Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
-
-
 def cmd_ledger(args: argparse.Namespace) -> int:
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+    ws = resolve_workspace(args)
+    if ws is None:
         return 2
-    ledger = _run_dir_root(root) / args.slug / "progress.md"
+    ledger = _run_dir_root(ws) / args.slug / "progress.md"
     header = _parse_header(ledger)
     if header is None:
         print(f"orko: no run named {args.slug!r}; run init first", file=sys.stderr)
@@ -427,16 +454,15 @@ def cmd_ledger(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+    ws = resolve_workspace(args)
+    if ws is None:
         return 2
 
     if args.slug:
-        if not (_run_dir_root(root) / args.slug / "progress.md").exists():
+        if not (_run_dir_root(ws) / args.slug / "progress.md").exists():
             print(f"orko: no run named {args.slug!r}", file=sys.stderr)
             return 2
-        run = _describe_run(root, args.slug)
+        run = _describe_run(ws, args.slug)
         if run is None:
             print(f"orko: unreadable ledger header for run {args.slug!r}",
                   file=sys.stderr)
@@ -444,11 +470,11 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(json.dumps(run, indent=2))
         return 0
 
-    base = _run_dir_root(root)
+    base = _run_dir_root(ws)
     slugs = sorted(
         child.name for child in base.iterdir() if (child / "progress.md").exists()
     ) if base.exists() else []
-    runs = [_describe_run(root, slug) for slug in slugs]
+    runs = [_describe_run(ws, slug) for slug in slugs]
     print(json.dumps([run for run in runs if run is not None], indent=2))
     return 0
 
@@ -596,11 +622,10 @@ def cmd_escalations(args: argparse.Namespace) -> int:
     halt a run, and an orchestrator with no `ls`/`test` permission has no other
     way to tell an absent file from an empty one.
     """
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+    ws = resolve_workspace(args)
+    if ws is None:
         return 2
-    run_dir = _run_dir_root(root) / args.slug
+    run_dir = _run_dir_root(ws) / args.slug
     if not (run_dir / "progress.md").exists():
         print(f"orko: no run named {args.slug!r}", file=sys.stderr)
         return 2
@@ -633,26 +658,20 @@ def _current_branch(root: Path) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def _is_git_repo(root: Path) -> bool:
-    return find_repo_root(root) is not None
-
-
 def cmd_preflight(args: argparse.Namespace) -> int:
     """Check in code what the prose used to ask the conductor to check.
 
     Prose that asks the conductor to check something is a check nothing runs;
     each condition here was once such a sentence.
     """
-    root = Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
-    if root is None or not _is_git_repo(root):
-        print(f"orko: not inside a git repository: {root or Path.cwd()}",
-              file=sys.stderr)
+    ws = resolve_workspace(args)
+    if ws is None:
         return 2
 
     mode = args.mode
     run = None
     if args.slug:
-        run = _describe_run(root, args.slug)
+        run = _describe_run(ws, args.slug)
         if run is None:
             print(f"orko: no run named {args.slug!r}", file=sys.stderr)
             return 2
@@ -664,11 +683,11 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     findings: list[str] = []
     if shutil.which("uv") is None:
         findings.append("uv-missing: `uv` is not on PATH; every script call needs it")
-    branch = _current_branch(root)
+    branch = _current_branch(ws)
     if mode == "build" and branch in DEFAULT_BRANCHES:
         findings.append(f"on-default-branch: HEAD is {branch}; a build runs on "
                         "orko/<slug>, never on a default branch")
-    gitignore = root / ".gitignore"
+    gitignore = ws / ".gitignore"
     ignored = gitignore.exists() and any(
         line.strip() == ".orko/" for line in gitignore.read_text(encoding="utf-8").splitlines()
     )
@@ -686,15 +705,14 @@ def cmd_preflight(args: argparse.Namespace) -> int:
 
 
 def _load_run(args: argparse.Namespace) -> tuple[Path, dict] | None:
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+    ws = resolve_workspace(args)
+    if ws is None:
         return None
-    run = _describe_run(root, args.slug)
+    run = _describe_run(ws, args.slug)
     if run is None:
         print(f"orko: no run named {args.slug!r}", file=sys.stderr)
         return None
-    return root, run
+    return ws, run
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -705,7 +723,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("mode", choices=sorted(MODES))
     p_init.add_argument("topic")
     p_init.add_argument("--team", required=True, help="Linear team key, e.g. JRF")
-    p_init.add_argument("--root", help="repo root (default: git toplevel of cwd)")
+    p_init.add_argument("--workspace", required=True,
+                        help="scaffold workspace root holding docs/ and code/")
     p_init.add_argument("--date", help="YYYY-MM-DD (default: today)")
     p_init.set_defaults(func=cmd_init)
 
@@ -714,13 +733,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_ledger.add_argument(
         "status", choices=["dispatched", "complete", "failed", "escalated"])
     p_ledger.add_argument("--slug", required=True)
-    p_ledger.add_argument("--root")
+    p_ledger.add_argument("--workspace")
     p_ledger.add_argument("--commit")
     p_ledger.set_defaults(func=cmd_ledger)
 
     p_status = sub.add_parser("status", help="print the resume point")
     p_status.add_argument("slug", nargs="?")
-    p_status.add_argument("--root")
+    p_status.add_argument("--workspace")
     p_status.set_defaults(func=cmd_status)
 
     p_check = sub.add_parser("check", help="validate an artifact")
@@ -736,19 +755,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_prompt.add_argument("--seat")
     p_prompt.add_argument("--question")
     p_prompt.add_argument("--context-file")
-    p_prompt.add_argument("--root")
+    p_prompt.add_argument("--workspace")
     p_prompt.set_defaults(func=cmd_prompt)
 
     p_escalations = sub.add_parser(
         "escalations", help="0 when there is nothing to escalate, 1 when there is")
     p_escalations.add_argument("slug")
-    p_escalations.add_argument("--root")
+    p_escalations.add_argument("--workspace")
     p_escalations.set_defaults(func=cmd_escalations)
 
     p_pre = sub.add_parser("preflight", help="check repo, branch, tooling, and record state")
     p_pre.add_argument("--slug")
     p_pre.add_argument("--mode", choices=sorted(MODES))
-    p_pre.add_argument("--root")
+    p_pre.add_argument("--workspace")
     p_pre.set_defaults(func=cmd_preflight)
 
     return parser

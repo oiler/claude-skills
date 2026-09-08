@@ -1,6 +1,7 @@
 """Tests for orko.py — the deterministic spine of the orko skill."""
 import hashlib
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -819,3 +820,36 @@ class TestFixtureWorkspace:
             pytest.skip("scaffold not checked out")
         ours = FIXTURE_WORKSPACE / "code/scripts/spec-check.sh"
         assert hashlib.sha256(ours.read_bytes()).hexdigest() == hashlib.sha256(scaffold.read_bytes()).hexdigest()
+
+
+class TestWorkspace:
+    def test_valid_fixture_has_no_findings(self, workspace):
+        assert orko.validate_workspace(workspace) == []
+
+    def test_refuses_docs_not_a_repo(self, workspace):
+        shutil.rmtree(workspace / "docs" / ".git")
+        assert orko.validate_workspace(workspace) == ["docs-not-a-repo"]
+
+    def test_refuses_code_not_a_repo(self, workspace):
+        shutil.rmtree(workspace / "code" / ".git")
+        assert orko.validate_workspace(workspace) == ["code-not-a-repo"]
+
+    def test_refuses_versions_missing(self, workspace):
+        shutil.rmtree(workspace / "docs" / "versions")
+        assert orko.validate_workspace(workspace) == ["versions-missing"]
+
+    def test_refuses_spec_check_missing(self, workspace):
+        (workspace / "code" / "scripts" / "spec-check.sh").unlink()
+        assert orko.validate_workspace(workspace) == ["spec-check-missing"]
+
+    def test_find_workspace_walks_up_from_docs_and_code(self, workspace):
+        (workspace / ".orko").mkdir()
+        assert orko.find_workspace(workspace / "docs" / "templates") == workspace
+        assert orko.find_workspace(workspace / "code" / "scripts") == workspace
+        assert orko.find_workspace(workspace) == workspace
+
+    def test_find_workspace_requires_orko_dir(self, workspace):
+        assert orko.find_workspace(workspace) is None
+
+    def test_find_workspace_outside_is_none(self, tmp_path):
+        assert orko.find_workspace(tmp_path) is None
