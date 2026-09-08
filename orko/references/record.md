@@ -14,7 +14,7 @@ One row per orko event. `<slug>` is the run slug from `init`, `<v>` is the activ
 
 | orko event | Record | Repository | Status | Human field | Command |
 |---|---|---|---|---|---|
-| Build intake | `STATUS.md` In progress line and `as_of`; version README index row per minted ID | `docs/` | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py init build "<topic>" --workspace <path> --owner <name> --boundaries "<text>" --trailer "<line>" --trailer "<line>"` |
+| Build intake | `STATUS.md` In progress line; version README index row per minted ID | `docs/` | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py init build "<topic>" --workspace <path> --owner <name> --boundaries "<text>" --trailer "<line>" --trailer "<line>"` |
 | Spec drafted | `versions/<v>/specs/SPEC-NNN-<slug>.md` | `docs/` | `draft` | `approved_at` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record spec --slug <slug> --title "<title>"` |
 | Spec review round | `versions/<v>/reviews/REVIEW-NNN-<slug>-spec.md`, `reviews:` naming `SPEC-NNN`, `revision:` the `docs/` commit reviewed | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role spec --reviews SPEC-NNN --revision <sha> --from-findings .orko/<slug>/findings/2` |
 | Plan drafted | `versions/<v>/plans/PLAN-NNN-<slug>.md`, `implements:` naming `SPEC-NNN` | `docs/` | `draft` | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record plan --slug <slug> --title "<title>" --implements SPEC-NNN` |
