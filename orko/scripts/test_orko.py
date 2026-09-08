@@ -932,6 +932,46 @@ class TestPreflight:
         code, out = self._pf(workspace, capsys)
         assert "docs-dirty" in out and "code-dirty" in out
 
+    def test_finding_order_is_dirty_pair_then_branch_pair(self, workspace, capsys):
+        init_run(workspace, capsys)
+        (workspace / "code/x").write_text("x")
+        code, out = self._pf(workspace, capsys)
+        assert code == 1
+        assert out.index("docs-dirty") < out.index("code-dirty")
+        assert out.index("code-dirty") < out.index("docs-on-default-branch")
+        assert out.index("docs-on-default-branch") < out.index("code-on-default-branch")
+
+    def test_analysis_run_may_sit_on_default_branches(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis", "Why slow")
+        if orko._dirty(workspace / "docs"):
+            orko.main(["commit", "docs", "--slug", "why-slow", "--message", "intake",
+                       "--workspace", str(workspace)])
+        code, out = self._pf(workspace, capsys, slug="why-slow")
+        assert code == 0, out
+        assert "-on-default-branch" not in out
+
+    def test_analysis_step_5_needs_no_accepted_spec(self, workspace, capsys):
+        # analysis step 5 is "synthesize", not "execute": the accepted-spec gate
+        # is a build gate, and the mode guard on it is what keeps it one.
+        init_run(workspace, capsys, "analysis", "Why slow")
+        if orko._dirty(workspace / "docs"):
+            orko.main(["commit", "docs", "--slug", "why-slow", "--message", "intake",
+                       "--workspace", str(workspace)])
+        for step in "1234":
+            orko.main(["ledger", step, "complete", "--slug", "why-slow",
+                       "--workspace", str(workspace)])
+        code, out = self._pf(workspace, capsys, slug="why-slow")
+        assert code == 0, out
+
+    def test_missing_uv_is_reported(self, workspace, capsys, monkeypatch):
+        init_run(workspace, capsys)
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "intake", "--path", "STATUS.md", "--workspace", str(workspace)])
+        self._branch(workspace)
+        monkeypatch.setattr(orko.shutil, "which",
+                            lambda name: None if name == "uv" else "/usr/bin/" + name)
+        code, out = self._pf(workspace, capsys)
+        assert code == 1 and "uv-missing" in out
+
     def test_spec_not_accepted_at_step_5_and_rehash_on_pass(self, workspace, capsys):
         _, payload = init_run(workspace, capsys)
         _, spec = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")

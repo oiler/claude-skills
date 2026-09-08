@@ -932,6 +932,9 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     for repo in ("docs", "code"):
         if _dirty(ws / repo):
             findings.append(f"{repo}-dirty: uncommitted changes in {repo}/")
+    # A second loop, not a second clause in the first: the findings print in
+    # the order they are appended, and the interface fixes that order.
+    for repo in ("docs", "code"):
         branch = _current_branch(ws / repo)
         if run["mode"] == "build" and branch in DEFAULT_BRANCHES:
             findings.append(f"{repo}-on-default-branch: {repo}/ is on {branch}; a "
