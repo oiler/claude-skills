@@ -129,7 +129,11 @@ PLAN_RED_FLAGS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 TASK_HEADING_RE = re.compile(r"^###\s+Task\s+\d+\s*:", re.MULTILINE)
-ACCEPTANCE_RE = re.compile(r"^\*\*Acceptance:\*\*\s*`?(?P<cmd>[^`\n]+)`?\s*$", re.MULTILINE)
+# `[ \t]*`, never `\s*`: `\s` spans newlines, so an empty `**Acceptance:**` line
+# would harvest the next line as the command and hand `**Interfaces:**` to a
+# `--write` Codex dispatch as something to run.
+ACCEPTANCE_RE = re.compile(r"^\*\*Acceptance:\*\*[ \t]*`?(?P<cmd>[^`\n]+)`?[ \t]*$",
+                           re.MULTILINE)
 FILES_RE = re.compile(r"^-\s+(?:Create|Modify|Test|Delete):\s*`(?P<path>[^`]+)`", re.MULTILINE)
 
 
@@ -787,6 +791,12 @@ def _task_or_exit(run: dict, n: int) -> dict | None:
         return None
     for task in tasks:
         if task["n"] == n:
+            # The acceptance command is the whole definition of done for a Codex
+            # dispatch. Rendering `None` into one would ask it to run nothing and
+            # call that a pass.
+            if task["acceptance"] is None:
+                print(f"orko: Task {n} has no **Acceptance:** command", file=sys.stderr)
+                return None
             return task
     print(f"orko: tasks.md has no Task {n}", file=sys.stderr)
     return None
@@ -842,6 +852,13 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     if args.kind == "task":
         sys.stdout.write(render_task_prompt(run, task, args.attempt, args.failure))
         return 0
+    # Every other kind files its findings under the step that asked for them, and
+    # a complete run has no such step. A `findings/None/` directory is a defect,
+    # not a resting place.
+    if run["next_step"] is None and args.kind != "task-review":
+        print(f"orko: run {run['slug']} is complete; nothing left to prompt",
+              file=sys.stderr)
+        return 2
     source = references_dir() / PROMPT_SOURCES[args.kind]
     try:
         text = source.read_text(encoding="utf-8")

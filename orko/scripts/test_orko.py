@@ -833,6 +833,17 @@ class TestPrompt:
                         "--workspace", str(workspace)])
         assert rc == 2
 
+    def test_a_complete_run_has_no_step_left_to_prompt(self, workspace, capsys):
+        init_run(workspace, capsys)
+        for step in sorted(orko.MODES["build"]):
+            orko.main(["ledger", str(step), "complete", "--slug", "demo-topic",
+                       "--workspace", str(workspace)])
+        capsys.readouterr()
+        assert orko.main(["prompt", "spec-review", "demo-topic", "--lens", "security",
+                          "--workspace", str(workspace)]) == 2
+        assert "is complete; nothing left to prompt" in capsys.readouterr().err
+        assert not (workspace / ".orko/demo-topic/findings/None").exists()
+
     def test_no_charter_names_a_single_repository_root(self):
         for name in ("spec-reviewer.md", "plan-reviewer.md", "plan-writer.md"):
             text = (orko.references_dir() / name).read_text(encoding="utf-8")
@@ -924,6 +935,24 @@ class TestPromptTask:
         assert orko.main(["prompt", "task-review", "demo-topic", "--task", "1",
                           "--lens", "code-quality", "--workspace", str(workspace)]) == 2
         assert "no ledger 5.1 dispatched" in capsys.readouterr().err
+
+    def test_prompt_task_refuses_task_without_acceptance(self, workspace, capsys):
+        payload = self._codex_run(workspace, capsys)
+        tasks = Path(payload["tasks"])
+        tasks.write_text(tasks.read_text().replace(
+            "**Acceptance:** `uv run pytest -q`", "**Acceptance:**"))
+        capsys.readouterr()
+        assert orko.main(["prompt", "task", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 2
+        assert "Task 1 has no **Acceptance:** command" in capsys.readouterr().err
+
+    def test_check_tasks_rejects_empty_acceptance_line(self, tmp_path, capsys):
+        text = PLAN_OK.replace("**Acceptance:** `uv run pytest -q`\n",
+                               "**Acceptance:**\n\n**Interfaces:**\n")
+        p = tmp_path / "t.md"
+        p.write_text(text)
+        assert orko.main(["check", "tasks", str(p)]) == 1
+        assert "no '**Acceptance:**' line" in capsys.readouterr().out
 
     def test_check_tasks_requires_acceptance_line(self, tmp_path):
         text = (Path(orko.__file__).parent / "fixtures/tasks.md").read_text().replace("**Acceptance:**", "**Accept:**")
