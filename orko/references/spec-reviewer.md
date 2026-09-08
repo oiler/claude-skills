@@ -21,9 +21,16 @@ When done:
 
 ### FINDINGS — Seat: {{LENS_NAME}}
 - Verdict: <one line>
-- Evidence: <each point tied to a file:line, a quoted spec line, or a tool result>
-- Recommendations: <ordered; each one a concrete edit the conductor could make>
 - Confidence & gaps: <what is uncertain or unchecked>
+
+#### F1 — <title>
+- Severity: blocking|high|medium|low|note
+- Evidence: <file:line or tool result>
+- Requirement: <SPEC-NNN R<n>, policy, or principle>
+- Impact: <consequence>
+- Recommendation: <concrete edit>
+
+Repeat the `#### F<n>` block, numbered from 1, for every finding.
 
 2. Return to the conductor ONLY the file path, your one-line verdict, and your confidence (high/medium/low). Do not paste the findings into your return.
 

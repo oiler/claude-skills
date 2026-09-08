@@ -5,7 +5,7 @@ Read ONLY:
 - The same source material it cites:
 {{CONTEXT}}
 
-For EACH finding, re-check it against the actual evidence and label it:
+For EACH `#### F<n>` block, re-check it against the actual evidence and label it:
 - confirmed — evidence supports it as stated
 - overstated — real but exaggerated (give the accurate version)
 - unsubstantiated — evidence does not support it
@@ -19,6 +19,8 @@ When done:
 1. Write your verdicts to {{VERDICT_PATH}} using this schema exactly:
 
 ### VERDICTS — Seat: {{SEAT}}
-- <finding> -> <label>: <one-line reason, cite evidence>
+- F1 -> confirmed|overstated|unsubstantiated|missing-context: <one-line reason, cite evidence>
 
-2. Return to the conductor ONLY a one-line tally (e.g. "3 confirmed, 1 overstated, 0 unsubstantiated"). Do not paste your verdicts into the return.
+Write one line per finding, using the same `F<n>` number the findings file gave it.
+
+2. Return to the conductor ONLY a one-line tally, for example "3 confirmed, 1 overstated, 0 unsubstantiated". Do not paste your verdicts into the return.

@@ -1013,6 +1013,108 @@ def _mint(ws: Path, run: dict, type_: str, role: str, title: str,
     return 0, dict(id=id_, type=type_, role=role, path=str(path), resumed=False)
 
 
+FINDING_HEAD_RE = re.compile(r"^#### F(?P<n>\d+) — (?P<title>.+)$", re.MULTILINE)
+FIELD_RE = re.compile(r"^- (?P<key>Severity|Evidence|Requirement|Impact|Recommendation): (?P<val>.+)$", re.MULTILINE)
+VERDICT_RE = re.compile(r"^- F(?P<n>\d+) -> (?P<rest>.+)$", re.MULTILINE)
+
+
+def parse_findings(text: str) -> tuple[dict, list[dict]]:
+    """Seat-level header plus one dict per `#### F<n>` block."""
+    seat = {"seat": "", "verdict": "", "gaps": ""}
+    m = re.search(r"^### FINDINGS — Seat: (?P<seat>.+)$", text, re.MULTILINE)
+    if m:
+        seat["seat"] = m.group("seat").strip()
+    for key, label in (("verdict", "Verdict"), ("gaps", "Confidence & gaps")):
+        m = re.search(rf"^- {re.escape(label)}: (?P<v>.+)$", text, re.MULTILINE)
+        if m:
+            seat[key] = m.group("v").strip()
+    heads = list(FINDING_HEAD_RE.finditer(text))
+    findings = []
+    for i, head in enumerate(heads):
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        block = text[head.end():end]
+        fields = {m.group("key").lower(): m.group("val").strip() for m in FIELD_RE.finditer(block)}
+        findings.append(dict(title=head.group("title").strip(), **fields))
+    return seat, findings
+
+
+def parse_verdicts(text: str) -> dict[str, str]:
+    return {f"F{m.group('n')}": m.group("rest").strip() for m in VERDICT_RE.finditer(text)}
+
+
+def render_review(seats: list[tuple[dict, list[dict], dict[str, str]]]) -> tuple[str, str, str]:
+    """seats: (seat_meta, findings, verdicts) in dispatch order."""
+    summary, risks, blocks = [], [], []
+    n = 0
+    for meta, findings, verdicts in seats:
+        summary.append(f"- {meta['seat']}: {meta['verdict']}")
+        if meta["gaps"]:
+            risks.append(f"- {meta['seat']}: {meta['gaps']}")
+        for local, f in enumerate(findings, start=1):
+            n += 1
+            evidence = f.get("evidence", "")
+            if f"F{local}" in verdicts:
+                evidence += f" Verified: {verdicts[f'F{local}']}"
+            blocks.append("\n".join([
+                f"### F{n} — {f['title']}",
+                "",
+                f"- Seat: {meta['seat']}",
+                f"- Severity: `{f.get('severity', 'note')}`",
+                f"- Evidence: {evidence}",
+                f"- Requirement: {f.get('requirement', '')}",
+                f"- Impact: {f.get('impact', '')}",
+                f"- Recommendation: {f.get('recommendation', '')}",
+                "- Disposition: `open`",
+            ]))
+    return "\n".join(summary), "\n\n".join(blocks), "\n".join(risks) or "None recorded."
+
+
+def _fill_section(text: str, heading: str, body: str) -> str:
+    """Replace the comment placeholder under `## heading` with body."""
+    pattern = re.compile(rf"(^## {re.escape(heading)}\n\n)<!--.*?-->\n", re.MULTILINE | re.DOTALL)
+    return pattern.sub(lambda m: m.group(1) + body + "\n", text, count=1)
+
+
+def cmd_record_review(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    src = Path(args.from_findings)
+    seats = []
+    names = list(args.seat) or sorted(p.stem for p in src.glob("*.md") if not p.name.endswith(".verdict.md"))
+    for path in (src / f"{name}.md" for name in names):
+        if not path.exists():
+            print(f"orko: no findings file {path}", file=sys.stderr)
+            return 2
+        meta, findings = parse_findings(path.read_text(encoding="utf-8"))
+        vpath = path.with_name(path.stem + ".verdict.md")
+        verdicts = parse_verdicts(vpath.read_text(encoding="utf-8")) if vpath.exists() else {}
+        seats.append((meta, findings, verdicts))
+    if not seats:
+        print(f"orko: no findings files under {src}", file=sys.stderr)
+        return 2
+    names = ", ".join(meta["seat"] for meta, _, _ in seats)
+    summary, blocks, risks = render_review(seats)
+    code, out = _mint(ws, run, "review", args.role, args.title,
+                      {"title": args.title, "status": "draft", "product_version": run["version"],
+                       "reviews": list(args.reviews), "revision": args.revision,
+                       "reviewer": f"orko ({names})", "reviewed_at": run["date"],
+                       "approved_by": None, "approved_at": None},
+                      ["ID", "Review", args.title, "draft", run["owner"]])
+    if code != 0:
+        return code
+    if not out["resumed"]:
+        path = Path(out["path"])
+        text = path.read_text(encoding="utf-8")
+        text = _fill_section(text, "Summary", summary)
+        text = re.sub(r"### F1 — \[Finding\].*?(?=\n## )", lambda m: blocks + "\n", text, count=1, flags=re.DOTALL)
+        text = _fill_section(text, "Unresolved risks and questions", risks)
+        path.write_text(text, encoding="utf-8")
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def cmd_record_spec(args: argparse.Namespace) -> int:
     loaded = _load_run(args)
     if loaded is None:
@@ -1093,6 +1195,18 @@ def build_parser() -> argparse.ArgumentParser:
         for flag in extra:
             p.add_argument(flag, required=True)
         p.set_defaults(func=func)
+
+    p_review = record_sub.add_parser("review")
+    p_review.add_argument("--slug", required=True)
+    p_review.add_argument("--workspace")
+    p_review.add_argument("--title", required=True)
+    p_review.add_argument("--role", choices=["spec", "plan", "code", "analysis"], required=True)
+    p_review.add_argument("--reviews", action="append", default=[])
+    p_review.add_argument("--seat", action="append", default=[],
+                          help="seat name, repeatable; sets the order findings render in")
+    p_review.add_argument("--revision", required=True)
+    p_review.add_argument("--from-findings", required=True)
+    p_review.set_defaults(func=cmd_record_review)
 
     p_prompt = sub.add_parser("prompt", help="emit a dispatch prompt")
     p_prompt.add_argument("kind", choices=sorted(PROMPT_SOURCES))

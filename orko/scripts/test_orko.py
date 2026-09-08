@@ -1125,3 +1125,70 @@ class TestRecordSpecPlan:
         _, payload = init_run(workspace, capsys)
         rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
         assert orko.record_for(Path(payload["ledger"]), "spec", "spec")["id"] == "SPEC-001"
+
+
+class TestRecordReview:
+    def _findings_dir(self, workspace):
+        src = Path(orko.__file__).parent / "fixtures/findings"
+        dst = workspace / ".orko/demo-topic/findings/2"
+        shutil.copytree(src, dst)
+        return dst
+
+    def test_parse_findings(self):
+        text = (Path(orko.__file__).parent / "fixtures/findings/requirements.md").read_text()
+        seat, findings = orko.parse_findings(text)
+        assert seat["seat"] == "requirements" and len(findings) == 2
+        assert findings[0]["severity"] == "high" and findings[1]["title"] == "Non-goals contradict scope"
+
+    def test_parse_verdicts(self):
+        text = (Path(orko.__file__).parent / "fixtures/findings/requirements.verdict.md").read_text()
+        verdicts = orko.parse_verdicts(text)
+        assert verdicts["F1"].startswith("confirmed: ")
+        assert verdicts["F2"].startswith("overstated: ")
+
+    def test_review_renders_f_blocks_in_seat_order(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        d = self._findings_dir(workspace)
+        code, out = rec(workspace, capsys, "review", "--slug", "demo-topic", "--role", "spec",
+                        "--reviews", "SPEC-001", "--revision", "abc1234", "--from-findings", str(d),
+                        "--title", "Spec review")
+        assert code == 0
+        text = Path(out["path"]).read_text()
+        assert out["path"].endswith("REVIEW-001-demo-topic-spec.md")
+        assert "reviews:\n  - SPEC-001\n" in text
+        assert 'reviewer: "orko (requirements, security)"' in text
+        assert "approved_by: null" in text
+        assert text.count("### F") == 3
+        f1 = text.split("### F1")[1].split("### F2")[0]
+        assert "- Severity: `high`" in f1 and "- Disposition: `open`" in f1
+        assert "Verified: confirmed: the quoted line" in f1
+        assert "### F3 — Upload path is unbounded" in text
+
+    def test_review_row_in_index(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        d = self._findings_dir(workspace)
+        rec(workspace, capsys, "review", "--slug", "demo-topic", "--role", "spec", "--reviews", "SPEC-001",
+            "--revision", "abc1234", "--from-findings", str(d), "--title", "Spec review")
+        assert "| REVIEW-001 | Review | Spec review | draft | oiler |" in (workspace / "docs/versions/0.1/README.md").read_text()
+
+    def test_seat_flags_set_order(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        d = self._findings_dir(workspace)
+        code, out = rec(workspace, capsys, "review", "--slug", "demo-topic", "--role", "spec",
+                        "--reviews", "SPEC-001", "--revision", "abc1234", "--from-findings", str(d),
+                        "--seat", "security", "--seat", "requirements", "--title", "Spec review")
+        assert code == 0
+        text = Path(out["path"]).read_text()
+        assert "### F1 — Upload path is unbounded" in text
+        assert 'reviewer: "orko (security, requirements)"' in text
+
+    def test_missing_findings_file_exits_2(self, workspace, capsys):
+        init_run(workspace, capsys)
+        d = self._findings_dir(workspace)
+        code, err = rec(workspace, capsys, "review", "--slug", "demo-topic", "--role", "spec",
+                        "--reviews", "SPEC-001", "--revision", "abc1234", "--from-findings", str(d),
+                        "--seat", "nobody", "--title", "Spec review")
+        assert code == 2 and "no findings file" in err
