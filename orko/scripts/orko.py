@@ -22,6 +22,14 @@ Usage:
     uv run orko.py record spec --slug SLUG --title TEXT [--workspace DIR]
     uv run orko.py record plan --slug SLUG --title TEXT --implements SPEC-NNN
         [--workspace DIR]
+    uv run orko.py record {decision|adr|research} --slug SLUG --title TEXT [--workspace DIR]
+    uv run orko.py record disposition --slug SLUG --review REVIEW-NNN --finding FN
+        --disposition {accepted|rejected|resolved} [--workspace DIR]
+    uv run orko.py record status --slug SLUG --id ID --status {draft|in_review} [--workspace DIR]
+    uv run orko.py record amendment --slug SLUG --id SPEC-NNN --text TEXT [--workspace DIR]
+    uv run orko.py record delivery-decision --slug SLUG --decision TEXT --rationale TEXT
+        [--workspace DIR]
+    uv run orko.py record risk --slug SLUG --text TEXT [--workspace DIR]
     uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--workspace DIR]
     uv run orko.py prompt plan-write <slug> [--workspace DIR]
     uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--workspace DIR]
@@ -999,6 +1007,9 @@ def _mint(ws: Path, run: dict, type_: str, role: str, title: str,
         if id_:
             text = re.sub(rf"^# {id_} — \[.*\]$", lambda m: f"# {id_} — {title}",
                           text, count=1, flags=re.MULTILINE)
+        else:
+            text = re.sub(r"^# \[Title\]$", lambda m: f"# {title}",
+                          text, count=1, flags=re.MULTILINE)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         append_ledger(ledger, f"record {type_} {role} {id_ or '-'} {rel(ws, path)}")
@@ -1145,6 +1156,175 @@ def cmd_record_plan(args: argparse.Namespace) -> int:
     return code
 
 
+def find_record(ws: Path, id_: str) -> Path | None:
+    """The file an ID names, across the docs and code trees."""
+    prefix = id_.split("-")[0]
+    for rt in RECORD_TYPES.values():
+        if rt.prefix != prefix:
+            continue
+        pattern = rt.subdir.replace("<v>", "*")
+        hits = sorted((ws / rt.repo).glob(f"{pattern}/{id_}-*.md"))
+        if hits:
+            return hits[0]
+    return None
+
+
+def _guarded_edit(ws: Path, run: dict, path: Path, transform) -> int:
+    """Rewrite a record in place, refusing when it carries edits the run never saw."""
+    ledger = Path(run["ledger"])
+    guard = overwrite_guard(ledger, ws, path)
+    if guard:
+        print(f"orko: {guard}", file=sys.stderr)
+        return 2
+    text = path.read_text(encoding="utf-8")
+    new = transform(text)
+    if new is None:
+        return 2
+    path.write_text(new, encoding="utf-8")
+    return 0
+
+
+def cmd_record_disposition(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    path = find_record(ws, args.review)
+    if path is None:
+        print(f"orko: no record {args.review}", file=sys.stderr)
+        return 2
+
+    def transform(text: str) -> str | None:
+        # Non-greedy to the finding's own Disposition line: the next `### F`
+        # block would otherwise absorb the match.
+        pattern = re.compile(
+            rf"(^### {re.escape(args.finding)} — .*?- Disposition: `)open(`)",
+            re.MULTILINE | re.DOTALL)
+        new, n = pattern.subn(
+            lambda m: m.group(1) + args.disposition + m.group(2), text, count=1)
+        if n == 0:
+            print(f"orko: {args.review} has no open finding {args.finding}", file=sys.stderr)
+            return None
+        return new
+    return _guarded_edit(ws, run, path, transform)
+
+
+def cmd_record_status(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    path = find_record(ws, args.id)
+    if path is None:
+        print(f"orko: no record {args.id}", file=sys.stderr)
+        return 2
+    return _guarded_edit(ws, run, path, lambda t: set_frontmatter(t, {"status": args.status}))
+
+
+def cmd_record_amendment(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    path = find_record(ws, args.id)
+    if path is None or "## Amendments" not in path.read_text(encoding="utf-8"):
+        print(f"orko: {args.id} has no Amendments section", file=sys.stderr)
+        return 2
+    line = f"- {_dt.date.today().isoformat()}: {args.text}\n"
+
+    def transform(text: str) -> str:
+        head, sep, tail = text.rpartition("## Amendments\n")
+        return head + sep + tail.rstrip("\n") + "\n\n" + line
+    return _guarded_edit(ws, run, path, transform)
+
+
+def cmd_record_decision(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    code, out = _mint(ws, run, "decision", "decision", args.title,
+                      {"title": args.title, "status": "proposed", "owner": run["owner"],
+                       "decided_at": None, "supersedes": None, "superseded_by": None},
+                      ["ID", args.title, "proposed", run["date"], "—"])
+    if code == 0:
+        print(json.dumps(out, indent=2))
+    return code
+
+
+def cmd_record_adr(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    code, out = _mint(ws, run, "adr", "adr", args.title,
+                      {"title": args.title, "status": "proposed", "decided_at": None,
+                       "supersedes": None, "superseded_by": None}, None)
+    if code == 0:
+        print(json.dumps(out, indent=2))
+    return code
+
+
+def cmd_record_research(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    code, out = _mint(ws, run, "research", "research", args.title,
+                      {"title": args.title, "collected_at": run["date"]}, None)
+    if code == 0:
+        print(json.dumps(out, indent=2))
+    return code
+
+
+def _append_after_heading(path: Path, heading: str, line: str, table: bool) -> None:
+    """Append `line` at the end of the section under `heading`: after the last
+    `|` row when `table`, else after the last non-blank line of the section."""
+    lines = path.read_text(encoding="utf-8").split("\n")
+    start = lines.index(heading)
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    section = range(start + 1, end)
+    if table:
+        anchor = max(i for i in section if lines[i].startswith("|"))
+    else:
+        anchor = max((i for i in section if lines[i].strip()), default=start)
+    lines.insert(anchor + 1, line)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def cmd_record_delivery_decision(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    ledger = Path(run["ledger"])
+    plan = record_for(ledger, "plan", "plan")
+    if plan is None:
+        print("orko: no plan minted for this run", file=sys.stderr)
+        return 2
+    path = ws / plan["path"]
+    guard = overwrite_guard(ledger, ws, path)
+    if guard:
+        print(f"orko: {guard}", file=sys.stderr)
+        return 2
+    _append_after_heading(path, "## Delivery decisions",
+                          f"| {args.decision} | {args.rationale} |  |", table=True)
+    append_ledger(ledger, f"touched {rel(ws, path)}")
+    return 0
+
+
+def cmd_record_risk(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    readme = dossier_dir(ws, run["version"]) / "README.md"
+    _append_after_heading(readme, "## Risks, blockers, and open decisions",
+                          f"- {args.text}", table=False)
+    append_ledger(Path(run["ledger"]), f"touched {rel(ws, readme)}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orko")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1207,6 +1387,49 @@ def build_parser() -> argparse.ArgumentParser:
     p_review.add_argument("--revision", required=True)
     p_review.add_argument("--from-findings", required=True)
     p_review.set_defaults(func=cmd_record_review)
+
+    p = record_sub.add_parser("disposition")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--review", required=True)
+    p.add_argument("--finding", required=True)
+    p.add_argument("--disposition", required=True, choices=["accepted", "rejected", "resolved"])
+    p.set_defaults(func=cmd_record_disposition)
+
+    p = record_sub.add_parser("status")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--id", required=True)
+    p.add_argument("--status", required=True, choices=["draft", "in_review"])
+    p.set_defaults(func=cmd_record_status)
+
+    p = record_sub.add_parser("amendment")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--id", required=True)
+    p.add_argument("--text", required=True)
+    p.set_defaults(func=cmd_record_amendment)
+
+    for kind, func in (("decision", cmd_record_decision), ("adr", cmd_record_adr),
+                       ("research", cmd_record_research)):
+        p = record_sub.add_parser(kind)
+        p.add_argument("--slug", required=True)
+        p.add_argument("--workspace")
+        p.add_argument("--title", required=True)
+        p.set_defaults(func=func)
+
+    p = record_sub.add_parser("delivery-decision")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--decision", required=True)
+    p.add_argument("--rationale", required=True)
+    p.set_defaults(func=cmd_record_delivery_decision)
+
+    p = record_sub.add_parser("risk")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--text", required=True)
+    p.set_defaults(func=cmd_record_risk)
 
     p_prompt = sub.add_parser("prompt", help="emit a dispatch prompt")
     p_prompt.add_argument("kind", choices=sorted(PROMPT_SOURCES))

@@ -1192,3 +1192,69 @@ class TestRecordReview:
                         "--reviews", "SPEC-001", "--revision", "abc1234", "--from-findings", str(d),
                         "--seat", "nobody", "--title", "Spec review")
         assert code == 2 and "no findings file" in err
+
+
+class TestRecordOthers:
+    def _spec_and_review(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        d = workspace / ".orko/demo-topic/findings/2"
+        shutil.copytree(Path(orko.__file__).parent / "fixtures/findings", d)
+        _, out = rec(workspace, capsys, "review", "--slug", "demo-topic", "--role", "spec", "--reviews", "SPEC-001",
+                     "--revision", "abc1234", "--from-findings", str(d), "--title", "Spec review")
+        return Path(out["path"])
+
+    def test_disposition_sets_one_finding(self, workspace, capsys):
+        review = self._spec_and_review(workspace, capsys)
+        code, _ = rec(workspace, capsys, "disposition", "--slug", "demo-topic", "--review", "REVIEW-001",
+                      "--finding", "F2", "--disposition", "rejected")
+        assert code == 0
+        text = review.read_text()
+        assert text.count("- Disposition: `open`") == 2 and "- Disposition: `rejected`" in text.split("### F2")[1].split("### F3")[0]
+
+    def test_disposition_unknown_finding_exits_2(self, workspace, capsys):
+        self._spec_and_review(workspace, capsys)
+        code, _ = rec(workspace, capsys, "disposition", "--slug", "demo-topic", "--review", "REVIEW-001",
+                      "--finding", "F9", "--disposition", "accepted")
+        assert code == 2
+
+    def test_status_in_review_and_refuses_accepted(self, workspace, capsys):
+        self._spec_and_review(workspace, capsys)
+        assert rec(workspace, capsys, "status", "--slug", "demo-topic", "--id", "SPEC-001", "--status", "in_review")[0] == 0
+        assert "status: in_review" in (workspace / "docs/versions/0.1/specs/SPEC-001-demo-topic.md").read_text()
+        with pytest.raises(SystemExit):
+            rec(workspace, capsys, "status", "--slug", "demo-topic", "--id", "SPEC-001", "--status", "accepted")
+
+    def test_amendment_appends_dated_line(self, workspace, capsys):
+        self._spec_and_review(workspace, capsys)
+        rec(workspace, capsys, "amendment", "--slug", "demo-topic", "--id", "SPEC-001", "--text", "R2 now returns 404")
+        text = (workspace / "docs/versions/0.1/specs/SPEC-001-demo-topic.md").read_text()
+        assert re.search(r"## Amendments\n\n<!--.*?-->\n\n- \d{4}-\d{2}-\d{2}: R2 now returns 404\n", text, re.DOTALL)
+
+    def test_decision_and_adr(self, workspace, capsys):
+        init_run(workspace, capsys)
+        _, dec = rec(workspace, capsys, "decision", "--slug", "demo-topic", "--title", "Drop Linear")
+        assert dec["path"].endswith("docs/decisions/DEC-001-demo-topic.md")
+        assert "status: proposed" in Path(dec["path"]).read_text()
+        assert "| DEC-001 | Drop Linear | proposed |" in (workspace / "docs/decisions/README.md").read_text()
+        _, adr = rec(workspace, capsys, "adr", "--slug", "demo-topic", "--title", "Use sqlite")
+        assert adr["path"].endswith("code/docs/adr/ADR-001-demo-topic.md")
+        assert "# ADR-001 — Use sqlite" in Path(adr["path"]).read_text()
+        assert not list((workspace / "docs").rglob("ADR-*"))
+
+    def test_delivery_decision_row_and_risk_bullet(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        rec(workspace, capsys, "plan", "--slug", "demo-topic", "--title", "Plan", "--implements", "SPEC-001")
+        assert rec(workspace, capsys, "delivery-decision", "--slug", "demo-topic", "--decision", "Use sqlite", "--rationale", "no server")[0] == 0
+        plan = (workspace / "docs/versions/0.1/plans/PLAN-001-demo-topic.md").read_text()
+        assert "| Use sqlite | no server |  |" in plan.split("## Delivery decisions")[1].split("## Delivery sequence")[0]
+        assert rec(workspace, capsys, "risk", "--slug", "demo-topic", "--text", "F3 deferred: upload bound")[0] == 0
+        readme = (workspace / "docs/versions/0.1/README.md").read_text()
+        assert "- F3 deferred: upload bound" in readme.split("## Risks, blockers, and open decisions")[1]
+
+    def test_research_stamped(self, workspace, capsys):
+        init_run(workspace, capsys, "analysis", "Why is it slow")
+        _, out = rec(workspace, capsys, "research", "--slug", "why-is-it-slow", "--title", "Why is it slow")
+        text = Path(out["path"]).read_text()
+        assert "AI-generated" in text and out["path"].endswith("-why-is-it-slow.md")
