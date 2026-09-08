@@ -1,0 +1,150 @@
+# Codex executor
+
+Step 5 of a build runs one of two executors. With `--executor claude`, `superpowers:subagent-driven-development` works through `tasks.md`. With `--executor codex`, this loop runs instead: Codex writes the code, you judge every delivery from the repository rather than from Codex's report, and two report-only Claude reviewers read each task before you close it.
+
+`init` records the executor, the Codex model plus effort overrides, the boundaries, and the attribution trailers in the ledger header. None of them change on resume.
+
+Every script call in this file is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py <subcommand>`. If `${CLAUDE_SKILL_DIR}` is empty in your Bash call, use `~/.claude/skills/orko/scripts/orko.py`. Never use shell command substitution: the prefix matching behind `allowed-tools` cannot see through it, and the resulting permission prompt is invisible inside a long dispatch. Where a command needs a value another command produces, run two commands.
+
+## Defaults
+
+The script builds the whole dispatch, including its routing flags. You do not compose them, and you do not add to them.
+
+- **No `--model` and no `--effort`** unless intake recorded an override with `init --codex-model` or `init --codex-effort`. With neither recorded, the dispatch inherits whatever `~/.codex/config.toml` sets, which is what oiler already tuned. Volunteering a model is how a run silently gets a different one than the machine's default.
+- **`--background` and `--write`** on every dispatch. Background because a foreground Codex task runs inside one Bash call, whose ceiling is 10 minutes, and a real task is longer than that. Write because Codex must commit its own work.
+- **`--fresh` on a first attempt**, `--resume` only on the one retry the loop allows.
+- **Model slugs pass through as literal strings.** If oiler names a slug at intake, pass it exactly as typed. This skill carries no slug table and never maps, validates, or corrects one.
+
+## Where Codex runs
+
+Change directory to `<workspace>/code` before every dispatch, and change back to the workspace root after.
+
+```bash
+cd <workspace>/code
+```
+
+Codex runs at the git root of its cwd, with a `workspace-write` sandbox when `--write` is set, `approvalPolicy: never`, and no network. Dispatching from `code/` makes the code repository both the git root and the whole writable surface, so Codex cannot reach `docs/`. The record stays yours. Dispatching from the workspace root would leave Codex with no git root at all, since the workspace root is not a repository.
+
+Every other command in the loop resolves the workspace itself, so run them from the workspace root.
+
+## The loop
+
+Run this once per task in `tasks.md`, in order, starting at the `next_task` that `status` reports.
+
+**1. Record the dispatch base.** Read the code repository's HEAD, then pass it:
+
+```bash
+git -C code rev-parse HEAD
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5.<n> dispatched --slug <slug> --commit <sha>
+```
+
+The sha is the base the delivery check diffs against. Two commands, never one substituted command.
+
+**2. Build and dispatch the prompt.**
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task <slug> --task <n> --attempt fresh
+```
+
+The first line of stdout is the routing flags: `--background --write --fresh` plus `--model <M>` and `--effort <E>` when intake recorded them. Everything after it is the task: the objective, the `SPEC-NNN R<n>` rows it satisfies, the files, the steps, the acceptance command, the branch, the boundaries, the testing-README row it must add, and the commit instruction with the trailers verbatim.
+
+Dispatch the whole stdout verbatim through `Agent(subagent_type: "codex:codex-rescue")`. Do not summarize it, reorder it, or drop the flag line: the routing flags travel inside the prompt text because the `Agent` tool's `model` parameter cannot carry a Codex slug. The agent returns the job id.
+
+`prompt` refuses a task with no `**Acceptance:**` command and exits non-zero. That is not a bug to work around. The acceptance command is the entire definition of done for the dispatch; fix `tasks.md` and re-run `check tasks <path>` before dispatching.
+
+**3. Wait for the job.**
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py codex wait <job-id> --slug <slug>
+```
+
+This polls the companion script and prints the result JSON. The default timeout is 1800000 milliseconds; override it with `--timeout-ms <n>` for a task you expect to run longer. An empty return from the agent, a missing job id, or a failed job is a delivery failure.
+
+**4. Check the delivery.**
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check delivery --slug <slug> --task <n>
+```
+
+The script judges the repository, not Codex's report. Its findings:
+
+| Finding | What it means |
+|---|---|
+| `tree-dirty` | uncommitted or untracked files in `code/`; Codex did not commit |
+| `diff-empty` | no commits since the dispatch base |
+| `diff-outside-allowlist: <paths>` | the diff touches files the task did not list |
+| `acceptance-failed: exit <n>` | the script ran the acceptance command and it did not exit `0` |
+
+Codex's own claim that the acceptance command passed is not evidence. Its sandbox has no network, so a command that fetches anything fails there and passes here, or the reverse.
+
+**5. Retry once on a delivery failure.**
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task <slug> --task <n> --attempt resume --failure "<what failed>"
+```
+
+Name the failure concretely: the finding, and for `diff-outside-allowlist` the paths. Dispatch the stdout verbatim as in step 2 and wait as in step 3. A second failure is an escalation.
+
+**6. Review the task.** Build both reviewer prompts and dispatch them in one message, both at `sonnet`:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task-review <slug> --task <n> --lens spec-compliance
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task-review <slug> --task <n> --lens code-quality
+```
+
+Both reviewers are report-only. Their findings land in `findings/5.<n>/<lens>.md`. Run `check delivery` again on their files if either one edited the tree; a reviewer that wrote code is a failed seat, not a delivery.
+
+**7. Decide each finding.** `record disposition` is not used here. Task-review findings have no review record: `REVIEW-NNN` for the code is minted once at step 6 of the build, over the whole branch diff. Decide each finding in your own message, and either fix it now, by re-dispatching Codex exactly as in step 5 with the finding named as the failure, or carry it to step 6's review, where the code review seats see it in the branch diff anyway.
+
+**8. Close the task.**
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5.<n> complete --slug <slug>
+```
+
+After the last task, and only then:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5 complete --slug <slug>
+```
+
+`next_step` counts integer steps only, so the run does not leave step 5 until that line exists. `status` reports `next_task` as one past the highest `5.<n> complete`, and a resume at step 5 starts there, never at task 1.
+
+## Resume rules
+
+`--resume` does not name a thread. It resolves to the newest resumable task job in this workspace for this Claude session. The plugin throws in two cases: when no previous job exists, and when one is still running. It also drops every job for the session at `SessionEnd`.
+
+So `--attempt resume` is only correct as the immediate retry of a dispatch this session just made and waited on. On either plugin error, or after any session boundary, fall back to a fresh dispatch that carries the failure text forward:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task <slug> --task <n> --attempt fresh --failure "<what failed>"
+```
+
+A fresh attempt with `--failure` is not a wasted retry. It is the same one retry, with the context that `--resume` would have supplied written into the prompt instead.
+
+An empty return from `Agent(subagent_type: "codex:codex-rescue")` is a delivery failure, not a transient glitch. The agent forwards one call and returns nothing on any failure, so an empty return means the dispatch never ran.
+
+## Escalation
+
+Two delivery failures on one task stop the run. Do not try a third dispatch, and do not write the code yourself.
+
+1. Route the blocker per the rule in `references/record.md`: `record decision` for a product-scope question, `record adr` for a choice with long-lived architectural consequence.
+2. Write the escalation into `<run_dir>/escalations.md` yourself, naming the task, both `check delivery` finding sets, and the record ID.
+3. `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5.<n> escalated --slug <slug>`
+4. Stop and report. `escalations` exits `1` while that file is non-empty, and `preflight` reports `blocked-escalation` until oiler empties it.
+
+## One session per task
+
+The whole loop for a single task must finish inside one Claude session, because the plugin's `SessionEnd` hook deletes the session's jobs, which takes the job id and the resume target with it. Compaction inside a session is fine: the ledger, not your context, is what `status` reads to resume.
+
+Do not start a task you cannot finish. If a session is ending, close the current task through step 8 first, or leave it undispatched. A dispatched task with no `5.<n> complete` line resumes cleanly at the top of the loop, and the re-dispatch is fresh.
+
+## Preflight
+
+With executor `codex`, `preflight` adds one check:
+
+```
+codex-unavailable: run /codex:setup (<detail>)
+```
+
+The script runs the companion's `setup --json`, which reports node, Codex CLI, and auth state with no model turn, and requires `ready: true`. Run `/codex:setup`, then re-run `preflight`. Do not dispatch a task while this finding stands: a dispatch into an unauthenticated CLI returns empty, which you would read as a delivery failure and retry.
