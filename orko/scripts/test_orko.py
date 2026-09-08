@@ -344,7 +344,7 @@ class TestLedgerAndStatus:
                         "--workspace", str(workspace), "--commit", "abc1234"])
         assert rc == 0
         text = (workspace / ".orko/demo-topic/progress.md").read_text()
-        assert text.splitlines()[2] == "step 1 complete commit=abc1234"
+        assert text.splitlines()[-1] == "step 1 complete commit=abc1234"
 
     def test_ledger_rejects_a_non_sha_commit(self, workspace, capsys):
         self._init(workspace, capsys)
@@ -371,8 +371,9 @@ class TestLedgerAndStatus:
             orko.main(["ledger", str(step), "complete", "--slug", "demo-topic",
                        "--workspace", str(workspace)])
         lines = (workspace / ".orko/demo-topic/progress.md").read_text().splitlines()
-        assert lines[2] == "step 1 complete"
-        assert lines[3] == "step 2 complete"
+        # intake's own STATUS line stays put ahead of them
+        assert lines[2] == "touched docs/STATUS.md"
+        assert lines[-2:] == ["step 1 complete", "step 2 complete"]
 
     def test_ledger_records_a_dispatched_base_sha(self, workspace, capsys):
         self._init(workspace, capsys)
@@ -380,7 +381,7 @@ class TestLedgerAndStatus:
                         "--workspace", str(workspace), "--commit", "ba5e123"])
         assert rc == 0
         text = (workspace / ".orko/demo-topic/progress.md").read_text()
-        assert text.splitlines()[2] == "step 2 dispatched commit=ba5e123"
+        assert text.splitlines()[-1] == "step 2 dispatched commit=ba5e123"
 
     @pytest.mark.parametrize("status", ["dispatched", "escalated", "failed"])
     def test_only_complete_advances_the_resume_point(self, workspace, capsys, status):
@@ -1399,3 +1400,79 @@ class TestCheckSpec:
         init_run(workspace, capsys)
         rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")  # template body, placeholders remain
         assert orko.main(["check", "spec", "SPEC-001", "--slug", "demo-topic", "--workspace", str(workspace)]) == 1
+
+
+class TestRecordClose:
+    def _closeable(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys)
+        assert "- Demo Topic: in progress" in (workspace / "docs/STATUS.md").read_text()
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        rec(workspace, capsys, "plan", "--slug", "demo-topic", "--title", "Plan",
+            "--implements", "SPEC-001")
+        return payload
+
+    def test_close_edits_status_changelogs_and_pr_bodies(self, workspace, capsys):
+        payload = self._closeable(workspace, capsys)
+        code, out = rec(workspace, capsys, "close", "--slug", "demo-topic",
+                        "--summary", "Adds addition.",
+                        "--changelog", "Added: addition endpoint")
+        assert code == 0
+        status = (workspace / "docs/STATUS.md").read_text()
+        assert 'as_of: "' + payload["date"] + '"' in status
+        assert "- Demo Topic (PLAN-001, SPEC-001): awaiting acceptance" in status
+        assert "Recently completed\n\n<!--" in status
+        for f in ("code/CHANGELOG.md", "docs/versions/0.1/CHANGELOG.md"):
+            text = (workspace / f).read_text()
+            assert re.search(
+                r"## Unreleased\n\n### Added\n\n- addition endpoint \(PLAN-001, SPEC-001\)",
+                text), f
+        pr_docs = Path(out["pr_docs"]).read_text()
+        assert "Adds addition." in pr_docs and "SPEC-001" in pr_docs and "PLAN-001" in pr_docs
+        assert Path(out["pr_code"]).exists()
+
+    def test_close_refreshes_index_status(self, workspace, capsys):
+        self._closeable(workspace, capsys)
+        rec(workspace, capsys, "status", "--slug", "demo-topic", "--id", "SPEC-001",
+            "--status", "in_review")
+        assert rec(workspace, capsys, "close", "--slug", "demo-topic",
+                   "--summary", "x")[0] == 0
+        readme = (workspace / "docs/versions/0.1/README.md").read_text()
+        assert "| SPEC-001 | Specification | Demo | in_review |" in readme
+
+    def test_close_records_every_touched_file(self, workspace, capsys):
+        payload = self._closeable(workspace, capsys)
+        rec(workspace, capsys, "close", "--slug", "demo-topic", "--summary", "x",
+            "--changelog", "Fixed: a bug")
+        assert set(orko.touched(Path(payload["ledger"]))) >= {
+            "docs/STATUS.md", "docs/versions/0.1/README.md",
+            "code/CHANGELOG.md", "docs/versions/0.1/CHANGELOG.md"}
+
+    def test_missing_changelog_section_is_created_inside_unreleased(self, workspace, capsys):
+        self._closeable(workspace, capsys)
+        changelog = workspace / "docs/versions/0.1/CHANGELOG.md"
+        changelog.write_text("# Log\n\n## Unreleased\n\n## 0.1.0\n\n### Added\n\n- old\n")
+        rec(workspace, capsys, "close", "--slug", "demo-topic", "--summary", "x",
+            "--changelog", "Security: locked the door")
+        text = changelog.read_text()
+        assert re.search(r"## Unreleased\n\n### Security\n\n- locked the door \(PLAN-001, SPEC-001\)",
+                         text)
+        assert text.endswith("## 0.1.0\n\n### Added\n\n- old\n")
+
+    def test_intake_bullet_keeps_the_section_readable(self, workspace, capsys):
+        init_run(workspace, capsys)
+        status = (workspace / "docs/STATUS.md").read_text()
+        assert ("<!-- Link active specifications, plans, research, or reviews. -->\n"
+                "\n- Demo Topic: in progress\n\n## Blockers and risks") in status
+
+    def test_close_joins_an_existing_bullet_list(self, workspace, capsys):
+        status = workspace / "docs/STATUS.md"
+        status.write_text(status.read_text().replace(
+            "## Blockers and risks", "- Other work: in progress\n\n## Blockers and risks"))
+        init_run(workspace, capsys)
+        assert "- Demo Topic: in progress\n- Other work: in progress" in status.read_text()
+
+    def test_unknown_changelog_section_exits_2(self, workspace, capsys):
+        init_run(workspace, capsys)
+        code, _ = rec(workspace, capsys, "close", "--slug", "demo-topic",
+                      "--summary", "x", "--changelog", "Bogus: y")
+        assert code == 2

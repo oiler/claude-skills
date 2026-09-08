@@ -30,6 +30,8 @@ Usage:
     uv run orko.py record delivery-decision --slug SLUG --decision TEXT --rationale TEXT
         [--workspace DIR]
     uv run orko.py record risk --slug SLUG --text TEXT [--workspace DIR]
+    uv run orko.py record close --slug SLUG --summary TEXT
+        [--changelog "<Added|Changed|Fixed|Removed|Security>: text"] [--workspace DIR]
     uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--workspace DIR]
     uv run orko.py prompt plan-write <slug> [--workspace DIR]
     uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--workspace DIR]
@@ -479,6 +481,12 @@ def cmd_init(args: argparse.Namespace) -> int:
         for key in ("findings_dir", "context_dir"):
             Path(paths[key]).mkdir(parents=True, exist_ok=True)
         ledger.write_text(f"{HEADER_TITLE}\n{_header_line(header)}\n", encoding="utf-8")
+    # Intake is a visible commitment: a build announces itself in STATUS.md the
+    # moment it starts, so a reader of the docs repo sees work in flight rather
+    # than a surprise pull request at close.
+    if not resumed and args.mode == "build":
+        _status_progress_line(ws, args.topic, f"- {args.topic}: in progress")
+        append_ledger(ledger, "touched docs/STATUS.md")
     payload = dict(paths, **header, resumed=resumed,
                    next_step=_next_step(ledger, header["mode"]))
     print(json.dumps(payload, indent=2))
@@ -1361,6 +1369,121 @@ def cmd_record_risk(args: argparse.Namespace) -> int:
     return 0
 
 
+CHANGELOG_SECTIONS = ("Added", "Changed", "Fixed", "Removed", "Security")
+
+
+def _insert_under(text: str, heading: str, line: str, within: str | None = None) -> str:
+    """Insert `line` as the first entry under `heading`, creating the heading at
+    the end of the section when absent.
+
+    `within` scopes the whole operation to one `## ` section: a changelog entry
+    belongs under Unreleased, and an unscoped insert would land it in whatever
+    released section happens to carry the same `### Added` heading first.
+    """
+    if within:
+        head, sep, rest = text.partition(within + "\n")
+        section, sep2, after = rest.partition("\n## ")
+        section = _insert_under(section, heading, line)
+        return head + sep + section + (sep2 + after if sep2 else "")
+    if heading + "\n" not in text:
+        # An empty section starts with no newline of its own, so `rstrip` +
+        # blank line would open the heading with two blank lines above it.
+        body = text.rstrip("\n")
+        text = (body + "\n\n" if body else "\n") + f"{heading}\n\n"
+    head, sep, rest = text.partition(heading + "\n")
+    rest = rest.lstrip("\n")
+    return head + sep + "\n" + line + "\n" + ("\n" + rest if rest else "")
+
+
+def _status_progress_line(ws: Path, topic: str, new_line: str) -> None:
+    """Set this run's one bullet under `## In progress`, replacing any earlier one."""
+    status = ws / "docs/STATUS.md"
+    lines = status.read_text(encoding="utf-8").split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith(f"- {topic}"):
+            lines[i] = new_line
+            break
+    else:
+        anchor = lines.index("## In progress")
+        # the template has a blank line then an HTML comment under the heading;
+        # insert after the comment so the bullet is not glued to it
+        insert_at = anchor + 1
+        while insert_at < len(lines) and (not lines[insert_at].strip() or lines[insert_at].startswith("<!--")):
+            insert_at += 1
+        # insert_at is now the section's first real line, or the next heading.
+        # The bullet joins an existing list directly and stands off anything
+        # else with a blank, so the next heading is never glued to it.
+        lines.insert(insert_at, new_line)
+        if insert_at + 1 >= len(lines) or not lines[insert_at + 1].startswith("- "):
+            lines.insert(insert_at + 1, "")
+    status.write_text("\n".join(lines), encoding="utf-8")
+
+
+def cmd_record_close(args: argparse.Namespace) -> int:
+    """Hand the run to a human: STATUS, both changelogs, the index, two PR bodies.
+
+    Nothing here moves work to Recently completed. Acceptance is oiler's call,
+    and a run that marked its own work done would be grading its own homework.
+    """
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    entries = []
+    for item in args.changelog:
+        section, _, text = item.partition(":")
+        if section.strip() not in CHANGELOG_SECTIONS or not text.strip():
+            print(f"orko: --changelog must be '<{'|'.join(CHANGELOG_SECTIONS)}>: text'",
+                  file=sys.stderr)
+            return 2
+        entries.append((section.strip(), text.strip()))
+    ledger = Path(run["ledger"])
+    ids = [entry["id"] for entry in records(ledger) if entry["id"] != "-"]
+    id_text = ", ".join(sorted(ids))
+
+    status = ws / "docs/STATUS.md"
+    status.write_text(set_frontmatter(status.read_text(encoding="utf-8"),
+                                      {"as_of": run["date"]}), encoding="utf-8")
+    _status_progress_line(ws, run["topic"], f"- {run['topic']} ({id_text}): awaiting acceptance")
+    append_ledger(ledger, "touched docs/STATUS.md")
+
+    # Refresh the artifact index from each record's own frontmatter: the row was
+    # written when the record was minted, and `record status` has moved on since.
+    readme = dossier_dir(ws, run["version"]) / "README.md"
+    kinds = {"spec": "Specification", "plan": "Delivery plan", "review": "Review"}
+    for entry in records(ledger):
+        if entry["type"] in kinds:
+            path = ws / entry["path"]
+            update_index(readme, [entry["id"], kinds[entry["type"]],
+                                  read_frontmatter_field(path, "title") or entry["id"],
+                                  read_frontmatter_field(path, "status") or "draft",
+                                  run["owner"]], entry["id"])
+    append_ledger(ledger, f"touched {rel(ws, readme)}")
+
+    for changelog in (ws / "code/CHANGELOG.md", dossier_dir(ws, run["version"]) / "CHANGELOG.md"):
+        text = changelog.read_text(encoding="utf-8")
+        for section, item in entries:
+            text = _insert_under(text, f"### {section}", f"- {item} ({id_text})",
+                                 within="## Unreleased")
+        changelog.write_text(text, encoding="utf-8")
+        append_ledger(ledger, f"touched {rel(ws, changelog)}")
+
+    out = {}
+    for repo in ("docs", "code"):
+        template = ws / repo / ".github/PULL_REQUEST_TEMPLATE.md"
+        body = template.read_text(encoding="utf-8") if template.exists() else "## Purpose\n\n## Artifacts\n"
+        body = _insert_under(body, "## Purpose", args.summary)
+        heading = next((line for line in body.split("\n") if line.startswith("## ")
+                        and ("Artifacts" in line or "Traceability" in line)), None)
+        if heading:
+            body = _insert_under(body, heading, "\n".join(f"- {i}" for i in ids))
+        path = Path(run["run_dir"]) / f"pr-{repo}.md"
+        path.write_text(body, encoding="utf-8")
+        out[f"pr_{repo}"] = str(path)
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=False)
 
@@ -1523,6 +1646,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workspace")
     p.add_argument("--text", required=True)
     p.set_defaults(func=cmd_record_risk)
+
+    p = record_sub.add_parser("close")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--summary", required=True)
+    p.add_argument("--changelog", action="append", default=[],
+                   help="'<Added|Changed|Fixed|Removed|Security>: text', repeatable")
+    p.set_defaults(func=cmd_record_close)
 
     p_prompt = sub.add_parser("prompt", help="emit a dispatch prompt")
     p_prompt.add_argument("kind", choices=sorted(PROMPT_SOURCES))
