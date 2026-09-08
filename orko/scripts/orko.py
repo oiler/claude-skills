@@ -4,7 +4,7 @@
 # dependencies = []
 # ///
 """Owns every deterministic surface of an orko run: artifact paths, the run
-ledger, artifact validation, every dispatch prompt, and every Linear payload.
+ledger, artifact validation, and every dispatch prompt.
 
 The model authors prose. This script owns structure. In particular the `prompt`
 subcommand exists so the orchestrator dispatches reviewer text it cannot edit —
@@ -15,19 +15,13 @@ Usage:
     uv run orko.py init {analysis|build} <topic> --team KEY [--root DIR] [--date YYYY-MM-DD]
     uv run orko.py ledger <step> <status> --slug SLUG [--commit SHA] [--root DIR]
     uv run orko.py status [<slug>] [--root DIR]
-    uv run orko.py validate {spec|plan} <path>
+    uv run orko.py check tasks <path>
     uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--root DIR]
     uv run orko.py prompt plan-write <slug> [--root DIR]
     uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--root DIR]
     uv run orko.py prompt verifier <slug> --seat NAME [--question TEXT] --context-file PATH [--root DIR]
     uv run orko.py escalations <slug> [--root DIR]
     uv run orko.py preflight [--slug SLUG | --mode {analysis|build}] [--root DIR]
-    uv run orko.py linear set <key> <id> --slug SLUG | linear get --slug SLUG
-    uv run orko.py post project --slug SLUG --goal TEXT --boundaries TEXT [--branch NAME]
-    uv run orko.py post document {spec|plan|brief|synthesis} --slug SLUG
-    uv run orko.py post finding --slug SLUG --seat NAME --outcome {handled|deferred|rejected|blocked} --title TEXT   (body on stdin)
-    uv run orko.py post escalation --slug SLUG --seat NAME --title TEXT   (body on stdin)
-    uv run orko.py post close --slug SLUG --summary TEXT [--pr URL]
 
 Exit codes: 0 success / all checks pass; 1 validation failures; 2 usage or IO error.
 """
@@ -35,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
-import hashlib
 import json
 import re
 import shutil
@@ -59,28 +52,15 @@ MODES: dict[str, dict[int, str]] = {
         4: "plan review", 5: "execute", 6: "code review", 7: "close",
     },
 }
-TEAM_RE = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
 
 PLACEHOLDER_RE = re.compile(
     r"\b(?:TBD|TODO|FIXME|XXX)\b|<placeholder>|\[fill in\]", re.IGNORECASE
 )
-OPEN_QUESTION_RE = re.compile(r"\*\*Open question|\?\?\?|\[\?\]", re.IGNORECASE)
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 # The ledger header is one line. A topic carrying a newline or any other control
 # character writes a header no later command can parse, and the run is then
 # unrecoverable without hand-editing the ledger.
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
-HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
-
-# Heading-keyword requirements. Matching is by whole word against the heading
-# text, so "Latest news" does not satisfy "testing" but "Testing" does. The list
-# mirrors what superpowers:brainstorming actually emits.
-SPEC_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("a problem or goal section", ("problem", "goal")),
-    ("an architecture or design section", ("architecture", "design")),
-    ("an error handling section", ("error",)),
-    ("a testing section", ("test",)),
-)
 
 
 class Finding(NamedTuple):
@@ -109,64 +89,6 @@ def strip_code(text: str) -> str:
             continue
         out.append(INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line))
     return "\n".join(out)
-
-
-def _headings(lines: list[str]) -> list[tuple[int, int, str]]:
-    """(line_number, level, text) for every ATX heading, 1-indexed."""
-    found = []
-    for index, line in enumerate(lines, start=1):
-        match = HEADING_RE.match(line)
-        if match:
-            found.append((index, len(match.group(1)), match.group(2)))
-    return found
-
-
-def _section_is_empty(lines: list[str], headings: list[tuple[int, int, str]],
-                      position: int) -> bool:
-    start, level, _ = headings[position]
-    end = len(lines)
-    for line_no, other_level, _ in headings[position + 1:]:
-        if other_level <= level:
-            end = line_no - 1
-            break
-    body = [line for line in lines[start:end] if line.strip()]
-    return not body
-
-
-def validate_spec(text: str) -> list[Finding]:
-    scanned = strip_code(text)
-    lines = scanned.split("\n")
-    findings: list[Finding] = []
-
-    for index, line in enumerate(lines, start=1):
-        for match in PLACEHOLDER_RE.finditer(line):
-            findings.append(
-                Finding(index, f"placeholder marker {match.group(0)!r}")
-            )
-        if OPEN_QUESTION_RE.search(line):
-            findings.append(Finding(index, "unresolved open question marker"))
-
-    headings = _headings(lines)
-    if not any(level == 1 for _, level, _ in headings):
-        findings.append(Finding(1, "missing a title (no level-1 heading)"))
-
-    for label, keywords in SPEC_SECTIONS:
-        matches = [
-            position for position, (_, level, heading) in enumerate(headings)
-            if level >= 2 and any(
-                re.search(rf"\b{re.escape(kw)}", heading, re.IGNORECASE)
-                for kw in keywords
-            )
-        ]
-        if not matches:
-            findings.append(Finding(1, f"missing {label}"))
-            continue
-        for position in matches:
-            if _section_is_empty(lines, headings, position):
-                line_no, _, heading = headings[position]
-                findings.append(Finding(line_no, f"section {heading!r} is empty"))
-
-    return sorted(findings)
 
 
 PLAN_RED_FLAGS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -225,17 +147,16 @@ def validate_plan(text: str) -> list[Finding]:
     return sorted(findings)
 
 
-def cmd_validate(args: argparse.Namespace) -> int:
+def cmd_check_tasks(args: argparse.Namespace) -> int:
     target = Path(args.path)
     try:
         text = target.read_text(encoding="utf-8")
     except OSError as error:
         print(f"orko: cannot read {target}: {error}", file=sys.stderr)
         return 2
-
-    findings = {"spec": validate_spec, "plan": validate_plan}[args.kind](text)
+    findings = validate_plan(text)
     if not findings:
-        print(f"OK: {target} passes the {args.kind} validator")
+        print(f"OK: {target} passes the tasks validator")
         return 0
     for finding in findings:
         print(f"{target}:{finding.line}: {finding.message}")
@@ -312,8 +233,10 @@ def ensure_gitignored(root: Path) -> None:
         handle.write(f"{prefix}.orko/\n")
 
 
-def _header(mode: str, team: str, topic: str, slug: str, date: str) -> str:
-    return (f"# orko run — mode: {mode} — team: {team} — topic: {topic} "
+def _header(mode: str, topic: str, slug: str, date: str) -> str:
+    # `X` is a placeholder: the team field is a leftover of the Linear record
+    # and Task 4 rewrites the header without it.
+    return (f"# orko run — mode: {mode} — team: X — topic: {topic} "
             f"— slug: {slug} — date: {date}")
 
 
@@ -340,12 +263,6 @@ def cmd_init(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
     if root is None:
         print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
-        return 2
-    # fullmatch, not match: `$` also matches before a trailing newline, and a
-    # newline in the team key writes a two-line header nothing can parse back.
-    if not TEAM_RE.fullmatch(args.team):
-        print(f"orko: team key {args.team!r} must be the Linear team key, "
-              "uppercase letters and digits (for example JRF)", file=sys.stderr)
         return 2
     if CONTROL_RE.search(args.topic):
         print("orko: topic contains a newline or control character; the ledger "
@@ -384,7 +301,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         for key in ("findings_dir", "context_dir", "unposted_dir"):
             Path(paths[key]).mkdir(parents=True, exist_ok=True)
         ledger.write_text(
-            _header(args.mode, args.team, args.topic, slug, date) + "\n",
+            _header(args.mode, args.topic, slug, date) + "\n",
             encoding="utf-8",
         )
 
@@ -404,26 +321,6 @@ LEDGER_LINE_RE = re.compile(
     r"^step (?P<step>\d+) (?P<status>dispatched|complete|failed|escalated)"
     r"(?: commit=(?P<commit>\S+))?$"
 )
-
-LINEAR_KEYS = ("project", "spec_doc", "plan_doc", "brief_doc",
-               "synthesis_doc", "blocked_label")
-LINEAR_LINE_RE = re.compile(
-    r"^linear (?P<key>" + "|".join(LINEAR_KEYS) + r") (?P<id>\S+)$"
-)
-
-
-def _linear_ids(ledger: Path) -> dict[str, str]:
-    """Recorded Linear IDs, last write wins. Lives in the ledger so a resumed
-    session can re-fetch the Project and documents without the transcript."""
-    ids: dict[str, str] = {}
-    if not ledger.exists():
-        return ids
-    for line in ledger.read_text(encoding="utf-8").splitlines()[1:]:
-        match = LINEAR_LINE_RE.match(line.strip())
-        if match:
-            ids[match.group("key")] = match.group("id")
-    return ids
-
 
 def _ledger_entries(ledger: Path) -> list[dict[str, str | None]]:
     """Parsed step records in order, header excluded. Unparseable lines are
@@ -495,7 +392,6 @@ def _describe_run(root: Path, slug: str) -> dict | None:
         next_step_name=steps.get(next_step) if next_step is not None else None,
         last_status=entries[-1]["status"] if entries else None,
         dispatched_base=_dispatched_base(entries, next_step),
-        linear=_linear_ids(ledger),
     )
 
 
@@ -779,12 +675,6 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     if not ignored:
         findings.append("run-dir-not-ignored: .gitignore lacks `.orko/`; init adds it")
     if run is not None:
-        past_intake = run["mode"] == "build" and run["next_step"] != 0
-        past_open = run["mode"] == "analysis" and run["next_step"] != 1
-        if (past_intake or past_open) and not run["linear"].get("project"):
-            findings.append("project-id-missing: the run is past its first step and "
-                            "no Linear project id is recorded; post project and "
-                            "`linear set project`")
         gate = Path(run["escalations"])
         if gate.exists() and gate.read_text(encoding="utf-8").strip():
             findings.append("blocked-escalation: escalations.md is non-empty; only "
@@ -793,36 +683,6 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     for finding in findings:
         print(finding)
     return 1 if findings else 0
-
-
-def cmd_linear(args: argparse.Namespace) -> int:
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
-        return 2
-    ledger = _run_dir_root(root) / args.slug / "progress.md"
-    if _parse_header(ledger) is None:
-        print(f"orko: no run named {args.slug!r}", file=sys.stderr)
-        return 2
-    if args.action == "set":
-        if CONTROL_RE.search(args.id) or args.id.split() != [args.id]:
-            print("orko: a Linear ID cannot contain whitespace", file=sys.stderr)
-            return 2
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(f"linear {args.key} {args.id}\n")
-        return 0
-    print(json.dumps(_linear_ids(ledger), indent=2))
-    return 0
-
-
-DOC_KINDS = {"spec": "Spec", "plan": "Plan", "brief": "Brief", "synthesis": "Synthesis"}
-
-
-def _emit_posts(posts: list[dict]) -> int:
-    """The one place payloads leave the script. Every `post` subcommand ends
-    here so the shape the conductor relays is identical across entities."""
-    print(json.dumps({"posts": posts}, indent=2))
-    return 0
 
 
 def _load_run(args: argparse.Namespace) -> tuple[Path, dict] | None:
@@ -835,177 +695,6 @@ def _load_run(args: argparse.Namespace) -> tuple[Path, dict] | None:
         print(f"orko: no run named {args.slug!r}", file=sys.stderr)
         return None
     return root, run
-
-
-def _project_description(run: dict, goal: str, boundaries: str,
-                         branch: str | None) -> str:
-    lines = [
-        f"**Goal:** {goal}",
-        "",
-        f"- Mode: {run['mode']}",
-        f"- Slug: `{run['slug']}`",
-        f"- Repository: `{run['root']}`",
-        f"- Branch: `{branch}`" if branch else "- Branch: none (analysis, read-only)",
-        f"- Run directory: `{run['run_dir']}`",
-        f"- Boundaries: {boundaries}",
-        "",
-        "Record kept by orko. Issues in this project are decisions kicked up to "
-        "the conductor, one per decision, attributed by seat in the first line "
-        "of each description. Documents hold the working artifacts.",
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def cmd_post_project(args: argparse.Namespace) -> int:
-    loaded = _load_run(args)
-    if loaded is None:
-        return 2
-    _, run = loaded
-    if run["mode"] == "build" and not args.branch:
-        print("orko: a build project needs --branch (the orko/<slug> branch the "
-              "run works on)", file=sys.stderr)
-        return 2
-    # Checked here rather than by argparse so a missing field is reported the
-    # same way as a missing --branch: exit 2 with an `orko:` line, not a
-    # usage dump. The branch check runs first because it is mode-specific.
-    if not args.boundaries:
-        print("orko: post project needs --boundaries (what the run may and may "
-              "not touch)", file=sys.stderr)
-        return 2
-    description = _project_description(run, args.goal, args.boundaries, args.branch)
-    existing = run["linear"].get("project")
-    if existing:
-        post_args = {"id": existing, "description": description}
-        then = None
-    else:
-        post_args = {"name": run["slug"], "addTeams": [run["team"]],
-                     "summary": args.goal[:255], "description": description}
-        then = f"linear set project <returned id> --slug {run['slug']}"
-    return _emit_posts([{"tool": "mcp__linear__save_project",
-                         "args": post_args, "then": then}])
-
-
-def cmd_post_document(args: argparse.Namespace) -> int:
-    loaded = _load_run(args)
-    if loaded is None:
-        return 2
-    _, run = loaded
-    project = run["linear"].get("project")
-    if not project:
-        print("orko: no Linear project recorded for this run; post project first "
-              "and record its id with `linear set project`", file=sys.stderr)
-        return 2
-    source = Path(run[args.kind])
-    try:
-        content = source.read_text(encoding="utf-8")
-    except OSError as error:
-        print(f"orko: cannot read {source}: {error}", file=sys.stderr)
-        return 2
-    key = f"{args.kind}_doc"
-    existing = run["linear"].get(key)
-    if existing:
-        post_args = {"id": existing, "content": content}
-        then = None
-    else:
-        post_args = {"title": DOC_KINDS[args.kind], "project": project,
-                     "content": content}
-        then = f"linear set {key} <returned id> --slug {run['slug']}"
-    # The conductor retypes `content` into the MCP call, so the payload carries
-    # the hash of what the script read: `get_document` after the save is the
-    # only check on a relay nothing else can verify.
-    return _emit_posts([{"tool": "mcp__linear__save_document",
-                         "args": post_args, "then": then,
-                         "content_sha256": hashlib.sha256(
-                             content.encode()).hexdigest()}])
-
-
-def cmd_post_close(args: argparse.Namespace) -> int:
-    loaded = _load_run(args)
-    if loaded is None:
-        return 2
-    _, run = loaded
-    project = run["linear"].get("project")
-    if not project:
-        print("orko: no Linear project recorded for this run", file=sys.stderr)
-        return 2
-    # `patch`, never `description`: save_project replaces the description
-    # wholesale, and the description is the reconstruction block a lost run
-    # directory is rebuilt from. Close adds a line; it does not overwrite.
-    post_args: dict = {
-        "id": project,
-        "state": "Completed",
-        "patch": [{"op": "append", "text": f"\n\n**Closed.** {args.summary}\n"}],
-    }
-    if args.pr:
-        post_args["links"] = [{"url": args.pr, "title": "Pull request"}]
-    return _emit_posts([{"tool": "mcp__linear__save_project",
-                         "args": post_args, "then": None}])
-
-
-# Decision outcomes and the JRF team state each maps to. The team has no
-# "Blocked" state, so an out-of-boundaries finding is a Todo carrying the
-# `blocked` label, and the run stops on it (see cmd_post_escalation). The label
-# payload carries no team, so `blocked` is created once per workspace and
-# save_issue resolves it by name.
-OUTCOMES: dict[str, str] = {
-    "handled": "Done",
-    "deferred": "Backlog",
-    "rejected": "Canceled",
-    "blocked": "Todo",
-}
-BLOCKED_LABEL = {"name": "blocked", "color": "#eb5757"}
-
-
-def _finding_posts(run: dict, seat: str, outcome: str, title: str,
-                   body: str) -> list[dict]:
-    posts: list[dict] = []
-    labels: list[str] = []
-    if outcome == "blocked":
-        labels = [BLOCKED_LABEL["name"]]
-        if not run["linear"].get("blocked_label"):
-            posts.append({
-                "tool": "mcp__linear__save_issue_label",
-                "args": dict(BLOCKED_LABEL),
-                "then": f"linear set blocked_label <returned id> --slug {run['slug']}",
-            })
-    issue_args: dict = {
-        "team": run["team"],
-        "project": run["linear"]["project"],
-        "title": title,
-        "state": OUTCOMES[outcome],
-        "description": f"Seat: {seat}\n\n{body.rstrip()}\n",
-    }
-    if labels:
-        issue_args["labels"] = labels
-    posts.append({"tool": "mcp__linear__save_issue", "args": issue_args,
-                  "then": None})
-    return posts
-
-
-def _read_body() -> str | None:
-    body = sys.stdin.read()
-    return body if body.strip() else None
-
-
-def cmd_post_finding(args: argparse.Namespace) -> int:
-    loaded = _load_run(args)
-    if loaded is None:
-        return 2
-    _, run = loaded
-    if not run["linear"].get("project"):
-        print("orko: no Linear project recorded for this run", file=sys.stderr)
-        return 2
-    body = _read_body()
-    if body is None:
-        print("orko: the finding body (stdin) is empty; pipe the finding's "
-              "evidence and the conductor's reasoning", file=sys.stderr)
-        return 2
-    outcome = "blocked" if args.entity == "escalation" else args.outcome
-    if args.entity == "escalation":
-        gate = Path(run["escalations"])
-        with gate.open("a", encoding="utf-8") as handle:
-            handle.write(f"## {args.title}\n\nSeat: {args.seat}\n\n{body.rstrip()}\n\n")
-    return _emit_posts(_finding_posts(run, args.seat, outcome, args.title, body))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1034,10 +723,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("--root")
     p_status.set_defaults(func=cmd_status)
 
-    p_validate = sub.add_parser("validate", help="check an artifact")
-    p_validate.add_argument("kind", choices=["spec", "plan"])
-    p_validate.add_argument("path")
-    p_validate.set_defaults(func=cmd_validate)
+    p_check = sub.add_parser("check", help="validate an artifact")
+    check_sub = p_check.add_subparsers(dest="kind", required=True)
+    p_ct = check_sub.add_parser("tasks")
+    p_ct.add_argument("path")
+    p_ct.set_defaults(func=cmd_check_tasks)
 
     p_prompt = sub.add_parser("prompt", help="emit a dispatch prompt")
     p_prompt.add_argument("kind", choices=sorted(PROMPT_SOURCES))
@@ -1060,53 +750,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_pre.add_argument("--mode", choices=sorted(MODES))
     p_pre.add_argument("--root")
     p_pre.set_defaults(func=cmd_preflight)
-
-    p_post = sub.add_parser("post", help="emit a Linear payload for the conductor to send")
-    post_sub = p_post.add_subparsers(dest="entity", required=True)
-
-    p_pp = post_sub.add_parser("project")
-    p_pp.add_argument("--slug", required=True)
-    p_pp.add_argument("--root")
-    p_pp.add_argument("--goal", required=True)
-    p_pp.add_argument("--boundaries")
-    p_pp.add_argument("--branch")
-    p_pp.set_defaults(func=cmd_post_project)
-
-    p_pd = post_sub.add_parser("document")
-    p_pd.add_argument("kind", choices=sorted(DOC_KINDS))
-    p_pd.add_argument("--slug", required=True)
-    p_pd.add_argument("--root")
-    p_pd.set_defaults(func=cmd_post_document)
-
-    p_pc = post_sub.add_parser("close")
-    p_pc.add_argument("--slug", required=True)
-    p_pc.add_argument("--root")
-    p_pc.add_argument("--summary", required=True)
-    p_pc.add_argument("--pr")
-    p_pc.set_defaults(func=cmd_post_close)
-
-    for entity in ("finding", "escalation"):
-        p_pf = post_sub.add_parser(entity)
-        p_pf.add_argument("--slug", required=True)
-        p_pf.add_argument("--root")
-        p_pf.add_argument("--seat", required=True)
-        p_pf.add_argument("--title", required=True)
-        if entity == "finding":
-            p_pf.add_argument("--outcome", required=True, choices=sorted(OUTCOMES))
-        p_pf.set_defaults(func=cmd_post_finding)
-
-    p_linear = sub.add_parser("linear", help="record or read Linear IDs")
-    linear_sub = p_linear.add_subparsers(dest="action", required=True)
-    p_set = linear_sub.add_parser("set")
-    p_set.add_argument("key", choices=LINEAR_KEYS)
-    p_set.add_argument("id")
-    p_set.add_argument("--slug", required=True)
-    p_set.add_argument("--root")
-    p_set.set_defaults(func=cmd_linear)
-    p_get = linear_sub.add_parser("get")
-    p_get.add_argument("--slug", required=True)
-    p_get.add_argument("--root")
-    p_get.set_defaults(func=cmd_linear)
 
     return parser
 

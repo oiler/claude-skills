@@ -1,6 +1,5 @@
 """Tests for orko.py — the deterministic spine of the orko skill."""
 import hashlib
-import io
 import json
 import subprocess
 from pathlib import Path
@@ -9,39 +8,6 @@ import pytest
 
 import orko
 from conftest import FIXTURE_WORKSPACE
-
-
-# Documented parameter names of the Linear MCP tools orko posts to. A payload
-# whose args carry a key not in this set would fail at the MCP boundary, after
-# the conductor has already committed to posting it.
-MCP_PARAMS = {
-    "mcp__linear__save_project": {
-        "id", "name", "addTeams", "description", "summary", "state", "links",
-        "patch",
-    },
-    "mcp__linear__save_document": {
-        "id", "title", "project", "content",
-    },
-    "mcp__linear__save_issue": {
-        "team", "project", "title", "description", "state", "labels", "links",
-    },
-    "mcp__linear__save_issue_label": {
-        "id", "name", "color", "description", "isGroup", "parent", "teamId",
-    },
-}
-
-
-def assert_posts_are_well_formed(payload):
-    assert list(payload) == ["posts"]
-    for post in payload["posts"]:
-        # `content_sha256` rides alongside the payload, never inside `args`:
-        # it is the conductor's relay check, not a Linear field.
-        allowed = {"tool", "args", "then"}
-        if post["tool"] == "mcp__linear__save_document":
-            allowed = allowed | {"content_sha256"}
-        assert {"tool", "args", "then"} <= set(post) <= allowed, set(post)
-        assert post["tool"] in MCP_PARAMS, post["tool"]
-        assert set(post["args"]) <= MCP_PARAMS[post["tool"]], post["args"].keys()
 
 
 class TestSlugify:
@@ -109,13 +75,7 @@ class TestInit:
         payload = json.loads(capsys.readouterr().out)
         assert payload["slug"] == "demo-topic"
         assert payload["mode"] == "build"
-        assert payload["team"] == "JRF"
         assert payload["next_step"] == 0
-        ledger = tmp_path / ".orko/demo-topic/progress.md"
-        assert ledger.read_text().splitlines()[0] == (
-            "# orko run — mode: build — team: JRF — topic: Demo Topic "
-            "— slug: demo-topic — date: 2026-09-04"
-        )
 
     def test_reinit_same_topic_resumes_instead_of_restarting(self, tmp_path, capsys):
         orko.main(["init", "build", "Demo Topic", "--team", "JRF",
@@ -161,23 +121,6 @@ class TestModes:
         orko.main(["init", mode, "Demo Topic", "--team", "JRF",
                    "--root", str(tmp_path), "--date", "2026-09-04"])
         capsys.readouterr()
-
-    def test_init_requires_a_team(self, tmp_path):
-        with pytest.raises(SystemExit) as raised:
-            orko.main(["init", "build", "Demo Topic", "--root", str(tmp_path)])
-        assert raised.value.code == 2
-
-    def test_init_rejects_a_lowercase_team_key(self, tmp_path, capsys):
-        rc = orko.main(["init", "build", "Demo Topic", "--team", "jrf",
-                        "--root", str(tmp_path)])
-        assert rc == 2
-        assert "team key" in capsys.readouterr().err
-
-    def test_init_rejects_a_team_key_with_trailing_newline(self, tmp_path, capsys):
-        rc = orko.main(["init", "build", "Demo Topic", "--team", "JRF\n",
-                        "--root", str(tmp_path)])
-        assert rc == 2
-        assert "team key" in capsys.readouterr().err
 
     def test_analysis_run_starts_at_step_one(self, tmp_path, capsys):
         self._init(tmp_path, capsys, mode="analysis")
@@ -470,26 +413,6 @@ class TestLedgerAndStatus:
         assert "no run" in capsys.readouterr().err
 
 
-SPEC_OK = """# Demo Design Spec
-
-## Problem
-
-Things are bad.
-
-## Architecture
-
-A box connected to another box.
-
-## Error handling
-
-Everything stops loudly.
-
-## Testing
-
-We test it.
-"""
-
-
 class TestStripCode:
     def test_blanks_inline_code_but_keeps_line_count(self):
         out = orko.strip_code("alpha `TODO` omega\nsecond line\n")
@@ -512,66 +435,21 @@ class TestStripCode:
         assert orko.strip_code("plain words\n") == "plain words\n"
 
 
-class TestValidateSpec:
-    def test_a_complete_spec_passes(self):
-        assert orko.validate_spec(SPEC_OK) == []
-
-    def test_placeholder_markers_are_reported_with_line_numbers(self):
-        findings = orko.validate_spec(SPEC_OK + "\nStill TODO here.\n")
-        assert len(findings) == 1
-        assert findings[0].line == 19
-        assert "TODO" in findings[0].message
-
-    def test_markers_inside_code_spans_are_ignored(self):
-        assert orko.validate_spec(SPEC_OK + "\nWe scan for `TODO` markers.\n") == []
-
-    def test_missing_section_is_reported(self):
-        text = SPEC_OK.replace("## Testing\n\nWe test it.\n", "")
-        messages = " ".join(f.message for f in orko.validate_spec(text))
-        assert "testing" in messages.lower()
-
-    def test_empty_section_body_is_reported(self):
-        text = SPEC_OK.replace("Everything stops loudly.\n", "")
-        messages = " ".join(f.message for f in orko.validate_spec(text))
-        assert "empty" in messages.lower()
-
-    def test_missing_title_is_reported(self):
-        text = SPEC_OK.replace("# Demo Design Spec\n", "")
-        messages = " ".join(f.message for f in orko.validate_spec(text))
-        assert "title" in messages.lower()
-
-    def test_open_question_marker_is_reported(self):
-        findings = orko.validate_spec(SPEC_OK + "\n**Open question:** which one?\n")
-        assert any("open question" in f.message.lower() for f in findings)
-
-    def test_heading_keyword_matching_does_not_match_substrings(self):
-        text = SPEC_OK.replace("## Testing", "## Latest news")
-        messages = " ".join(f.message for f in orko.validate_spec(text))
-        assert "testing" in messages.lower()
-
-    def test_the_title_cannot_satisfy_a_section_requirement(self):
-        text = SPEC_OK.replace(
-            "## Architecture\n\nA box connected to another box.\n\n", ""
-        )
-        messages = " ".join(f.message for f in orko.validate_spec(text))
-        assert "architecture" in messages.lower()
-
-
 class TestValidateCLI:
-    def test_passing_spec_exits_zero(self, tmp_path, capsys):
-        target = tmp_path / "spec.md"
-        target.write_text(SPEC_OK)
-        assert orko.main(["validate", "spec", str(target)]) == 0
+    def test_passing_tasks_exits_zero(self, tmp_path, capsys):
+        target = tmp_path / "tasks.md"
+        target.write_text(PLAN_OK)
+        assert orko.main(["check", "tasks", str(target)]) == 0
         assert "OK" in capsys.readouterr().out
 
-    def test_failing_spec_exits_one_and_lists_findings(self, tmp_path, capsys):
-        target = tmp_path / "spec.md"
-        target.write_text(SPEC_OK + "\nTBD\n")
-        assert orko.main(["validate", "spec", str(target)]) == 1
-        assert "spec.md:19:" in capsys.readouterr().out
+    def test_failing_tasks_exits_one_and_lists_findings(self, tmp_path, capsys):
+        target = tmp_path / "tasks.md"
+        target.write_text(PLAN_OK + "\nTBD\n")
+        assert orko.main(["check", "tasks", str(target)]) == 1
+        assert "tasks.md:" in capsys.readouterr().out
 
     def test_missing_file_exits_two(self, tmp_path, capsys):
-        assert orko.main(["validate", "spec", str(tmp_path / "nope.md")]) == 2
+        assert orko.main(["check", "tasks", str(tmp_path / "nope.md")]) == 2
         assert "cannot read" in capsys.readouterr().err
 
 
@@ -846,354 +724,6 @@ class TestEscalations:
         assert "not inside a git repository" in capsys.readouterr().err
 
 
-class TestLinearIds:
-    def _init(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        capsys.readouterr()
-
-    def test_set_then_get_round_trips(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        assert orko.main(["linear", "set", "project", "proj_123",
-                          "--slug", "demo-topic", "--root", str(tmp_path)]) == 0
-        assert orko.main(["linear", "get", "--slug", "demo-topic",
-                          "--root", str(tmp_path)]) == 0
-        assert json.loads(capsys.readouterr().out) == {"project": "proj_123"}
-
-    def test_set_appends_a_ledger_line(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        orko.main(["linear", "set", "spec_doc", "doc_9", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        lines = (tmp_path / ".orko/demo-topic/progress.md").read_text().splitlines()
-        assert lines[-1] == "linear spec_doc doc_9"
-
-    def test_last_write_wins(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        for value in ("a", "b"):
-            orko.main(["linear", "set", "project", value, "--slug", "demo-topic",
-                       "--root", str(tmp_path)])
-        capsys.readouterr()
-        orko.main(["linear", "get", "--slug", "demo-topic", "--root", str(tmp_path)])
-        assert json.loads(capsys.readouterr().out)["project"] == "b"
-
-    def test_unknown_key_is_a_usage_error(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        with pytest.raises(SystemExit) as raised:
-            orko.main(["linear", "set", "wiki", "x", "--slug", "demo-topic",
-                       "--root", str(tmp_path)])
-        assert raised.value.code == 2
-        assert "invalid choice: 'wiki'" in capsys.readouterr().err
-
-    def test_set_rejects_an_id_containing_unicode_whitespace(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        assert orko.main(["linear", "set", "project", "proj\u00a0123",
-                          "--slug", "demo-topic", "--root", str(tmp_path)]) == 2
-        assert "whitespace" in capsys.readouterr().err
-
-    def test_status_reports_the_ids(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        orko.main(["linear", "set", "project", "proj_123", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        capsys.readouterr()
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
-        assert json.loads(capsys.readouterr().out)["linear"] == {"project": "proj_123"}
-
-    def test_linear_lines_do_not_disturb_step_parsing(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        orko.main(["ledger", "0", "complete", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        orko.main(["linear", "set", "project", "p", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        capsys.readouterr()
-        orko.main(["status", "demo-topic", "--root", str(tmp_path)])
-        assert json.loads(capsys.readouterr().out)["next_step"] == 1
-
-
-class TestPostProject:
-    def _init(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        capsys.readouterr()
-
-    def _post(self, tmp_path, capsys, *extra):
-        rc = orko.main(["post", "project", "--slug", "demo-topic",
-                        "--root", str(tmp_path), *extra])
-        out = capsys.readouterr()
-        return rc, out
-
-    def test_emits_save_project_for_the_team_named_at_init(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        rc, out = self._post(tmp_path, capsys, "--goal", "Ship it",
-                             "--branch", "orko/demo-topic",
-                             "--boundaries", "Only src/")
-        assert rc == 0
-        payload = json.loads(out.out)
-        assert_posts_are_well_formed(payload)
-        post = payload["posts"][0]
-        assert post["tool"] == "mcp__linear__save_project"
-        assert post["args"]["name"] == "demo-topic"
-        assert post["args"]["addTeams"] == ["JRF"]
-        assert "id" not in post["args"]
-        assert post["then"] == "linear set project <returned id> --slug demo-topic"
-
-    def test_description_carries_every_reconstruction_field(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        _, out = self._post(tmp_path, capsys, "--goal", "Ship it",
-                            "--branch", "orko/demo-topic", "--boundaries", "Only src/")
-        description = json.loads(out.out)["posts"][0]["args"]["description"]
-        for needle in ("Ship it", "build", str(tmp_path), "orko/demo-topic",
-                       ".orko/demo-topic", "demo-topic", "Only src/"):
-            assert needle in description, needle
-
-    def test_refuses_without_goal_or_branch(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        rc, out = self._post(tmp_path, capsys, "--goal", "Ship it")
-        assert rc == 2
-        assert "branch" in out.err
-
-    def test_refuses_without_boundaries(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        rc, out = self._post(tmp_path, capsys, "--goal", "Ship it",
-                             "--branch", "orko/demo-topic")
-        assert rc == 2
-        assert "boundaries" in out.err
-
-    def test_updates_in_place_once_a_project_id_is_recorded(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        capsys.readouterr()
-        _, out = self._post(tmp_path, capsys, "--goal", "Ship it",
-                            "--branch", "orko/demo-topic", "--boundaries", "none")
-        post = json.loads(out.out)["posts"][0]
-        assert post["args"]["id"] == "proj_1"
-        assert "addTeams" not in post["args"]
-        assert post["then"] is None
-
-    def test_analysis_project_needs_no_branch(self, tmp_path, capsys):
-        orko.main(["init", "analysis", "Demo Q", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        capsys.readouterr()
-        rc = orko.main(["post", "project", "--slug", "demo-q", "--root", str(tmp_path),
-                        "--goal", "Why is it slow?", "--boundaries", "read-only"])
-        assert rc == 0
-
-
-class TestPostDocument:
-    def _init(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        capsys.readouterr()
-
-    def test_emits_save_document_with_file_contents(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        (tmp_path / ".orko/demo-topic/spec.md").write_text("# Spec\n\nbody\n")
-        rc = orko.main(["post", "document", "spec", "--slug", "demo-topic",
-                        "--root", str(tmp_path)])
-        assert rc == 0
-        payload = json.loads(capsys.readouterr().out)
-        assert_posts_are_well_formed(payload)
-        post = payload["posts"][0]
-        assert post["tool"] == "mcp__linear__save_document"
-        assert post["args"] == {"title": "Spec", "project": "proj_1",
-                                "content": "# Spec\n\nbody\n"}
-        assert post["then"] == "linear set spec_doc <returned id> --slug demo-topic"
-
-    def test_updates_when_the_document_id_is_recorded(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        (tmp_path / ".orko/demo-topic/plan.md").write_text("# Plan\n")
-        orko.main(["linear", "set", "plan_doc", "doc_2", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        capsys.readouterr()
-        orko.main(["post", "document", "plan", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        post = json.loads(capsys.readouterr().out)["posts"][0]
-        assert post["args"]["id"] == "doc_2"
-        assert "project" not in post["args"]
-        assert post["then"] is None
-
-    def test_carries_the_sha256_of_the_content(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        content = "# Spec\n\nbody\n"
-        (tmp_path / ".orko/demo-topic/spec.md").write_text(content)
-        orko.main(["post", "document", "spec", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        post = json.loads(capsys.readouterr().out)["posts"][0]
-        assert post["content_sha256"] == hashlib.sha256(content.encode()).hexdigest()
-        assert "content_sha256" not in post["args"]
-
-    def test_refuses_before_the_project_exists(self, tmp_path, capsys):
-        orko.main(["init", "build", "Other", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        (tmp_path / ".orko/other/spec.md").write_text("# Spec\n")
-        capsys.readouterr()
-        rc = orko.main(["post", "document", "spec", "--slug", "other",
-                        "--root", str(tmp_path)])
-        assert rc == 2
-        assert "project" in capsys.readouterr().err
-
-    def test_refuses_when_the_file_is_missing(self, tmp_path, capsys):
-        self._init(tmp_path, capsys)
-        rc = orko.main(["post", "document", "synthesis", "--slug", "demo-topic",
-                        "--root", str(tmp_path)])
-        assert rc == 2
-
-
-class TestPostClose:
-    def test_emits_completed_state_with_summary(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        capsys.readouterr()
-        rc = orko.main(["post", "close", "--slug", "demo-topic", "--root", str(tmp_path),
-                        "--summary", "Two tasks shipped.", "--pr",
-                        "https://github.com/x/y/pull/1"])
-        assert rc == 0
-        payload = json.loads(capsys.readouterr().out)
-        assert_posts_are_well_formed(payload)
-        post = payload["posts"][0]
-        assert post["args"]["id"] == "proj_1"
-        assert post["args"]["state"] == "Completed"
-        assert post["args"]["links"] == [{"url": "https://github.com/x/y/pull/1",
-                                          "title": "Pull request"}]
-        # Close appends; it must never send `description`, which save_project
-        # replaces wholesale and which carries the reconstruction block.
-        assert "description" not in post["args"]
-        assert post["args"]["patch"] == [
-            {"op": "append", "text": "\n\n**Closed.** Two tasks shipped.\n"}
-        ]
-
-    def test_close_refuses_before_the_project_exists(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        capsys.readouterr()
-        rc = orko.main(["post", "close", "--slug", "demo-topic",
-                        "--root", str(tmp_path), "--summary", "x"])
-        assert rc == 2
-        assert "project" in capsys.readouterr().err
-
-    def test_refuses_without_summary(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        capsys.readouterr()
-        with pytest.raises(SystemExit):
-            orko.main(["post", "close", "--slug", "demo-topic", "--root", str(tmp_path)])
-
-
-class TestPostFinding:
-    def _init(self, tmp_path, capsys):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        capsys.readouterr()
-
-    def _post(self, tmp_path, capsys, monkeypatch, outcome, body="Evidence here.\n"):
-        monkeypatch.setattr("sys.stdin", io.StringIO(body))
-        rc = orko.main(["post", "finding", "--slug", "demo-topic", "--root", str(tmp_path),
-                        "--seat", "security-reviewer", "--outcome", outcome,
-                        "--title", "Token in query string"])
-        return rc, capsys.readouterr()
-
-    def test_handled_maps_to_done(self, tmp_path, capsys, monkeypatch):
-        self._init(tmp_path, capsys)
-        rc, out = self._post(tmp_path, capsys, monkeypatch, "handled")
-        assert rc == 0
-        payload = json.loads(out.out)
-        assert_posts_are_well_formed(payload)
-        assert payload["posts"][-1]["args"]["state"] == "Done"
-
-    def test_deferred_maps_to_backlog(self, tmp_path, capsys, monkeypatch):
-        self._init(tmp_path, capsys)
-        _, out = self._post(tmp_path, capsys, monkeypatch, "deferred")
-        assert json.loads(out.out)["posts"][-1]["args"]["state"] == "Backlog"
-
-    def test_rejected_maps_to_canceled(self, tmp_path, capsys, monkeypatch):
-        self._init(tmp_path, capsys)
-        _, out = self._post(tmp_path, capsys, monkeypatch, "rejected")
-        assert json.loads(out.out)["posts"][-1]["args"]["state"] == "Canceled"
-
-    def test_blocked_maps_to_todo_with_label(self, tmp_path, capsys, monkeypatch):
-        self._init(tmp_path, capsys)
-        orko.main(["linear", "set", "blocked_label", "lbl_1", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        capsys.readouterr()
-        _, out = self._post(tmp_path, capsys, monkeypatch, "blocked")
-        posts = json.loads(out.out)["posts"]
-        assert len(posts) == 1
-        assert posts[0]["args"]["state"] == "Todo"
-        assert posts[0]["args"]["labels"] == ["blocked"]
-
-    def test_blocked_bootstraps_the_label_when_unrecorded(self, tmp_path, capsys, monkeypatch):
-        self._init(tmp_path, capsys)
-        _, out = self._post(tmp_path, capsys, monkeypatch, "blocked")
-        payload = json.loads(out.out)
-        assert_posts_are_well_formed(payload)
-        posts = payload["posts"]
-        assert [p["tool"] for p in posts] == ["mcp__linear__save_issue_label",
-                                              "mcp__linear__save_issue"]
-        assert posts[0]["args"] == {"name": "blocked", "color": "#eb5757"}
-        assert posts[0]["then"] == "linear set blocked_label <returned id> --slug demo-topic"
-
-    def test_description_starts_with_the_seat_line(self, tmp_path, capsys, monkeypatch):
-        self._init(tmp_path, capsys)
-        _, out = self._post(tmp_path, capsys, monkeypatch, "handled")
-        description = json.loads(out.out)["posts"][-1]["args"]["description"]
-        assert description.startswith("Seat: security-reviewer\n")
-        assert "Evidence here." in description
-
-    def test_issue_targets_team_and_project(self, tmp_path, capsys, monkeypatch):
-        self._init(tmp_path, capsys)
-        _, out = self._post(tmp_path, capsys, monkeypatch, "handled")
-        args = json.loads(out.out)["posts"][-1]["args"]
-        assert args["team"] == "JRF"
-        assert args["project"] == "proj_1"
-        assert args["title"] == "Token in query string"
-
-    def test_empty_body_is_a_usage_error(self, tmp_path, capsys, monkeypatch):
-        self._init(tmp_path, capsys)
-        rc, out = self._post(tmp_path, capsys, monkeypatch, "handled", body="  \n")
-        assert rc == 2
-        assert "body" in out.err
-
-    def test_unknown_outcome_is_rejected_by_argparse(self, tmp_path, capsys, monkeypatch):
-        self._init(tmp_path, capsys)
-        with pytest.raises(SystemExit):
-            self._post(tmp_path, capsys, monkeypatch, "maybe")
-
-
-class TestPostEscalation:
-    def test_escalation_is_a_blocked_finding_that_writes_the_gate_file(
-        self, tmp_path, capsys, monkeypatch
-    ):
-        orko.main(["init", "build", "Demo Topic", "--team", "JRF",
-                   "--root", str(tmp_path), "--date", "2026-09-04"])
-        orko.main(["linear", "set", "project", "proj_1", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        orko.main(["linear", "set", "blocked_label", "lbl_1", "--slug", "demo-topic",
-                   "--root", str(tmp_path)])
-        capsys.readouterr()
-        monkeypatch.setattr("sys.stdin", io.StringIO("Scope grows to billing.\n"))
-        rc = orko.main(["post", "escalation", "--slug", "demo-topic",
-                        "--root", str(tmp_path), "--seat", "architecture-reviewer",
-                        "--title", "Billing is outside boundaries"])
-        assert rc == 0
-        payload = json.loads(capsys.readouterr().out)
-        assert_posts_are_well_formed(payload)
-        posts = payload["posts"]
-        assert posts[-1]["args"]["state"] == "Todo"
-        assert posts[-1]["args"]["labels"] == ["blocked"]
-        gate = (tmp_path / ".orko/demo-topic/escalations.md").read_text()
-        assert "Billing is outside boundaries" in gate
-        assert "Scope grows to billing." in gate
-        assert orko.main(["escalations", "demo-topic", "--root", str(tmp_path)]) == 1
-
-
 class TestPreflight:
     def _repo(self, tmp_path, branch="feat/x"):
         subprocess.run(["git", "init", "-q", "-b", branch, str(tmp_path)], check=True)
@@ -1231,16 +761,6 @@ class TestPreflight:
         assert orko.main(["preflight", "--root", str(root), "--mode", "build"]) == 1
         assert "run-dir-not-ignored" in capsys.readouterr().out
 
-    def test_run_past_intake_without_project_id_is_reported(self, tmp_path, capsys, monkeypatch):
-        root = self._repo(tmp_path)
-        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        orko.main(["init", "build", "Demo", "--team", "JRF", "--root", str(root),
-                   "--date", "2026-09-04"])
-        orko.main(["ledger", "0", "complete", "--slug", "demo", "--root", str(root)])
-        capsys.readouterr()
-        assert orko.main(["preflight", "--root", str(root), "--slug", "demo"]) == 1
-        assert "project-id-missing" in capsys.readouterr().out
-
     def test_slug_supplies_the_mode(self, tmp_path, capsys, monkeypatch):
         root = self._repo(tmp_path, branch="master")
         monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
@@ -1265,22 +785,17 @@ class TestPreflight:
 
 
 class TestFixtures:
-    """The validators' required shapes derive from real artifacts, not an
-    imagined structure. A rule change that rejects either fixture fails here."""
-
-    def test_spec_fixture_passes(self):
-        text = (Path(orko.__file__).parent / "fixtures/spec.md").read_text(encoding="utf-8")
-        assert orko.validate_spec(text) == []
+    """The validator's required shape derives from a real artifact, not an
+    imagined structure. A rule change that rejects the fixture fails here."""
 
     def test_plan_fixture_passes(self):
-        text = (Path(orko.__file__).parent / "fixtures/plan.md").read_text(encoding="utf-8")
+        text = (Path(orko.__file__).parent / "fixtures/tasks.md").read_text(encoding="utf-8")
         assert orko.validate_plan(text) == []
 
     def test_fixtures_carry_no_stale_run_paths(self):
-        for name in ("spec.md", "plan.md"):
-            text = (Path(orko.__file__).parent / f"fixtures/{name}").read_text(encoding="utf-8")
-            assert "docs/sessions/" not in orko.strip_code(text).replace(
-                "`docs/sessions/`", ""), name
+        text = (Path(orko.__file__).parent / "fixtures/tasks.md").read_text(encoding="utf-8")
+        assert "docs/sessions/" not in orko.strip_code(text).replace(
+            "`docs/sessions/`", "")
 
 
 class TestFixtureWorkspace:
