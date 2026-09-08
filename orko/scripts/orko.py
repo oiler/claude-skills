@@ -290,8 +290,9 @@ def _header_line(fields: dict) -> str:
 def _parse_header(ledger: Path) -> dict | None:
     """The run's header fields, or None when the ledger cannot supply them.
 
-    Empty, truncated, and short-of-a-key are all unreadable rather than a
-    crash: callers turn None into exit 2.
+    Empty, truncated, short-of-a-key, and carrying a mode no MODES table knows
+    are all unreadable rather than a crash: callers turn None into exit 2. The
+    mode check is load-bearing — every caller indexes MODES with it.
     """
     if not ledger.exists():
         return None
@@ -301,6 +302,8 @@ def _parse_header(ledger: Path) -> dict | None:
     try:
         fields = json.loads(lines[1].removeprefix("header: "))
     except json.JSONDecodeError:
+        return None
+    if fields.get("mode") not in MODES:
         return None
     return fields if set(HEADER_KEYS) <= set(fields) else None
 

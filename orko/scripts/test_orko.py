@@ -143,6 +143,11 @@ class TestInit:
         code, _ = init_run(workspace, capsys, "analysis")
         assert code == 2
 
+    def test_topic_collision_on_same_slug_is_refused(self, workspace, capsys):
+        init_run(workspace, capsys, "build", "Demo Topic")
+        code, _ = init_run(workspace, capsys, "build", "demo topic!")
+        assert code == 2
+
     def test_creates_the_scratch_subdirectories(self, workspace, capsys):
         _, payload = init_run(workspace, capsys)
         for key in ("findings_dir", "context_dir"):
@@ -279,6 +284,20 @@ class TestErrorContracts:
         code, err = init_run(workspace, capsys)
         assert code == 2
         assert "unreadable ledger header" in err
+
+    def test_a_header_with_an_unknown_mode_is_unreadable(self, workspace, capsys):
+        # Every caller indexes MODES with the mode, so a header naming one that
+        # does not exist must read as unreadable, not raise KeyError.
+        _, payload = init_run(workspace, capsys)
+        ledger = Path(payload["ledger"])
+        title, header, *rest = ledger.read_text(encoding="utf-8").splitlines()
+        fields = json.loads(header.removeprefix("header: "))
+        fields["mode"] = "bogus"
+        ledger.write_text("\n".join([title, "header: " + json.dumps(fields), *rest]) + "\n",
+                          encoding="utf-8")
+        capsys.readouterr()
+        assert orko.main(["status", "demo-topic", "--workspace", str(workspace)]) == 2
+        assert "unreadable ledger header" in capsys.readouterr().err
 
     @pytest.mark.parametrize("topic", [
         "Demo\nTopic",
