@@ -1373,8 +1373,13 @@ CHANGELOG_SECTIONS = ("Added", "Changed", "Fixed", "Removed", "Security")
 
 
 def _insert_under(text: str, heading: str, line: str, within: str | None = None) -> str:
-    """Insert `line` as the first entry under `heading`, creating the heading at
-    the end of the section when absent.
+    """Record `line` under `heading`, creating the heading when absent.
+
+    Idempotent, because `close` is rerunnable: a line already standing in the
+    section is left alone rather than filed twice. Entries append after the
+    section's last bullet, so `--changelog` order survives into the file and
+    consecutive bullets stay a tight list with one blank line before whatever
+    heading follows.
 
     `within` scopes the whole operation to one `## ` section: a changelog entry
     belongs under Unreleased, and an unscoped insert would land it in whatever
@@ -1385,14 +1390,30 @@ def _insert_under(text: str, heading: str, line: str, within: str | None = None)
         section, sep2, after = rest.partition("\n## ")
         section = _insert_under(section, heading, line)
         return head + sep + section + (sep2 + after if sep2 else "")
-    if heading + "\n" not in text:
-        # An empty section starts with no newline of its own, so `rstrip` +
+    lines = text.split("\n")
+    if heading not in lines:
+        # An empty section carries no newline of its own, so `rstrip` plus a
         # blank line would open the heading with two blank lines above it.
         body = text.rstrip("\n")
-        text = (body + "\n\n" if body else "\n") + f"{heading}\n\n"
-    head, sep, rest = text.partition(heading + "\n")
-    rest = rest.lstrip("\n")
-    return head + sep + "\n" + line + "\n" + ("\n" + rest if rest else "")
+        lines = ((body + "\n\n" if body else "\n") + f"{heading}\n\n").split("\n")
+    start = lines.index(heading)
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("#")),
+               len(lines))
+    block, body = line.split("\n"), lines[start + 1:end]
+    if any(body[i:i + len(block)] == block for i in range(len(body) - len(block) + 1)):
+        return "\n".join(lines)
+    bullets = [i for i in range(start + 1, end) if lines[i].startswith("- ")]
+    if bullets:
+        at = bullets[-1] + 1
+    else:
+        at = start + 1
+        if at >= len(lines) or lines[at].strip():
+            lines.insert(at, "")
+        at += 1
+    lines.insert(at, line)
+    if at + 1 >= len(lines) or lines[at + 1].strip():
+        lines.insert(at + 1, "")
+    return "\n".join(lines)
 
 
 def _status_progress_line(ws: Path, topic: str, new_line: str) -> None:
@@ -1438,8 +1459,12 @@ def cmd_record_close(args: argparse.Namespace) -> int:
             return 2
         entries.append((section.strip(), text.strip()))
     ledger = Path(run["ledger"])
-    ids = [entry["id"] for entry in records(ledger) if entry["id"] != "-"]
-    id_text = ", ".join(sorted(ids))
+    # The PR bodies trace everything the run minted. STATUS and the changelogs
+    # cite the work itself: a reader asking what shipped is not served by a
+    # review or decision ID on a changelog line.
+    ids = sorted(entry["id"] for entry in records(ledger) if entry["id"] != "-")
+    id_text = ", ".join(sorted(entry["id"] for entry in records(ledger)
+                               if entry["type"] in ("spec", "plan")))
 
     status = ws / "docs/STATUS.md"
     status.write_text(set_frontmatter(status.read_text(encoding="utf-8"),

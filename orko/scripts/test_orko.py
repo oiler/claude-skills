@@ -1458,6 +1458,47 @@ class TestRecordClose:
                          text)
         assert text.endswith("## 0.1.0\n\n### Added\n\n- old\n")
 
+    def test_two_entries_in_one_section_stay_a_tight_list_in_order(self, workspace, capsys):
+        self._closeable(workspace, capsys)
+        rec(workspace, capsys, "close", "--slug", "demo-topic", "--summary", "x",
+            "--changelog", "Added: first entry", "--changelog", "Added: second entry")
+        text = (workspace / "code/CHANGELOG.md").read_text()
+        assert ("### Added\n\n"
+                "- first entry (PLAN-001, SPEC-001)\n"
+                "- second entry (PLAN-001, SPEC-001)\n\n"
+                "### Changed") in text
+
+    def test_close_twice_does_not_duplicate_changelog_entries(self, workspace, capsys):
+        self._closeable(workspace, capsys)
+        args = ("close", "--slug", "demo-topic", "--summary", "Adds addition.",
+                "--changelog", "Added: addition endpoint")
+        rec(workspace, capsys, *args)
+        status = workspace / "docs/STATUS.md"
+        before = status.read_text()
+        before_logs = {f: (workspace / f).read_text()
+                       for f in ("code/CHANGELOG.md", "docs/versions/0.1/CHANGELOG.md")}
+        assert rec(workspace, capsys, *args)[0] == 0
+        assert status.read_text() == before
+        for f, text in before_logs.items():
+            assert (workspace / f).read_text() == text
+            assert text.count("- addition endpoint (PLAN-001, SPEC-001)") == 1
+
+    def test_only_spec_and_plan_ids_reach_the_changelog(self, workspace, capsys):
+        self._closeable(workspace, capsys)
+        shutil.copytree(Path(orko.__file__).parent / "fixtures/findings",
+                        workspace / ".orko/demo-topic/findings/2")
+        rec(workspace, capsys, "review", "--slug", "demo-topic", "--role", "spec",
+            "--reviews", "SPEC-001", "--revision", "abc1234", "--title", "Spec review",
+            "--from-findings", str(workspace / ".orko/demo-topic/findings/2"))
+        _, out = rec(workspace, capsys, "close", "--slug", "demo-topic", "--summary", "x",
+                     "--changelog", "Added: addition endpoint")
+        text = (workspace / "code/CHANGELOG.md").read_text()
+        assert "- addition endpoint (PLAN-001, SPEC-001)" in text
+        assert "REVIEW-001" not in text
+        assert "REVIEW-001" not in (workspace / "docs/STATUS.md").read_text()
+        pr_docs = Path(out["pr_docs"]).read_text()
+        assert "- PLAN-001\n- REVIEW-001\n- SPEC-001" in pr_docs
+
     def test_intake_bullet_keeps_the_section_readable(self, workspace, capsys):
         init_run(workspace, capsys)
         status = (workspace / "docs/STATUS.md").read_text()
