@@ -1278,3 +1278,67 @@ class TestRecordOthers:
         amendments = text.split("## Amendments")[1].split("## Trailing notes")[0]
         assert re.search(r"\n\n- \d{4}-\d{2}-\d{2}: R2 now returns 404\n", amendments)
         assert text.rstrip().endswith("- keep me last")
+
+
+def git_out(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout
+
+
+class TestCommit:
+    def test_docs_commit_stages_records_and_carries_ids_and_trailers(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        assert orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "draft spec",
+                          "--workspace", str(workspace)]) == 0
+        body = git_out(workspace / "docs", "log", "-1", "--format=%B")
+        assert body.startswith("draft spec\n\nRefs: SPEC-001\n")
+        assert "Co-Authored-By: T <t@example.invalid>" in body and "Claude-Session:" in body
+        assert git_out(workspace / "docs", "status", "--porcelain") == ""  # index README and STATUS.md staged too
+        assert orko.hashes(Path(payload["ledger"]))["docs/versions/0.1/specs/SPEC-001-demo-topic.md"]
+        assert "versions/0.1/README.md" in git_out(workspace / "docs", "show", "--name-only", "HEAD")
+
+    def test_code_commit_never_stages_docs(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        (workspace / "code/src.py").write_text("x = 1\n")
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--message", "add src",
+                          "--path", "src.py", "--workspace", str(workspace)]) == 0
+        assert "src.py" in git_out(workspace / "code", "show", "--name-only", "HEAD")
+        assert git_out(workspace / "docs", "status", "--porcelain") != ""
+
+    def test_nothing_to_stage_exits_2(self, workspace, capsys):
+        init_run(workspace, capsys)
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--message", "x",
+                          "--workspace", str(workspace)]) == 2
+
+
+class TestOverwriteGuard:
+    def _committed_spec(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys)
+        _, out = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m", "--workspace", str(workspace)])
+        return Path(payload["ledger"]), Path(out["path"])
+
+    def test_no_recorded_hash_passes(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys)
+        _, out = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        assert orko.overwrite_guard(Path(payload["ledger"]), workspace, Path(out["path"])) is None
+
+    def test_missing_file_passes(self, workspace, capsys):
+        ledger, path = self._committed_spec(workspace, capsys)
+        path.unlink()
+        assert orko.overwrite_guard(ledger, workspace, path) is None
+
+    def test_unchanged_file_passes(self, workspace, capsys):
+        ledger, path = self._committed_spec(workspace, capsys)
+        assert orko.overwrite_guard(ledger, workspace, path) is None
+
+    def test_changed_hash_is_a_finding(self, workspace, capsys):
+        ledger, path = self._committed_spec(workspace, capsys)
+        path.write_text(path.read_text() + "\nhuman edit\n")
+        assert orko.overwrite_guard(ledger, workspace, path).startswith("edited-since-commit")
+
+    def test_record_status_refuses_after_human_edit(self, workspace, capsys):
+        ledger, path = self._committed_spec(workspace, capsys)
+        path.write_text(path.read_text() + "\nhuman edit\n")
+        assert rec(workspace, capsys, "status", "--slug", "demo-topic", "--id", "SPEC-001", "--status", "in_review")[0] == 2

@@ -1335,6 +1335,53 @@ def cmd_record_risk(args: argparse.Namespace) -> int:
     return 0
 
 
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=False)
+
+
+def cmd_commit(args: argparse.Namespace) -> int:
+    """Stage this run's own paths in one repo, commit them with the run's IDs
+    and trailers, then re-hash what landed so the overwrite guard has a floor."""
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    repo = ws / args.repo
+    ledger = Path(run["ledger"])
+    staged: list[str] = []
+    for entry in records(ledger):
+        if entry["path"].startswith(args.repo + "/"):
+            staged.append(entry["path"].removeprefix(args.repo + "/"))
+    for path in touched(ledger):
+        if path.startswith(args.repo + "/"):
+            staged.append(path.removeprefix(args.repo + "/"))
+    staged += list(args.path)
+    staged = [p for p in staged if (repo / p).exists() and not Path(p).is_absolute() and ".." not in Path(p).parts]
+    if not staged:
+        print(f"orko: nothing to stage in {args.repo}", file=sys.stderr)
+        return 2
+    result = _git(repo, "add", "--", *staged)
+    if result.returncode != 0:
+        print(f"orko: git add failed: {result.stderr.strip()}", file=sys.stderr)
+        return 2
+    if _git(repo, "diff", "--cached", "--quiet").returncode == 0:
+        print(f"orko: nothing changed in {args.repo}", file=sys.stderr)
+        return 2
+    ids = sorted({e["id"] for e in records(ledger) if e["id"] != "-"})
+    message = args.message.rstrip() + "\n\n" + (f"Refs: {', '.join(ids)}\n" if ids else "")
+    message += "\n" + "\n".join(run["trailers"]) + "\n"
+    result = subprocess.run(["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+                            input=message, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        print(f"orko: git commit failed: {result.stderr.strip()}", file=sys.stderr)
+        return 2
+    for p in staged:
+        append_ledger(ledger, f"hash {args.repo}/{p} {sha256_file(repo / p)}")
+    print(json.dumps({"repo": args.repo, "commit": _git(repo, "rev-parse", "HEAD").stdout.strip(),
+                      "staged": staged}, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orko")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1456,6 +1503,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_escalations.add_argument("slug")
     p_escalations.add_argument("--workspace")
     p_escalations.set_defaults(func=cmd_escalations)
+
+    p_commit = sub.add_parser("commit", help="stage and commit this run's paths in one repo")
+    p_commit.add_argument("repo", choices=["docs", "code"])
+    p_commit.add_argument("--slug", required=True)
+    p_commit.add_argument("--workspace")
+    p_commit.add_argument("--message", required=True)
+    p_commit.add_argument("--path", action="append", default=[],
+                          help="extra repo-relative path to stage, repeatable")
+    p_commit.set_defaults(func=cmd_commit)
 
     p_pre = sub.add_parser("preflight", help="check repo, branch, tooling, and record state")
     p_pre.add_argument("--slug")
