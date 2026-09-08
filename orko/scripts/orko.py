@@ -37,7 +37,7 @@ Usage:
     uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--workspace DIR]
     uv run orko.py prompt verifier <slug> --seat NAME [--question TEXT] --context-file PATH [--workspace DIR]
     uv run orko.py escalations <slug> [--workspace DIR]
-    uv run orko.py preflight [--slug SLUG | --mode {analysis|build}] [--workspace DIR]
+    uv run orko.py preflight --slug SLUG [--workspace DIR]
 
 Exit codes: 0 success / all checks pass; 1 validation failures; 2 usage or IO error.
 """
@@ -886,40 +886,76 @@ def _current_branch(root: Path) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
+def codex_companion_path() -> Path | None:
+    hits = sorted((Path.home() / ".claude/plugins/cache/openai-codex/codex").glob(
+        "*/scripts/codex-companion.mjs"))
+    return hits[-1] if hits else None
+
+
+def codex_setup_ready() -> tuple[bool, str]:
+    """Ask the openai-codex companion whether the CLI is usable right now."""
+    companion = codex_companion_path()
+    if companion is None:
+        return False, "openai-codex plugin not installed"
+    result = subprocess.run(
+        ["node", str(companion), "setup", "--json"],
+        capture_output=True, text=True, check=False,
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False, result.stderr.strip() or "setup --json returned no JSON"
+    return payload.get("ready") is True, json.dumps(payload.get("codex", {}))
+
+
+def _dirty(repo: Path) -> bool:
+    return bool(_git(repo, "status", "--porcelain").stdout.strip())
+
+
 def cmd_preflight(args: argparse.Namespace) -> int:
     """Check in code what the prose used to ask the conductor to check.
 
     Prose that asks the conductor to check something is a check nothing runs;
-    each condition here was once such a sentence.
+    each condition here was once such a sentence. Each condition is one
+    finding, so a test can remove exactly one and see exactly one test go red.
     """
-    ws = resolve_workspace(args)
-    if ws is None:
+    loaded = _load_run(args)
+    if loaded is None:
         return 2
-
-    mode = args.mode
-    run = None
-    if args.slug:
-        run = _describe_run(ws, args.slug)
-        if run is None:
-            print(f"orko: no run named {args.slug!r}", file=sys.stderr)
-            return 2
-        mode = run["mode"]
-    if mode is None:
-        print("orko: preflight needs --mode or --slug", file=sys.stderr)
-        return 2
+    ws, run = loaded
 
     findings: list[str] = []
     if shutil.which("uv") is None:
         findings.append("uv-missing: `uv` is not on PATH; every script call needs it")
-    branch = _current_branch(ws)
-    if mode == "build" and branch in DEFAULT_BRANCHES:
-        findings.append(f"on-default-branch: HEAD is {branch}; a build runs on "
-                        "orko/<slug>, never on a default branch")
-    if run is not None:
-        gate = Path(run["escalations"])
-        if gate.exists() and gate.read_text(encoding="utf-8").strip():
-            findings.append("blocked-escalation: escalations.md is non-empty; only "
-                            "oiler may empty it, and the run stays stopped until then")
+    for name in validate_workspace(ws):
+        findings.append(f"workspace-invalid: {name}")
+    for repo in ("docs", "code"):
+        if _dirty(ws / repo):
+            findings.append(f"{repo}-dirty: uncommitted changes in {repo}/")
+        branch = _current_branch(ws / repo)
+        if run["mode"] == "build" and branch in DEFAULT_BRANCHES:
+            findings.append(f"{repo}-on-default-branch: {repo}/ is on {branch}; a "
+                            "build runs on orko/<slug>, never on a default branch")
+    if dossier_status(ws, run["version"]) not in ("active", "proposed"):
+        findings.append(f"dossier-inactive: versions/{run['version']} is not active")
+    if run["mode"] == "build" and run["next_step"] == 5:
+        spec = record_for(Path(run["ledger"]), "spec", "spec")
+        path = ws / spec["path"] if spec else None
+        if path is None or read_frontmatter_field(path, "status") != "accepted":
+            findings.append("spec-not-accepted: a human sets status: accepted "
+                            "before execution begins")
+        else:
+            # The acceptance edit is a human's, so re-hash here or the next
+            # overwrite guard reports the human's own edit as tampering.
+            append_ledger(Path(run["ledger"]), f"hash {spec['path']} {sha256_file(path)}")
+    if run["executor"] == "codex":
+        ready, detail = codex_setup_ready()
+        if not ready:
+            findings.append(f"codex-unavailable: run /codex:setup ({detail})")
+    gate = Path(run["escalations"])
+    if gate.exists() and gate.read_text(encoding="utf-8").strip():
+        findings.append("blocked-escalation: escalations.md is non-empty; only "
+                        "oiler may empty it, and the run stays stopped until then")
 
     for finding in findings:
         print(finding)
@@ -1705,9 +1741,8 @@ def build_parser() -> argparse.ArgumentParser:
                           help="extra repo-relative path to stage, repeatable")
     p_commit.set_defaults(func=cmd_commit)
 
-    p_pre = sub.add_parser("preflight", help="check repo, branch, tooling, and record state")
-    p_pre.add_argument("--slug")
-    p_pre.add_argument("--mode", choices=sorted(MODES))
+    p_pre = sub.add_parser("preflight", help="check repos, branches, tooling, and record state")
+    p_pre.add_argument("--slug", required=True)
     p_pre.add_argument("--workspace")
     p_pre.set_defaults(func=cmd_preflight)
 

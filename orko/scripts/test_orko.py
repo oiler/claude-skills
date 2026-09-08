@@ -901,53 +901,70 @@ class TestEscalations:
 
 
 class TestPreflight:
-    def _repo(self, tmp_path, branch="feat/x"):
-        subprocess.run(["git", "init", "-q", "-b", branch, str(tmp_path)], check=True)
-        return tmp_path
+    def _pf(self, workspace, capsys, slug="demo-topic"):
+        capsys.readouterr()
+        code = orko.main(["preflight", "--slug", slug, "--workspace", str(workspace)])
+        return code, capsys.readouterr().out
 
-    def test_clean_repo_on_feature_branch_passes(self, tmp_path, capsys, monkeypatch):
-        root = self._repo(tmp_path)
-        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        assert orko.main(["preflight", "--workspace", str(root), "--mode", "build"]) == 0
+    def _branch(self, workspace):
+        for repo in ("docs", "code"):
+            subprocess.run(["git", "-C", str(workspace / repo), "checkout", "-q", "-b", "orko/demo-topic"], check=True)
 
-    def test_master_fails_for_build(self, tmp_path, capsys, monkeypatch):
-        root = self._repo(tmp_path, branch="master")
-        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        assert orko.main(["preflight", "--workspace", str(root), "--mode", "build"]) == 1
-        assert "on-default-branch" in capsys.readouterr().out
+    def test_clean_build_on_branches_passes(self, workspace, capsys):
+        init_run(workspace, capsys)
+        # init dirtied STATUS.md; commit it so the tree is clean
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "intake", "--path", "STATUS.md", "--workspace", str(workspace)])
+        self._branch(workspace)
+        code, out = self._pf(workspace, capsys)
+        assert code == 0, out
 
-    def test_master_is_fine_for_analysis(self, tmp_path, capsys, monkeypatch):
-        root = self._repo(tmp_path, branch="master")
-        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        assert orko.main(["preflight", "--workspace", str(root),
-                          "--mode", "analysis"]) == 0
+    def test_default_branch_findings_are_independent(self, workspace, capsys):
+        init_run(workspace, capsys)
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "intake", "--path", "STATUS.md", "--workspace", str(workspace)])
+        subprocess.run(["git", "-C", str(workspace / "code"), "checkout", "-q", "-b", "orko/demo-topic"], check=True)
+        code, out = self._pf(workspace, capsys)
+        assert code == 1 and "docs-on-default-branch" in out and "code-on-default-branch" not in out
 
-    def test_missing_uv_is_reported(self, tmp_path, capsys, monkeypatch):
-        root = self._repo(tmp_path)
-        monkeypatch.setattr(orko.shutil, "which", lambda name: None)
-        assert orko.main(["preflight", "--workspace", str(root), "--mode", "build"]) == 1
-        assert "uv-missing" in capsys.readouterr().out
+    def test_dirty_findings_are_independent(self, workspace, capsys):
+        init_run(workspace, capsys)
+        self._branch(workspace)
+        (workspace / "code/x").write_text("x")
+        code, out = self._pf(workspace, capsys)
+        assert "docs-dirty" in out and "code-dirty" in out
 
-    @pytest.mark.xfail(reason="preflight rewritten in Task 13", strict=True)
-    def test_slug_supplies_the_mode(self, workspace, capsys, monkeypatch):
-        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        init_run(workspace, capsys, "build", "Demo")
-        assert orko.main(["preflight", "--workspace", str(workspace),
-                          "--slug", "demo"]) == 1
-        assert "on-default-branch" in capsys.readouterr().out
+    def test_spec_not_accepted_at_step_5_and_rehash_on_pass(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys)
+        _, spec = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m", "--path", "STATUS.md", "--workspace", str(workspace)])
+        self._branch(workspace)
+        for step in "01234":
+            orko.main(["ledger", step, "complete", "--slug", "demo-topic", "--workspace", str(workspace)])
+        code, out = self._pf(workspace, capsys)
+        assert code == 1 and "spec-not-accepted" in out
+        path = Path(spec["path"])
+        path.write_text(orko.set_frontmatter(path.read_text(), {"status": "accepted", "approved_at": "2026-09-08"}))
+        subprocess.run(["git", "-C", str(workspace / "docs"), "commit", "-qam", "accept"], check=True)
+        code, out = self._pf(workspace, capsys)
+        assert code == 0, out
+        assert orko.hashes(Path(payload["ledger"]))[orko.rel(workspace, path)] == orko.sha256_file(path)
 
-    def test_outstanding_escalation_is_reported(self, workspace, capsys, monkeypatch):
-        monkeypatch.setattr(orko.shutil, "which", lambda name: "/usr/bin/uv")
-        init_run(workspace, capsys, "build", "Demo")
-        (workspace / ".orko/demo/escalations.md").write_text("## Scope\n\nbody\n")
-        assert orko.main(["preflight", "--workspace", str(workspace),
-                          "--slug", "demo"]) == 1
-        assert "blocked-escalation" in capsys.readouterr().out
+    def test_codex_unavailable(self, workspace, capsys, monkeypatch):
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m", "--path", "STATUS.md", "--workspace", str(workspace)])
+        self._branch(workspace)
+        monkeypatch.setattr(orko, "codex_setup_ready", lambda: (False, "codex missing"))
+        code, out = self._pf(workspace, capsys)
+        assert code == 1 and "codex-unavailable: run /codex:setup" in out
+        monkeypatch.setattr(orko, "codex_setup_ready", lambda: (True, "ok"))
+        assert self._pf(workspace, capsys)[0] == 0
 
-    @pytest.mark.xfail(reason="preflight rewritten in Task 13", strict=True)
-    def test_not_a_repo_is_exit_two(self, tmp_path, capsys):
-        assert orko.main(["preflight", "--workspace", str(tmp_path),
-                          "--mode", "build"]) == 2
+    def test_blocked_escalation(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys)
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m", "--path", "STATUS.md", "--workspace", str(workspace)])
+        self._branch(workspace)
+        Path(payload["escalations"]).write_text("## scope\n\nout of bounds\n")
+        code, out = self._pf(workspace, capsys)
+        assert code == 1 and "blocked-escalation" in out
 
 
 class TestFixtures:
