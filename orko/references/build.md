@@ -177,7 +177,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 3 complete --slug <slug> --workspace <path>
 ```
 
-Use `--require-plan` from here on. Without it, a spec whose plan is missing or whose `implements:` list is a flow list passes with a warning and no mapping checked at all. `--require-plan` also reports `plan-approval-signed` when a `draft` or `in_review` plan carries a value in the Delivery decisions `Approved by` column. Clear the cell: a seat that wrote a name there forged an approval no human gave. `tasks.md` is scratch and is never committed; it is regenerable from `PLAN-NNN`, and `commit docs` stages only recorded paths, so it cannot ride along.
+Use `--require-plan` from here on. Without it, a spec whose plan is missing or whose `implements:` list is a flow list passes with a warning and no mapping checked at all. `--require-plan` also reports `plan-approval-signed` when a plan whose status is exactly `draft` carries a value in the Delivery decisions `Approved by` column. Clear the cell: a seat that wrote a name there forged an approval no human gave. The check is scoped to `draft` on purpose. The gate sets the plan to `in_review` before a human signs, so a signature there is the real one and step 5 must not stop on it. A cell still holding the template's bracketed placeholder is not a signature either; `spec-check` fails that on its own. `tasks.md` is scratch and is never committed; it is regenerable from `PLAN-NNN`, and `commit docs` stages only recorded paths, so it cannot ride along.
 
 ### 4 Plan review
 

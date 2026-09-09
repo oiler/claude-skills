@@ -249,8 +249,12 @@ DELIVERY_DECISIONS_HEADING = "## Delivery decisions"
 
 
 def signed_delivery_rows(plan: Path) -> list[str]:
-    """Body rows of the plan's Delivery decisions table with a non-empty third
-    cell. That column is `Approved by`, and only a human writes into it."""
+    """Body rows of the plan's Delivery decisions table carrying a signature.
+
+    That column is `Approved by`, and only a human writes into it. A cell
+    opening with `[` is the scaffold template's own placeholder, not a
+    signature; spec-check already fails a plan that leaves one in place.
+    """
     lines = plan.read_text(encoding="utf-8").split("\n")
     if DELIVERY_DECISIONS_HEADING not in lines:
         return []
@@ -261,7 +265,7 @@ def signed_delivery_rows(plan: Path) -> list[str]:
     signed = []
     for row in rows[2:]:  # skip the header and the separator
         cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
-        if len(cells) >= 3 and cells[2]:
+        if len(cells) >= 3 and cells[2] and not cells[2].startswith("["):
             signed.append(row)
     return signed
 
@@ -287,11 +291,12 @@ def cmd_check_spec(args: argparse.Namespace) -> int:
         if "no PLAN" in result.stdout:
             print(f"plan-missing: spec-check found no plan implementing {args.id}")
             return 1
+        # `draft` only. The gate sets `in_review` before a human signs, so
+        # firing there would stop step 5 on the very signature it asked for.
         for plan in plans_implementing(ws, args.id):
-            status = read_frontmatter_field(plan, "status")
-            if status in ("draft", "in_review") and signed_delivery_rows(plan):
+            if read_frontmatter_field(plan, "status") == "draft" and signed_delivery_rows(plan):
                 print(f"plan-approval-signed: {plan} has an Approved by value on "
-                      f"a {status} plan")
+                      "a draft plan")
                 return 1
     return result.returncode
 

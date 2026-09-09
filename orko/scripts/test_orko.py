@@ -1722,6 +1722,29 @@ class TestCheckSpec:
         assert code == 0, out
         assert "plan-approval-signed" not in out
 
+    def test_signed_row_on_in_review_plan_passes(self, workspace, capsys):
+        # The gate sets in_review, then a human signs. Firing here would stop
+        # step 5 on the very signature the gate asked for.
+        path = self._mapped_plan(workspace, capsys)
+        self._sign(path, "oiler")
+        rec(workspace, capsys, "status", "--slug", "demo-topic", "--id", "PLAN-001",
+            "--status", "in_review")
+        code, out = self._require_plan(workspace, capsys)
+        assert code == 0, out
+        assert "plan-approval-signed" not in out
+
+    def test_placeholder_approver_row_is_not_a_signature(self, workspace, capsys):
+        # The scaffold template's own row. spec-check already fails placeholders.
+        path = self._mapped_plan(workspace, capsys)
+        self._sign(path, "[Approver]")
+        assert orko.signed_delivery_rows(path) == []
+        # spec-check owns the placeholder verdict, so the exit is still 1 --
+        # but on its own finding, never on a forged approval.
+        code, out = self._require_plan(workspace, capsys)
+        assert code == 1
+        assert "plan-approval-signed" not in out
+        assert "plan placeholders remain" in out
+
     def test_bad_id_and_missing_docs_exit_2(self, workspace, capsys):
         init_run(workspace, capsys)
         assert orko.main(["check", "spec", "spec-1", "--slug", "demo-topic", "--workspace", str(workspace)]) == 2
