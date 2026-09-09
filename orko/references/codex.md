@@ -66,13 +66,13 @@ This polls the companion script and prints the result JSON. The default timeout 
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check delivery --slug <slug> --task <n>
 ```
 
-The script judges the repository, not Codex's report. Its findings:
+The script judges the repository, not Codex's report. It prints `acceptance: <cmd>` before it runs that command, so the line it executes is visible in the transcript. Read every `**Acceptance:**` line in `tasks.md` yourself before the first dispatch, and reject any that is not the repository's own test or lint runner: the script runs it as a shell command with your privileges. Its findings:
 
 | Finding | What it means |
 |---|---|
 | `tree-dirty` | uncommitted or untracked files in `code/`; Codex did not commit |
 | `diff-empty` | no commits since the dispatch base |
-| `diff-outside-allowlist: <paths>` | the diff touches files the task did not list |
+| `diff-outside-allowlist: <paths>` | the diff touches files the task did not list. `docs/testing/README.md` is always inside the allowlist, because the task prompt tells every delivery to write it |
 | `acceptance-failed: exit <n>` | the script ran the acceptance command and it did not exit `0` |
 
 Codex's own claim that the acceptance command passed is not evidence. Its sandbox has no network, so a command that fetches anything fails there and passes here, or the reverse.
@@ -147,4 +147,4 @@ With executor `codex`, `preflight` adds one check:
 codex-unavailable: run /codex:setup (<detail>)
 ```
 
-The script runs the companion's `setup --json`, which reports node, Codex CLI, and auth state with no model turn, and requires `ready: true`. Run `/codex:setup`, then re-run `preflight`. Do not dispatch a task while this finding stands: a dispatch into an unauthenticated CLI returns empty, which you would read as a delivery failure and retry.
+The script runs the companion's `setup --json`, which reports node, Codex CLI, and auth state with no model turn, and requires `ready: true`. A clean `preflight` prints `preflight: ok (<n> checks)`, so a passing probe is visible rather than silent. Run `/codex:setup`, then re-run `preflight`. Do not dispatch a task while this finding stands: a dispatch into an unauthenticated CLI returns empty, which you would read as a delivery failure and retry.

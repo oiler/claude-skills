@@ -12,7 +12,7 @@ Run these in order, before writing anything. The order matters: the run cannot b
 
 **1. Read what the workspace already decided.**
 
-`cd` to the workspace root and stay there for the whole run, except the Codex dispatch, which runs from `code/`. Then read, in this order: `docs/OBJECTIVE.md`, `docs/STATUS.md`, the active version's README plus its `SCOPE.md`, the accepted specs in that dossier, and `docs/design/`. You are joining a project in progress, and the goal you were handed was written by someone who may not have read all of it. Report any conflict between what you read and the goal, per the authority order in `docs/AGENTS.md`. Never reconcile one silently. A goal that contradicts an accepted spec or the version's scope is a question for oiler at intake, not a judgment call for you at step 1.
+`cd` to the workspace root and stay there for the whole run, except the Codex dispatch, which runs from `code/`. `cd` persists across Bash calls in Claude Code, so a single `cd` elsewhere silently breaks every `git -C docs` call and every relative path for the rest of the run. Every command that changes directory ends by returning: `cd docs && ... && cd ..` is the only sanctioned form. Confirm `pwd` is the workspace root before any `orko.py` call that omits `--workspace`, and prefer passing `--workspace <path>` on every call so the working directory is irrelevant. Then read, in this order: `docs/OBJECTIVE.md`, `docs/STATUS.md`, the active version's README plus its `SCOPE.md`, the accepted specs in that dossier, and `docs/design/`. You are joining a project in progress, and the goal you were handed was written by someone who may not have read all of it. Report any conflict between what you read and the goal, per the authority order in `docs/AGENTS.md`. Never reconcile one silently. A goal that contradicts an accepted spec or the version's scope is a question for oiler at intake, not a judgment call for you at step 1.
 
 **2. Look for an existing run.**
 
@@ -43,32 +43,33 @@ Add `--executor codex` when oiler chose Codex, plus `--codex-model <M>` and `--c
 
 Read `slug`, `run_dir`, `ledger`, `escalations`, `tasks`, `findings_dir`, `context_dir`, and `next_step` out of the JSON. Never construct a path. Record paths are not in there: those come from each `record` command's own JSON as it mints them.
 
-`init` writes one line into the record: the run's In progress bullet in `docs/STATUS.md`. Step 0 commits it. `next_step` tells you where to start: `0` on a new run, higher on a resume, and `null` when every step is complete. On `null`, go straight to *Ending*. To resume, run the same `init build` command with the same goal. It re-derives the slug, finds the existing ledger, and returns `resumed: true` with the resume point.
+`init` writes one line into the record: the run's In progress bullet in `docs/STATUS.md`. Startup step 5 commits it, before `preflight`. `next_step` tells you where to start: `0` on a new run, higher on a resume, and `null` when every step is complete. On `null`, go straight to *Ending*. To resume, run the same `init build` command with the same goal. It re-derives the slug, finds the existing ledger, and returns `resumed: true` with the resume point.
 
-**5. Branch both repositories, then preflight.**
+**5. Branch both repositories, commit the intake line, then preflight.**
 
 ```bash
 git -C docs checkout -b orko/<slug>
 git -C code checkout -b orko/<slug>
 ```
 
-On a resume the branches exist, so use `git -C docs checkout orko/<slug>` and the same for `code`; `checkout -b` fails on an existing branch. Then:
+On a resume the branches exist, so use `git -C docs checkout orko/<slug>` and the same for `code`; `checkout -b` fails on an existing branch. Then commit the In progress line `init` wrote, because `preflight` reports `docs-dirty` while it is uncommitted:
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py preflight --slug <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "Start <topic>" --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py preflight --slug <slug> --workspace <path>
 ```
 
 `preflight` checks in code what prose used to ask you to check, and prints its findings in this order:
 
-`uv-missing` says `uv` is not on PATH, and every script call needs it. `workspace-invalid: <name>` names `docs-not-a-repo`, `code-not-a-repo`, `versions-missing`, or `spec-check-missing`. `docs-dirty` and `code-dirty` mean uncommitted changes that `commit` would sweep into the run. `docs-on-default-branch` and `code-on-default-branch` mean a build is sitting where it must never run. `dossier-inactive` means the version dossier is neither `active` nor `proposed`. `spec-not-accepted`, on a resume at step 5 only, means a human has not set `status: accepted`. `codex-unavailable: run /codex:setup (<detail>)`, with executor `codex` only, means the companion reports the CLI is not ready. `blocked-escalation` means `escalations.md` is non-empty, and only oiler empties it.
+`uv-missing` says `uv` is not on PATH, and every script call needs it. `workspace-invalid: <name>` names `docs-not-a-repo`, `code-not-a-repo`, `versions-missing`, or `spec-check-missing`. `docs-dirty` and `code-dirty` mean modified tracked files. Untracked files are ignored by preflight, because a reviewer seat that ran the test suite leaves caches and lockfiles behind and `commit` cannot sweep them in; `check delivery` still counts them, because a Codex delivery that left a file unstaged is incomplete. `docs-on-default-branch` and `code-on-default-branch` mean a build is sitting where it must never run. `dossier-inactive` means the version dossier is neither `active` nor `proposed`. `spec-not-accepted`, on a resume at step 5 only, means a human has not set `status: accepted`. `codex-unavailable: run /codex:setup (<detail>)`, with executor `codex` only, means the companion reports the CLI is not ready. `blocked-escalation` means `escalations.md` is non-empty, and only oiler empties it.
 
-Exit `1` prints one finding per line and stops intake: fix the named condition and run it again. Exit `2` means the run could not be loaded, which is a bad slug or an unresolvable workspace, not an artifact defect. Run `preflight` after the branch switch, not before, or the two default-branch findings fire on every run. Two findings are resume-only and pass on a fresh run: `spec-not-accepted` fires only once the run reaches step 5, and `blocked-escalation` only once `escalations.md` could exist. On a fresh run their exit `0` means "not yet applicable", not "checked and clean".
+Exit `1` prints one finding per line and stops intake: fix the named condition and run it again. Exit `2` means the run could not be loaded, which is a bad slug or an unresolvable workspace, not an artifact defect. Run `preflight` after the branch switch and the startup commit, not before: run earlier, it reports the two default-branch findings and the `docs-dirty` line `init` itself wrote, on every fresh run. Two findings are resume-only and pass on a fresh run: `spec-not-accepted` fires only once the run reaches step 5, and `blocked-escalation` only once `escalations.md` could exist. On a fresh run their exit `0` means "not yet applicable", not "checked and clean". A clean run prints `preflight: ok (<n> checks)`, so a passing Codex readiness probe is visible rather than silent.
 
 **On a resume, reconcile before you author.**
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py status <slug>
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py escalations <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py status <slug> --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py escalations <slug> --workspace <path>
 ```
 
 A `last_status` of `dispatched` means a round started and the ledger never recorded it finishing. That is what a compaction mid-dispatch looks like, and it is not proof the seats never delivered: list the step's findings directory first and read what is there. Re-dispatching a seat whose findings file already exists spends a second dispatch and returns a second copy of the same review. `status <slug>` also prints `dispatched_base`, the SHA on the most recent `dispatched` line for the resume step, and `next_task`, which is where a Codex step 5 picks up. Run `escalations <slug>` regardless of where you are resuming: `escalated` is recorded alongside `complete`, so `next_step` still points forward past an unresolved conflict, and a resume that trusts `next_step` alone walks straight into building against it.
@@ -88,25 +89,24 @@ Each step ends with its ledger line. `complete` is the only status that advances
 
 ### 0 Intake
 
-Startup has already run `init`, branched both repositories, and cleared `preflight`. Commit the In progress line `init` wrote:
+Startup has already run `init`, branched both repositories, committed the In progress line, and cleared `preflight`. Confirm the startup commit landed, then close the step:
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "Start <topic>"
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 0 complete --slug <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 0 complete --slug <slug> --workspace <path>
 ```
 
 ### 1 Spec
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record spec --slug <slug> --title "<title>"
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record spec --slug <slug> --title "<title>" --workspace <path>
 ```
 
 The script copies the scaffold's spec template, mints `SPEC-NNN`, fills the frontmatter, updates the version README index, and prints JSON with the path. Read the path from that JSON and write the body into it, in the shape *What the checks require* prescribes below. Delete the template's example Given/when/then lines rather than editing around them. Do not invoke `superpowers:brainstorming` here. It starts its own discovery round and its own gate, and the intake round has already settled what that round would ask.
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check spec SPEC-NNN --slug <slug>
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "SPEC-NNN: <title>"
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 1 complete --slug <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check spec SPEC-NNN --slug <slug> --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "SPEC-NNN: <title>" --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 1 complete --slug <slug> --workspace <path>
 ```
 
 Exit `1` from `check spec` is a real defect: one repair against the reported findings, then stop if it fails again.
@@ -116,8 +116,8 @@ Exit `1` from `check spec` is a real defect: one repair against the reported fin
 Pick the lenses. The default is all four in [spec-reviewer.md](spec-reviewer.md): `requirements`, `architecture`, `testability`, `security`. Drop one only when it has nothing to examine, and say which you dropped and why in the review's Scope and method.
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 2 dispatched --slug <slug>
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt spec-review <slug> --lens <lens>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 2 dispatched --slug <slug> --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt spec-review <slug> --lens <lens> --workspace <path>
 ```
 
 `dispatched` does not advance the run; it tells a resumed session that a round started, so it checks the findings directory instead of dispatching again. `prompt` creates `findings/2/` and refuses to run at all once the run is complete. Dispatch one `general-purpose` subagent per lens at `opus`, with that stdout as the entire prompt, byte for byte. Add nothing: no summary of the spec, no authoring rationale, no list of areas you are worried about. You wrote the spec, so you cannot see what you failed to consider, and that blind spot is exactly what a fresh reader finds. Send all the dispatches in one message so the seats run in parallel. When they return, check delivery: each seat's file must exist at `<findings_dir>/2/<lens>.md` and carry the FINDINGS schema, including one `#### F<n>` block per finding. A seat that returned a receipt but wrote no file gets one re-dispatch with the same prompt. A seat that fails twice is recorded as failed in the review's Scope and method, and the step proceeds with the seats that delivered.
@@ -126,7 +126,7 @@ Then mint the review over what they wrote:
 
 ```bash
 git -C docs rev-parse HEAD
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role spec --reviews SPEC-NNN --revision <sha> --from-findings .orko/<slug>/findings/2 --seat requirements --seat architecture --seat testability --seat security
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role spec --reviews SPEC-NNN --revision <sha> --from-findings .orko/<slug>/findings/2 --seat requirements --seat architecture --seat testability --seat security --workspace <path>
 ```
 
 Name every seat with `--seat`, in the order you want the findings to read; unnamed seats are ordered lexically by filename, which is rarely what you want. The script renders one `### F<n>` block per finding, each starting at `Disposition: open`. You write the Summary, Unresolved risks, and Conclusion.
@@ -134,28 +134,26 @@ Name every seat with `--seat`, in the order you want the findings to read; unnam
 Then decide every finding, one at a time. For an accepted finding, edit the spec first, then record the disposition:
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record disposition --slug <slug> --review REVIEW-NNN --finding F3 --disposition accepted
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record disposition --slug <slug> --review REVIEW-NNN --finding F3 --disposition accepted --workspace <path>
 ```
 
-`accepted`, `rejected`, or `resolved`, once per finding. A finding whose fix belongs in the other artifact is `resolved` with the target named in your edit, and applied when that artifact's step runs. Do not edit an artifact outside its own step: the ledger has no line for it.
+`accepted`, `rejected`, `resolved`, or `noted`, once per finding. `noted` is for a finding whose recommendation is no change. A finding whose fix belongs in the other artifact is `resolved` with the target named in your edit, and applied when that artifact's step runs. Do not edit an artifact outside its own step: the ledger has no line for it.
 
-A seat's `scope:` mark is a recommendation to escalate, not a determination. A finding is outside boundaries only when acting on it would touch a file or behavior the intake boundaries excluded. When one genuinely is, route it per *Routing a change after acceptance* in [record.md](record.md), write the escalation into `.orko/<slug>/escalations.md` yourself, and stop. Commit before the ledger lines, or the minted review and its dispositions stay uncommitted, the ledger carries no hash for them, and the resume opens on `docs-dirty`:
+A seat's `scope:` mark is a recommendation to escalate, not a determination. A finding is outside boundaries only when acting on it would touch a file or behavior the intake boundaries excluded. When one genuinely is, route it per *Routing a change after acceptance* in [record.md](record.md), write the escalation into `.orko/<slug>/escalations.md` yourself, and stop.
+
+**The usual path, with nothing escalated.** Re-run the check on the edited spec, then close the step. The second check is not redundant: folding several findings into a spec can strand an edit mid-sentence or empty a required section the same way writing it can. Commit before the ledger lines, or the minted review and its dispositions stay uncommitted, the ledger carries no hash for them, and the resume opens on `docs-dirty`:
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "REVIEW-NNN: spec review"
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 2 complete --slug <slug>
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 2 escalated --slug <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check spec SPEC-NNN --slug <slug> --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "REVIEW-NNN: spec review" --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 2 complete --slug <slug> --workspace <path>
 ```
 
-With no escalation, re-run the check on the edited spec and close the step:
+**Only when a finding escalated**, add one more line after `complete`, never instead of it, and stop:
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check spec SPEC-NNN --slug <slug>
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "REVIEW-NNN: spec review"
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 2 complete --slug <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 2 escalated --slug <slug> --workspace <path>
 ```
-
-The second check is not redundant: folding several findings into a spec can strand an edit mid-sentence or empty a required section the same way writing it can.
 
 ### 3 Plan
 
@@ -163,34 +161,36 @@ The plan is drafted by a seat, not by you. It is long, mechanical against a fixe
 
 ```bash
 git -C code rev-parse HEAD
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 3 dispatched --slug <slug> --commit <sha>
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record plan --slug <slug> --title "<title>" --implements SPEC-NNN
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt plan-write <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 3 dispatched --slug <slug> --commit <sha> --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record plan --slug <slug> --title "<title>" --implements SPEC-NNN --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt plan-write <slug> --workspace <path>
 ```
 
-Read the SHA from `git -C code rev-parse HEAD` and pass it to `ledger` as its own command, so the base survives a compaction mid-dispatch. On a fresh run nothing has landed on the code branch yet, so this is the pre-run HEAD, which is correct. Dispatch one `general-purpose` seat at `opus` with that stdout as the entire prompt. It writes two files: the `PLAN-NNN` body at the record path, and the task list at `.orko/<slug>/tasks.md`. Check both exist, then read and edit both yourself. The plan is your artifact and the seat's draft is a draft.
+Read the SHA from `git -C code rev-parse HEAD` and pass it to `ledger` as its own command, so the base survives a compaction mid-dispatch. On a fresh run nothing has landed on the code branch yet, so this is the pre-run HEAD, which is correct. Dispatch one `general-purpose` seat at `opus` with that stdout as the entire prompt. It writes two files: the `PLAN-NNN` body at the record path, and the task list at `.orko/<slug>/tasks.md`. Check both exist, then read and edit both yourself. The plan is your artifact and the seat's draft is a draft. Read every `**Acceptance:**` line yourself before the first dispatch, and reject any that is not the repository's own test or lint runner: the script runs that line as a shell command with your privileges.
+
+Your edits go into the committed `PLAN-NNN` and `tasks.md` in place. `CHANGE-CONTROL.md` permits editing a draft directly, and the overwrite guard exists to protect a human's edit, not to stop yours. After editing, re-run `check spec --require-plan` and `check tasks`, then `commit docs`, which records the new hash.
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check spec SPEC-NNN --slug <slug> --require-plan
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check tasks .orko/<slug>/tasks.md
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "PLAN-NNN: <title>"
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 3 complete --slug <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check spec SPEC-NNN --slug <slug> --require-plan --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check tasks .orko/<slug>/tasks.md --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "PLAN-NNN: <title>" --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 3 complete --slug <slug> --workspace <path>
 ```
 
-Use `--require-plan` from here on. Without it, a spec whose plan is missing or whose `implements:` list is a flow list passes with a warning and no mapping checked at all. `tasks.md` is scratch and is never committed; it is regenerable from `PLAN-NNN`, and `commit docs` stages only recorded paths, so it cannot ride along.
+Use `--require-plan` from here on. Without it, a spec whose plan is missing or whose `implements:` list is a flow list passes with a warning and no mapping checked at all. `--require-plan` also reports `plan-approval-signed` when a `draft` or `in_review` plan carries a value in the Delivery decisions `Approved by` column. Clear the cell: a seat that wrote a name there forged an approval no human gave. `tasks.md` is scratch and is never committed; it is regenerable from `PLAN-NNN`, and `commit docs` stages only recorded paths, so it cannot ride along.
 
 ### 4 Plan review
 
-Identical to step 2, against the plan plus `tasks.md`. The command is `prompt plan-review`, the default lenses are the four in [plan-reviewer.md](plan-reviewer.md), `coverage`, `interfaces`, `placeholders`, and `tests`, and the findings land in `findings/4/`. Read the revision with `git -C docs rev-parse HEAD` as its own command, then mint `record review --slug <slug> --title "<title>" --role plan --reviews PLAN-NNN --revision <sha> --from-findings .orko/<slug>/findings/4`. After your edits, re-run both `check spec SPEC-NNN --slug <slug> --require-plan` and `check tasks .orko/<slug>/tasks.md`, then `commit docs`, then `ledger 4 complete`, and `ledger 4 escalated` after it when a finding escalated. `commit docs` comes before the ledger lines on the escalation path too. The plan reviewer's prompt already carries the spec path: it judges the plan against the spec, not against your intent for it.
+Identical to step 2, against the plan plus `tasks.md`. The command is `prompt plan-review`, the default lenses are the four in [plan-reviewer.md](plan-reviewer.md), `coverage`, `interfaces`, `placeholders`, and `tests`, and the findings land in `findings/4/`. Read the revision with `git -C docs rev-parse HEAD` as its own command, then mint `record review --slug <slug> --title "<title>" --role plan --reviews PLAN-NNN --revision <sha> --from-findings .orko/<slug>/findings/4`. Your edits go into the committed `PLAN-NNN` and `tasks.md` in place, as in step 3. After them, re-run both `check spec SPEC-NNN --slug <slug> --require-plan` and `check tasks .orko/<slug>/tasks.md`, then `commit docs`, which records the new hash, then `ledger 4 complete`, and `ledger 4 escalated` after it when a finding escalated. `commit docs` comes before the ledger lines on the escalation path too. The plan reviewer's prompt already carries the spec path: it judges the plan against the spec, not against your intent for it.
 
 ### The gate
 
 The run stops here, before any implementation.
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record status --slug <slug> --id SPEC-NNN --status in_review
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record status --slug <slug> --id PLAN-NNN --status in_review
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "SPEC-NNN, PLAN-NNN: ready for review"
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record status --slug <slug> --id SPEC-NNN --status in_review --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record status --slug <slug> --id PLAN-NNN --status in_review --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "SPEC-NNN, PLAN-NNN: ready for review" --workspace <path>
 ```
 
 Then report, in one message: the spec path, the plan path, both review paths, and the four fields a human sets, which are `status: accepted` and `approved_at` on the spec, `approved_by` on the spec review, and `approved_by` on the plan review. Name all four. Say that the human commits the acceptance edit on `orko/<slug>` in `docs/` and then resumes by running the same `init build` command with the same goal from the workspace root. An uncommitted edit stops the resume at `docs-dirty` before `preflight` ever reaches `spec-not-accepted`. Report the `release-check.sh` selection fragility described in [record.md](record.md) to oiler here, and change nothing about the scaffold's scripts from inside a run.
@@ -198,8 +198,8 @@ Then report, in one message: the spec path, the plan path, both review paths, an
 ### 5 Execute
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py preflight --slug <slug>
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check spec SPEC-NNN --slug <slug> --require-plan
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py preflight --slug <slug> --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check spec SPEC-NNN --slug <slug> --require-plan --workspace <path>
 ```
 
 `preflight` at step 5 confirms the spec is `accepted` and re-records its hash, so the human's edit is not reported as tampering on the next write. Report the `check spec` output, which the workspace `AGENTS.md` asks for before implementation begins.
@@ -211,7 +211,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check spec SPEC-NNN --slug <slug> --r
 Either way, when the last task is done:
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5 complete --slug <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5 complete --slug <slug> --workspace <path>
 ```
 
 A requirement whose plan row says `Performed by: owner` is reported as pending at close, never performed by you. Behavior the accepted spec does not define stops the run: `record amendment` when the intake boundaries already authorize it, otherwise `record decision`. Either way, write the escalation, record `ledger 5 escalated`, and stop. Recording an amendment does not resume the run; only the human does.
@@ -223,7 +223,7 @@ The diff range is the branch's own work in the code repository. Read the default
 ```bash
 git -C code symbolic-ref --short refs/remotes/origin/HEAD
 git -C code merge-base <origin/default> HEAD
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 6 dispatched --slug <slug> --commit <base>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 6 dispatched --slug <slug> --commit <base> --workspace <path>
 ```
 
 Every seat reviews `git -C code diff <base>..HEAD`, the same range. Dispatch, in one message:
@@ -235,23 +235,23 @@ Every seat reviews `git -C code diff <base>..HEAD`, the same range. Dispatch, in
 A domain seat needs a context file. Write it to `<context_dir>/<seat>.md` first, carrying the diff range, the paths to look at, the goal, and who the work is for, then:
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt seat <slug> --seat <name> --question "<one question>" --context-file <run_dir>/context/<name>.md
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt seat <slug> --seat <name> --question "<one question>" --context-file <run_dir>/context/<name>.md --workspace <path>
 ```
 
 Findings land in `findings/6/`. Mint the review over them with `record review --role code --reviews SPEC-NNN --revision <code sha> --from-findings .orko/<slug>/findings/6`, reading the SHA from `git -C code rev-parse HEAD` first. Decide every finding as in step 2, with one difference: an accepted finding is fixed on the branch by dispatching an implementer, or by re-dispatching Codex, not by you editing code. The conductor decides and records; it does not implement. A deferred finding keeps `Disposition: open` and gets a `record risk` bullet under the version README's risks, so it outlives the run. Two duties before you close the step. Check whether `code/ARCHITECTURE.md` or `code/DESIGN.md` describes something the branch changed materially, and update it. Write an `ADR-NNN` with `record adr` for any consequential in-bounds technical choice the implementation made; an in-bounds choice recorded as an ADR is not an escalation and does not stop the run. When a finding does escalate, write `escalations.md`, run `commit docs`, then add `ledger 6 escalated --slug <slug>` after the `complete` line, and stop.
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "<subject>"
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "REVIEW-NNN: code review"
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 6 complete --slug <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "<subject>" --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "REVIEW-NNN: code review" --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 6 complete --slug <slug> --workspace <path>
 ```
 
 ### 7 Close
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record close --slug <slug> --summary "<text>" --changelog "Added: <text>" --changelog "Fixed: <text>"
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "Close <topic>"
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "Close <topic>"
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record close --slug <slug> --summary "<text>" --changelog "Added: <text>" --changelog "Fixed: <text>" --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "Close <topic>" --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "Close <topic>" --workspace <path>
 ```
 
 `record close` sets `STATUS.md` `as_of` and rewrites the run's In progress line to "awaiting acceptance", inserts each `--changelog` entry under its subheading in both changelogs, refreshes the version README index, and writes the two pull request bodies. `--changelog` is repeatable and its section is `Added`, `Changed`, `Fixed`, `Removed`, or `Security`. It is idempotent, so a rerun after an interruption is safe.
@@ -263,10 +263,10 @@ git -C docs push -u origin orko/<slug>
 git -C code push -u origin orko/<slug>
 cd docs && gh pr create --title "<topic> (SPEC-NNN)" --body-file ../.orko/<slug>/pr-docs.md && cd ..
 cd code && gh pr create --title "<topic> (SPEC-NNN)" --body-file ../.orko/<slug>/pr-code.md && cd ..
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 7 complete --slug <slug>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 7 complete --slug <slug> --workspace <path>
 ```
 
-Push first: `gh pr create` on an unpushed branch asks the question interactively, and an interactive question inside a Bash call stalls the run with no visible prompt. If a push fails for want of a remote or credentials, or `gh` is missing or unauthenticated, nothing is lost: the body files are already written. Report both paths, both push commands, and both `gh` commands for the human to run.
+Both `gh` lines end in `cd ..` for a reason: `cd` persists across Bash calls, so a `cd docs` that never returns leaves every later `git -C docs` and every relative body-file path resolving against the wrong directory. Push first: `gh pr create` on an unpushed branch asks the question interactively, and an interactive question inside a Bash call stalls the run with no visible prompt. If a push fails for want of a remote or credentials, or `gh` is missing or unauthenticated, nothing is lost: the body files are already written. Report both paths, both push commands, and both `gh` commands for the human to run.
 
 ## What check spec and check tasks require
 

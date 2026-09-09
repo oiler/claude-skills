@@ -28,12 +28,14 @@ One row per orko event. `<slug>` is the run slug from `init`, `<v>` is the activ
 | Escalation, delivery | a row in the plan's Delivery decisions table, `Approved by` empty | `docs/` | inherits plan | `Approved by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record delivery-decision --slug <slug> --decision "<decision>" --rationale "<why>"` |
 | Deferred code-review finding | the finding stays `Disposition: open`, plus a bullet under the version README's Risks, blockers, and open decisions | `docs/` | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record risk --slug <slug> --text "<text>"` |
 | Close | `STATUS.md`, both `CHANGELOG.md` files, the version README index, two PR bodies in the run directory | both | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record close --slug <slug> --summary "<text>" --changelog "Added: <text>"` |
-| Analysis of an artifact or revision | `REVIEW-NNN-<slug>.md` in the active dossier | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role analysis --revision <sha> --from-findings .orko/<slug>/findings/<step>` |
+| Analysis of an artifact or revision | `REVIEW-NNN-<slug>-analysis.md` in the active dossier | `docs/` | `draft` | `approved_by` | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record review --slug <slug> --title "<title>" --role analysis --revision <sha> --from-findings .orko/<slug>/findings/<step>` |
 | Analysis of an open question | `docs/research/<date>-<slug>.md`, stamped as AI-generated plus unverified | `docs/` | n/a | none | `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record research --slug <slug> --title "<title>"` |
 
 Every path in these commands is relative to the workspace root, which is where you run them. The run directory is `.orko/<slug>` below it, so a findings directory is `.orko/<slug>/findings/<step>`; `init`'s JSON prints the absolute `findings_dir`, and reading it from there beats building the path by hand.
 
 Close does not move the work to Recently completed. `RELEASE.md` places that after the tag, which orko does not cut.
+
+An analysis review names no reviewed artifact, so with no `--reviews` the key renders bare as `reviews:`. That parses as null, which the scaffold's `release-check.sh` reads with `list()` and handles. Leave it.
 
 `record spec`, `record plan`, `record review`, `record decision`, `record adr`, and `record research` print JSON with `id`, `type`, `role`, `path`, and `resumed`. Read the path from that JSON. Never construct one. A second mint of the same type and role for a slug returns the record that already exists with `resumed: true`, so a rerun after an interruption is a no-op rather than a duplicate ID.
 
@@ -72,7 +74,7 @@ Reviewer findings map one-to-one onto the review template's `### F<n>` blocks. E
 
 `Verdict` and `Confidence & gaps` stay seat-level and feed the review's Summary and Unresolved risks. The verifier's `Verified F<n>: <one line>` is appended to that finding's Evidence.
 
-`record review --from-findings <dir>` reads every findings file in the directory and renders one `### F<n>` block per finding, numbered across seats in the order you name them with `--seat` (repeatable). Name every seat, in the order you want the findings to read. When you name none, the script orders files lexically by stem, which is the seat names' alphabetical order and rarely the order you want.
+`record review --from-findings <dir>` reads every findings file in the directory and renders one `### F<n>` block per finding, numbered across seats in the order you name them with `--seat` (repeatable). Name every seat, in the order you want the findings to read. When you name none, the script orders files lexically by stem, which is the seat names' alphabetical order and rarely the order you want. The command's JSON carries a `seats` map naming the `F<n>` labels each seat's findings became, in render order. Read it before you disposition: getting `--seat` order wrong renumbers every finding silently, and a whole round of dispositions then lands on the wrong blocks.
 
 Every rendered finding starts at `Disposition: open`. You set each one:
 
@@ -80,7 +82,11 @@ Every rendered finding starts at `Disposition: open`. You set each one:
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record disposition --slug <slug> --review REVIEW-NNN --finding F3 --disposition accepted
 ```
 
-The disposition is `accepted`, `rejected`, or `resolved`, and the command sets exactly one open finding. A second disposition of the same finding exits `2`: the record of what you decided is written once. A disposition is a proposal, not an approval. It has no effect until a human sets `approved_by` on the review.
+The disposition is `accepted`, `rejected`, `resolved`, or `noted`, and the command sets exactly one open finding. `noted` is for a finding whose recommendation is "no change": a seat's verified confirmation that something is already correct is neither accepted nor rejected, because nothing was proposed.
+
+A second disposition of the same finding exits `2`: the record of what you decided is written once. A disposition is a proposal, not an approval. It has no effect until a human sets `approved_by` on the review.
+
+`record review` renders every seat's findings verbatim, so a review carries duplicates whenever two seats found the same thing. There is no dedup mechanism, and hand-editing a seat's file would break the verbatim relay. Dispose the first occurrence `accepted` or `noted` and each duplicate `resolved`. Name the first occurrence in the review's Scope and method section.
 
 In a spec or plan review, apply each accepted disposition to the draft artifact directly. `CHANGE-CONTROL.md` permits editing a draft. Then re-run `check spec`.
 
