@@ -749,6 +749,28 @@ class TestPrompt:
         assert str(workspace / "code") in out
         assert "{{" not in out
 
+    def test_every_build_charter_carries_the_run_boundaries(self, workspace, capsys):
+        # A plan-writer with no boundaries drafts increments outside them, and a
+        # reviewer with no boundaries cannot flag that as `scope:`.
+        init_run(workspace, capsys)
+        for argv in (["prompt", "plan-write", "demo-topic"],
+                     ["prompt", "spec-review", "demo-topic", "--lens", "security"],
+                     ["prompt", "plan-review", "demo-topic", "--lens", "coverage"]):
+            capsys.readouterr()
+            assert orko.main([*argv, "--workspace", str(workspace)]) == 0, argv
+            out = capsys.readouterr().out
+            assert "code/ only" in out, argv
+            assert "{{" not in out, argv
+
+    def test_plan_review_names_the_task_list(self, workspace, capsys):
+        # Two of the four plan lenses ask questions only tasks.md can answer.
+        init_run(workspace, capsys)
+        assert orko.main(["prompt", "plan-review", "demo-topic", "--lens", "placeholders",
+                          "--workspace", str(workspace)]) == 0
+        out = capsys.readouterr().out
+        assert str(workspace / ".orko/demo-topic/tasks.md") in out
+        assert "{{" not in out
+
     def test_seat_prompt_inlines_the_context_file(self, workspace, capsys):
         init_run(workspace, capsys, "analysis")
         ctx = workspace / ".orko/demo-topic/context/perf.md"
@@ -1030,6 +1052,7 @@ class TestPreflight:
         self._branch(workspace)
         code, out = self._pf(workspace, capsys)
         assert code == 0, out
+        assert out.startswith("preflight: ok (") and out.endswith(" checks)\n")
 
     def test_default_branch_findings_are_independent(self, workspace, capsys):
         init_run(workspace, capsys)
@@ -1041,13 +1064,27 @@ class TestPreflight:
     def test_dirty_findings_are_independent(self, workspace, capsys):
         init_run(workspace, capsys)
         self._branch(workspace)
-        (workspace / "code/x").write_text("x")
+        (workspace / "code/AGENTS.md").write_text("edited\n")
         code, out = self._pf(workspace, capsys)
         assert "docs-dirty" in out and "code-dirty" in out
 
+    def test_untracked_files_do_not_dirty_preflight(self, workspace, capsys):
+        # A reviewer seat that ran the suite leaves caches and a lockfile behind.
+        # `commit` cannot sweep them in, so preflight must not stop the run.
+        init_run(workspace, capsys)
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "intake",
+                   "--path", "STATUS.md", "--workspace", str(workspace)])
+        self._branch(workspace)
+        (workspace / "code/x").write_text("x")
+        code, out = self._pf(workspace, capsys)
+        assert code == 0, out
+        assert "code-dirty" not in out
+        (workspace / "code/AGENTS.md").write_text("edited\n")
+        assert "code-dirty" in self._pf(workspace, capsys)[1]
+
     def test_finding_order_is_dirty_pair_then_branch_pair(self, workspace, capsys):
         init_run(workspace, capsys)
-        (workspace / "code/x").write_text("x")
+        (workspace / "code/AGENTS.md").write_text("edited\n")
         code, out = self._pf(workspace, capsys)
         assert code == 1
         assert out.index("docs-dirty") < out.index("code-dirty")
@@ -1113,6 +1150,18 @@ class TestPreflight:
         assert code == 1 and "codex-unavailable: run /codex:setup" in out
         monkeypatch.setattr(orko, "codex_setup_ready", lambda: (True, "ok"))
         assert self._pf(workspace, capsys)[0] == 0
+
+    def test_codex_setup_without_node_is_a_finding_not_a_traceback(self, monkeypatch, tmp_path):
+        companion = tmp_path / "codex-companion.mjs"
+        companion.write_text("")
+        monkeypatch.setattr(orko, "codex_companion_path", lambda: companion)
+
+        def no_node(*args, **kwargs):
+            raise FileNotFoundError("node")
+
+        monkeypatch.setattr(orko.subprocess, "run", no_node)
+        ready, detail = orko.codex_setup_ready()
+        assert ready is False and detail == "node is not on PATH"
 
     def test_blocked_escalation(self, workspace, capsys):
         _, payload = init_run(workspace, capsys)
@@ -1336,7 +1385,7 @@ class TestRecordReview:
         assert text.count("### F") == 3
         f1 = text.split("### F1")[1].split("### F2")[0]
         assert "- Severity: `high`" in f1 and "- Disposition: `open`" in f1
-        assert "Verified: confirmed: the quoted line" in f1
+        assert "| Verified: confirmed: the quoted line" in f1
         assert "### F3 — Upload path is unbounded" in text
 
     def test_review_row_in_index(self, workspace, capsys):
@@ -1358,6 +1407,18 @@ class TestRecordReview:
         text = Path(out["path"]).read_text()
         assert "### F1 — Upload path is unbounded" in text
         assert 'reviewer: "orko (security, requirements)"' in text
+
+    def test_seat_to_finding_ranges_are_printed(self, workspace, capsys):
+        # Getting --seat order wrong silently renumbers every finding, so the
+        # mint reports which F blocks each seat became.
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        d = self._findings_dir(workspace)
+        code, out = rec(workspace, capsys, "review", "--slug", "demo-topic", "--role", "spec",
+                        "--reviews", "SPEC-001", "--revision", "abc1234", "--from-findings", str(d),
+                        "--title", "Spec review")
+        assert code == 0
+        assert out["seats"] == {"requirements": ["F1", "F2"], "security": ["F3"]}
 
     def test_missing_findings_file_exits_2(self, workspace, capsys):
         init_run(workspace, capsys)
@@ -1385,6 +1446,17 @@ class TestRecordOthers:
         assert code == 0
         text = review.read_text()
         assert text.count("- Disposition: `open`") == 2 and "- Disposition: `rejected`" in text.split("### F2")[1].split("### F3")[0]
+
+    def test_disposition_noted_is_accepted(self, workspace, capsys):
+        # A `note` finding whose Recommendation is "no change" is neither
+        # accepted nor rejected.
+        review = self._spec_and_review(workspace, capsys)
+        code, _ = rec(workspace, capsys, "disposition", "--slug", "demo-topic",
+                      "--review", "REVIEW-001", "--finding", "F2",
+                      "--disposition", "noted")
+        assert code == 0
+        text = review.read_text()
+        assert "- Disposition: `noted`" in text.split("### F2")[1].split("### F3")[0]
 
     def test_disposition_unknown_finding_exits_2(self, workspace, capsys):
         self._spec_and_review(workspace, capsys)
@@ -1426,6 +1498,39 @@ class TestRecordOthers:
         assert rec(workspace, capsys, "risk", "--slug", "demo-topic", "--text", "F3 deferred: upload bound")[0] == 0
         readme = (workspace / "docs/versions/0.1/README.md").read_text()
         assert "- F3 deferred: upload bound" in readme.split("## Risks, blockers, and open decisions")[1]
+
+    def test_risk_on_a_readme_without_the_heading_exits_2(self, workspace, capsys):
+        init_run(workspace, capsys)
+        readme = workspace / "docs/versions/0.1/README.md"
+        readme.write_text(readme.read_text().split("## Risks, blockers")[0])
+        code, err = rec(workspace, capsys, "risk", "--slug", "demo-topic",
+                        "--text", "upload bound")
+        assert code == 2
+        assert "has no '## Risks, blockers, and open decisions' section" in err
+
+    def test_delivery_decision_on_a_plan_without_the_section_exits_2(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        _, plan = rec(workspace, capsys, "plan", "--slug", "demo-topic", "--title", "Plan",
+                      "--implements", "SPEC-001")
+        path = Path(plan["path"])
+        text = path.read_text()
+        head, _, rest = text.partition("## Delivery decisions")
+        path.write_text(head + rest.partition("\n## ")[1] + rest.partition("\n## ")[2])
+        code, err = rec(workspace, capsys, "delivery-decision", "--slug", "demo-topic",
+                        "--decision", "Use sqlite", "--rationale", "no server")
+        assert code == 2
+        assert "has no '## Delivery decisions' section" in err
+
+    def test_index_without_a_table_exits_2_not_stopiteration(self, workspace, capsys):
+        init_run(workspace, capsys)
+        readme = workspace / "docs/versions/0.1/README.md"
+        text = readme.read_text()
+        head, sep, rest = text.partition("## Artifact index")
+        readme.write_text(head + sep + "\n\nNo table here yet.\n")
+        code, err = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        assert code == 2
+        assert "has no table under ## Artifact index" in err
 
     def test_research_stamped(self, workspace, capsys):
         init_run(workspace, capsys, "analysis", "Why is it slow")
@@ -1489,6 +1594,24 @@ class TestCommit:
                           "--path", "src.py", "--workspace", str(workspace)]) == 0
         assert "src.py" in git_out(workspace / "code", "show", "--name-only", "HEAD")
         assert git_out(workspace / "docs", "status", "--porcelain") != ""
+
+    def test_a_dropped_path_is_named_on_stderr(self, workspace, capsys):
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        capsys.readouterr()
+        assert orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m",
+                          "--path", "adr/ADR-002-typo.md",
+                          "--workspace", str(workspace)]) == 0
+        err = capsys.readouterr().err
+        assert "orko: skipping adr/ADR-002-typo.md (missing, absolute, or outside docs/)" in err
+
+    def test_only_a_dropped_path_leaves_nothing_to_stage(self, workspace, capsys):
+        init_run(workspace, capsys)
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--message", "m",
+                          "--path", "nope.py", "--workspace", str(workspace)]) == 2
+        err = capsys.readouterr().err
+        assert "orko: skipping nope.py" in err and "nothing to stage" in err
 
     def test_nothing_to_stage_exits_2(self, workspace, capsys):
         init_run(workspace, capsys)
@@ -1563,6 +1686,42 @@ class TestCheckSpec:
         assert orko.main(["check", "spec", "SPEC-001", "--require-plan", "--slug", "demo-topic", "--workspace", str(workspace)]) == 1
         assert "plan-missing" in capsys.readouterr().out
 
+    def _mapped_plan(self, workspace, capsys):
+        self._spec(workspace, capsys)
+        _, plan = rec(workspace, capsys, "plan", "--slug", "demo-topic", "--title", "Plan",
+                      "--implements", "SPEC-001")
+        path = Path(plan["path"])
+        apply_body(path, "plan-body.md")
+        return path
+
+    def _sign(self, path, third):
+        head, sep, rest = path.read_text().partition("## Delivery decisions")
+        row = f"| Positional arguments | Keeps the call sites unchanged | {third} |\n"
+        path.write_text(head + sep + rest.replace(
+            "| --- | --- | --- |\n", "| --- | --- | --- |\n" + row, 1))
+
+    def _require_plan(self, workspace, capsys):
+        capsys.readouterr()
+        code = orko.main(["check", "spec", "SPEC-001", "--require-plan", "--slug",
+                          "demo-topic", "--workspace", str(workspace)])
+        return code, capsys.readouterr().out
+
+    def test_require_plan_rejects_a_signed_draft_plan(self, workspace, capsys):
+        # Only a human signs. A seat that wrote its own name into Approved by
+        # forges an approval, and the gate is where that has to stop.
+        path = self._mapped_plan(workspace, capsys)
+        self._sign(path, "oiler")
+        code, out = self._require_plan(workspace, capsys)
+        assert code == 1
+        assert "plan-approval-signed:" in out and "on a draft plan" in out
+
+    def test_require_plan_passes_an_unsigned_draft_plan(self, workspace, capsys):
+        path = self._mapped_plan(workspace, capsys)
+        self._sign(path, " ")
+        code, out = self._require_plan(workspace, capsys)
+        assert code == 0, out
+        assert "plan-approval-signed" not in out
+
     def test_bad_id_and_missing_docs_exit_2(self, workspace, capsys):
         init_run(workspace, capsys)
         assert orko.main(["check", "spec", "spec-1", "--slug", "demo-topic", "--workspace", str(workspace)]) == 2
@@ -1587,11 +1746,12 @@ class TestRecordClose:
     def test_close_edits_status_changelogs_and_pr_bodies(self, workspace, capsys):
         payload = self._closeable(workspace, capsys)
         code, out = rec(workspace, capsys, "close", "--slug", "demo-topic",
-                        "--summary", "Adds addition.",
+                        "--summary", "Adds addition.", "--date", "2026-09-30",
                         "--changelog", "Added: addition endpoint")
         assert code == 0
         status = (workspace / "docs/STATUS.md").read_text()
-        assert 'as_of: "' + payload["date"] + '"' in status
+        # The close date, not the run's init date.
+        assert 'as_of: "2026-09-30"' in status
         assert "- Demo Topic (PLAN-001, SPEC-001): awaiting acceptance" in status
         assert "Recently completed\n\n<!--" in status
         for f in ("code/CHANGELOG.md", "docs/versions/0.1/CHANGELOG.md"):
@@ -1602,6 +1762,15 @@ class TestRecordClose:
         pr_docs = Path(out["pr_docs"]).read_text()
         assert "Adds addition." in pr_docs and "SPEC-001" in pr_docs and "PLAN-001" in pr_docs
         assert Path(out["pr_code"]).exists()
+
+    def test_close_stamps_today_not_the_run_date(self, workspace, capsys):
+        # A build that opens on Monday and closes on Friday is as of Friday.
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic", "--date", "2000-01-01")
+        assert payload["date"] == "2000-01-01"
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        assert rec(workspace, capsys, "close", "--slug", "demo-topic", "--summary", "x")[0] == 0
+        today = __import__("datetime").date.today().isoformat()
+        assert f'as_of: "{today}"' in (workspace / "docs/STATUS.md").read_text()
 
     def test_close_refreshes_index_status(self, workspace, capsys):
         self._closeable(workspace, capsys)
@@ -1719,7 +1888,8 @@ class TestCheckDelivery:
         self._task_run(workspace, capsys)
         self._commit_task_file(workspace)
         monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
-        assert self._cd(workspace, capsys) == (0, "")
+        # The acceptance line is model-authored shell; the check prints it.
+        assert self._cd(workspace, capsys) == (0, "acceptance: uv run pytest -q\n")
 
     def test_fails_tree_dirty(self, workspace, capsys, monkeypatch):
         self._task_run(workspace, capsys)
@@ -1740,6 +1910,20 @@ class TestCheckDelivery:
         subprocess.run(["git", "-C", str(workspace / "code"), "commit", "-qm", "t"], check=True)
         monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
         assert "diff-outside-allowlist: other.py" in self._cd(workspace, capsys)[1]
+
+    def test_testing_readme_is_inside_the_allowlist(self, workspace, capsys, monkeypatch):
+        # The Codex task prompt tells every delivery to write this file, and no
+        # plan lists it under Files.
+        self._task_run(workspace, capsys)
+        readme = workspace / "code/docs/testing/README.md"
+        readme.write_text(readme.read_text() + "\n| SPEC-001 R1 | test_adds |\n")
+        subprocess.run(["git", "-C", str(workspace / "code"), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(workspace / "code"), "commit", "-qm", "map"], check=True)
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        code, out = self._cd(workspace, capsys)
+        assert "diff-outside-allowlist" not in out
+        assert "diff-empty" not in out
+        assert code == 0, out
 
     def test_fails_acceptance(self, workspace, capsys, monkeypatch):
         self._task_run(workspace, capsys)

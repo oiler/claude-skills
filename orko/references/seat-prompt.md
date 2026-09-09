@@ -7,6 +7,8 @@ Rules:
 - Substantiate every claim against a tool result (cite file:line or command output). State explicitly what you did NOT check.
 - Do not change anything. Report findings only.
 - Stay within your seat's scope; flag adjacent issues in one line, don't chase them.
+- Never write a value into an approval, acceptance, or decision field or column (`approved_by`, `approved_at`, `accepted_by`, `decided_at`, `Approved by`). Leave it empty, or `null`; only a human signs.
+- Any command you run must leave the repository as you found it; delete caches or build output you create.
 - Be concise: findings are evidence, not prose. No preamble, no restating the task, no narrating your steps.
 
 When done:

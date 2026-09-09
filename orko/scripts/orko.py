@@ -24,14 +24,15 @@ Usage:
         [--workspace DIR]
     uv run orko.py record {decision|adr|research} --slug SLUG --title TEXT [--workspace DIR]
     uv run orko.py record disposition --slug SLUG --review REVIEW-NNN --finding FN
-        --disposition {accepted|rejected|resolved} [--workspace DIR]
+        --disposition {accepted|rejected|resolved|noted} [--workspace DIR]
     uv run orko.py record status --slug SLUG --id ID --status {draft|in_review} [--workspace DIR]
     uv run orko.py record amendment --slug SLUG --id SPEC-NNN --text TEXT [--workspace DIR]
     uv run orko.py record delivery-decision --slug SLUG --decision TEXT --rationale TEXT
         [--workspace DIR]
     uv run orko.py record risk --slug SLUG --text TEXT [--workspace DIR]
     uv run orko.py record close --slug SLUG --summary TEXT
-        [--changelog "<Added|Changed|Fixed|Removed|Security>: text"] [--workspace DIR]
+        [--changelog "<Added|Changed|Fixed|Removed|Security>: text"]
+        [--date YYYY-MM-DD] [--workspace DIR]
     uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--workspace DIR]
     uv run orko.py prompt plan-write <slug> [--workspace DIR]
     uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--workspace DIR]
@@ -219,6 +220,52 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
 SPEC_ID_RE = re.compile(r"^[A-Z]+-[0-9]{3}$")
 
 
+def plans_implementing(ws: Path, spec_id: str) -> list[Path]:
+    """Every `docs/versions/*/plans/PLAN-*.md` whose `implements:` names the ID."""
+    hits = []
+    for plan in sorted((ws / "docs" / "versions").glob("*/plans/PLAN-*.md")):
+        try:
+            text = plan.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if not text.startswith("---"):
+            continue
+        block = text.split("---", 2)[1].split("\n")
+        for index, line in enumerate(block):
+            if not line.startswith("implements:"):
+                continue
+            span = [line]
+            for later in block[index + 1:]:
+                if FM_KEY_RE.match(later):
+                    break
+                span.append(later)
+            if re.search(rf"\b{re.escape(spec_id)}\b", "\n".join(span)):
+                hits.append(plan)
+            break
+    return hits
+
+
+DELIVERY_DECISIONS_HEADING = "## Delivery decisions"
+
+
+def signed_delivery_rows(plan: Path) -> list[str]:
+    """Body rows of the plan's Delivery decisions table with a non-empty third
+    cell. That column is `Approved by`, and only a human writes into it."""
+    lines = plan.read_text(encoding="utf-8").split("\n")
+    if DELIVERY_DECISIONS_HEADING not in lines:
+        return []
+    start = lines.index(DELIVERY_DECISIONS_HEADING)
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
+               len(lines))
+    rows = [lines[i] for i in range(start + 1, end) if lines[i].lstrip().startswith("|")]
+    signed = []
+    for row in rows[2:]:  # skip the header and the separator
+        cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
+        if len(cells) >= 3 and cells[2]:
+            signed.append(row)
+    return signed
+
+
 def cmd_check_spec(args: argparse.Namespace) -> int:
     """Run the scaffold's own spec-check.sh and pass its verdict through."""
     if not SPEC_ID_RE.fullmatch(args.id):
@@ -236,9 +283,16 @@ def cmd_check_spec(args: argparse.Namespace) -> int:
     sys.stdout.write(result.stdout)
     if result.stderr:
         sys.stderr.write(result.stderr)
-    if args.require_plan and result.returncode == 0 and "no PLAN" in result.stdout:
-        print(f"plan-missing: spec-check found no plan implementing {args.id}")
-        return 1
+    if args.require_plan and result.returncode == 0:
+        if "no PLAN" in result.stdout:
+            print(f"plan-missing: spec-check found no plan implementing {args.id}")
+            return 1
+        for plan in plans_implementing(ws, args.id):
+            status = read_frontmatter_field(plan, "status")
+            if status in ("draft", "in_review") and signed_delivery_rows(plan):
+                print(f"plan-approval-signed: {plan} has an Approved by value on "
+                      f"a {status} plan")
+                return 1
     return result.returncode
 
 
@@ -876,6 +930,7 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         "{{SPEC_PATH}}": _record_path_or(run, "spec", "spec", "(no spec minted yet)"),
         "{{PLAN_PATH}}": _record_path_or(run, "plan", "plan", "(no plan minted yet)"),
         "{{TASKS_PATH}}": run["tasks"],
+        "{{BOUNDARIES}}": run["boundaries"],
         "{{RUN_DIR}}": run["run_dir"],
         "{{WORKSPACE}}": run["workspace"],
         "{{DOCS}}": run["docs"],
@@ -1032,10 +1087,15 @@ def codex_setup_ready() -> tuple[bool, str]:
     companion = codex_companion_path()
     if companion is None:
         return False, "openai-codex plugin not installed"
-    result = subprocess.run(
-        ["node", str(companion), "setup", "--json"],
-        capture_output=True, text=True, check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["node", str(companion), "setup", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+    except FileNotFoundError:
+        # The companion is a Node script, and a machine with the plugin but no
+        # node is a preflight finding, never a traceback out of `preflight`.
+        return False, "node is not on PATH"
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -1074,8 +1134,16 @@ def cmd_codex_wait(args: argparse.Namespace) -> int:
     return 0 if payload.get("status") == "completed" else 1
 
 
-def _dirty(repo: Path) -> bool:
-    return bool(_git(repo, "status", "--porcelain").stdout.strip())
+def _dirty(repo: Path, untracked: bool = True) -> bool:
+    """Working-tree dirt. `untracked=False` counts modified and staged files only.
+
+    Preflight ignores untracked files: a reviewer seat that ran the test suite
+    leaves caches and lockfiles behind, and none of them can reach a commit
+    `commit` makes. `check delivery` still counts them, because a Codex delivery
+    that left a file unstaged is an incomplete delivery.
+    """
+    flags = ["--porcelain"] if untracked else ["--porcelain", "--untracked-files=no"]
+    return bool(_git(repo, "status", *flags).stdout.strip())
 
 
 def cmd_preflight(args: argparse.Namespace) -> int:
@@ -1091,13 +1159,18 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     ws, run = loaded
 
     findings: list[str] = []
+    checks = 0
     if shutil.which("uv") is None:
         findings.append("uv-missing: `uv` is not on PATH; every script call needs it")
+    checks += 1
     for name in validate_workspace(ws):
         findings.append(f"workspace-invalid: {name}")
+    checks += 1
     for repo in ("docs", "code"):
-        if _dirty(ws / repo):
+        # Modified and staged only: see `_dirty`.
+        if _dirty(ws / repo, untracked=False):
             findings.append(f"{repo}-dirty: uncommitted changes in {repo}/")
+        checks += 1
     # A second loop, not a second clause in the first: the findings print in
     # the order they are appended, and the interface fixes that order.
     for repo in ("docs", "code"):
@@ -1105,9 +1178,12 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         if run["mode"] == "build" and branch in DEFAULT_BRANCHES:
             findings.append(f"{repo}-on-default-branch: {repo}/ is on {branch}; a "
                             "build runs on orko/<slug>, never on a default branch")
+        checks += 1
     if dossier_status(ws, run["version"]) not in ("active", "proposed"):
         findings.append(f"dossier-inactive: versions/{run['version']} is not active")
+    checks += 1
     if run["mode"] == "build" and run["next_step"] == 5:
+        checks += 1
         spec = record_for(Path(run["ledger"]), "spec", "spec")
         path = ws / spec["path"] if spec else None
         if path is None or read_frontmatter_field(path, "status") != "accepted":
@@ -1121,14 +1197,21 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         ready, detail = codex_setup_ready()
         if not ready:
             findings.append(f"codex-unavailable: run /codex:setup ({detail})")
+        checks += 1
     gate = Path(run["escalations"])
     if gate.exists() and gate.read_text(encoding="utf-8").strip():
         findings.append("blocked-escalation: escalations.md is non-empty; only "
                         "oiler may empty it, and the run stays stopped until then")
+    checks += 1
 
     for finding in findings:
         print(finding)
-    return 1 if findings else 0
+    if findings:
+        return 1
+    # A silent exit 0 cannot be told from a preflight that never ran, and the
+    # Codex readiness probe is the one check whose silence costs a wasted dispatch.
+    print(f"preflight: ok ({checks} checks)")
+    return 0
 
 
 def _load_run(args: argparse.Namespace) -> tuple[Path, dict] | None:
@@ -1186,7 +1269,9 @@ def update_index(index_path: Path, row: list[str], id_cell: str) -> None:
         start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
         if start is None:
             raise ValueError(f"{index_path} has no '{heading}' heading")
-    first = next(i for i in range(start, len(lines)) if lines[i].startswith("|"))
+    first = next((i for i in range(start, len(lines)) if lines[i].startswith("|")), None)
+    if first is None:
+        raise ValueError(f"{index_path} has no table under {heading or 'the top'}")
     table = []
     for i in range(first, len(lines)):
         if not lines[i].startswith("|"):
@@ -1292,19 +1377,30 @@ def parse_verdicts(text: str) -> dict[str, str]:
     return {f"F{m.group('n')}": m.group("rest").strip() for m in VERDICT_RE.finditer(text)}
 
 
-def render_review(seats: list[tuple[dict, list[dict], dict[str, str]]]) -> tuple[str, str, str]:
-    """seats: (seat_meta, findings, verdicts) in dispatch order."""
+def render_review(
+    seats: list[tuple[dict, list[dict], dict[str, str]]],
+) -> tuple[str, str, str, dict[str, list[str]]]:
+    """seats: (seat_meta, findings, verdicts) in dispatch order.
+
+    The fourth value maps each seat to the `F<n>` labels its findings became, so
+    the conductor can disposition against the right numbers: `--seat` order
+    silently renumbers every finding, and a mis-ordered mint sends 24
+    dispositions to the wrong blocks.
+    """
     summary, risks, blocks = [], [], []
+    seat_ranges: dict[str, list[str]] = {}
     n = 0
     for meta, findings, verdicts in seats:
         summary.append(f"- {meta['seat']}: {meta['verdict']}")
         if meta["gaps"]:
             risks.append(f"- {meta['seat']}: {meta['gaps']}")
+        labels: list[str] = []
         for local, f in enumerate(findings, start=1):
             n += 1
+            labels.append(f"F{n}")
             evidence = f.get("evidence", "")
             if f"F{local}" in verdicts:
-                evidence += f" Verified: {verdicts[f'F{local}']}"
+                evidence += " | Verified: " + verdicts[f"F{local}"]
             blocks.append("\n".join([
                 f"### F{n} — {f['title']}",
                 "",
@@ -1316,7 +1412,9 @@ def render_review(seats: list[tuple[dict, list[dict], dict[str, str]]]) -> tuple
                 f"- Recommendation: {f.get('recommendation', '')}",
                 "- Disposition: `open`",
             ]))
-    return "\n".join(summary), "\n\n".join(blocks), "\n".join(risks) or "None recorded."
+        seat_ranges[meta["seat"]] = labels
+    return ("\n".join(summary), "\n\n".join(blocks),
+            "\n".join(risks) or "None recorded.", seat_ranges)
 
 
 def _fill_section(text: str, heading: str, body: str) -> str:
@@ -1345,7 +1443,7 @@ def cmd_record_review(args: argparse.Namespace) -> int:
         print(f"orko: no findings files under {src}", file=sys.stderr)
         return 2
     names = ", ".join(meta["seat"] for meta, _, _ in seats)
-    summary, blocks, risks = render_review(seats)
+    summary, blocks, risks, seat_ranges = render_review(seats)
     code, out = _mint(ws, run, "review", args.role, args.title,
                       {"title": args.title, "status": "draft", "product_version": run["version"],
                        "reviews": list(args.reviews), "revision": args.revision,
@@ -1361,7 +1459,7 @@ def cmd_record_review(args: argparse.Namespace) -> int:
         text = re.sub(r"### F1 — \[Finding\].*?(?=\n## )", lambda m: blocks + "\n", text, count=1, flags=re.DOTALL)
         text = _fill_section(text, "Unresolved risks and questions", risks)
         path.write_text(text, encoding="utf-8")
-    print(json.dumps(out, indent=2))
+    print(json.dumps(dict(out, seats=seat_ranges), indent=2))
     return 0
 
 
@@ -1556,8 +1654,15 @@ def cmd_record_delivery_decision(args: argparse.Namespace) -> int:
     if guard:
         print(f"orko: {guard}", file=sys.stderr)
         return 2
-    _append_after_heading(path, "## Delivery decisions",
-                          f"| {args.decision} | {args.rationale} |  |", table=True)
+    heading = "## Delivery decisions"
+    try:
+        _append_after_heading(path, heading,
+                              f"| {args.decision} | {args.rationale} |  |", table=True)
+    except ValueError:
+        # The plan-writer is told to delete unused template rows, so a plan that
+        # lost the whole section is a plausible input, not a bug in the script.
+        print(f"orko: {path} has no '{heading}' section", file=sys.stderr)
+        return 2
     append_ledger(ledger, f"touched {rel(ws, path)}")
     return 0
 
@@ -1568,8 +1673,12 @@ def cmd_record_risk(args: argparse.Namespace) -> int:
         return 2
     ws, run = loaded
     readme = dossier_dir(ws, run["version"]) / "README.md"
-    _append_after_heading(readme, "## Risks, blockers, and open decisions",
-                          f"- {args.text}", table=False)
+    heading = "## Risks, blockers, and open decisions"
+    try:
+        _append_after_heading(readme, heading, f"- {args.text}", table=False)
+    except ValueError:
+        print(f"orko: {readme} has no '{heading}' section", file=sys.stderr)
+        return 2
     append_ledger(Path(run["ledger"]), f"touched {rel(ws, readme)}")
     return 0
 
@@ -1672,8 +1781,11 @@ def cmd_record_close(args: argparse.Namespace) -> int:
                                if entry["type"] in ("spec", "plan")))
 
     status = ws / "docs/STATUS.md"
+    # The close date, not the run's init date: a build that opens on Monday and
+    # closes on Friday is as of Friday.
+    as_of = args.date or _dt.date.today().isoformat()
     status.write_text(set_frontmatter(status.read_text(encoding="utf-8"),
-                                      {"as_of": run["date"]}), encoding="utf-8")
+                                      {"as_of": as_of}), encoding="utf-8")
     _status_progress_line(ws, run["topic"], f"- {run['topic']} ({id_text}): awaiting acceptance")
     append_ledger(ledger, "touched docs/STATUS.md")
 
@@ -1734,8 +1846,17 @@ def cmd_commit(args: argparse.Namespace) -> int:
     for path in touched(ledger):
         if path.startswith(args.repo + "/"):
             staged.append(path.removeprefix(args.repo + "/"))
-    staged += list(args.path)
-    staged = [p for p in staged if (repo / p).exists() and not Path(p).is_absolute() and ".." not in Path(p).parts]
+    def keeps(path: str) -> bool:
+        return ((repo / path).exists() and not Path(path).is_absolute()
+                and ".." not in Path(path).parts)
+
+    # A typo'd `--path` that silently vanished meant the file never committed and
+    # nothing said so, so every dropped one is named on stderr.
+    for path in args.path:
+        if not keeps(path):
+            print(f"orko: skipping {path} (missing, absolute, or outside {args.repo}/)",
+                  file=sys.stderr)
+    staged = [p for p in staged + list(args.path) if keeps(p)]
     if not staged:
         print(f"orko: nothing to stage in {args.repo}", file=sys.stderr)
         return 2
@@ -1773,6 +1894,12 @@ def run_acceptance(cmd: str, cwd: Path) -> int:
     return subprocess.run(cmd, shell=True, cwd=str(cwd), check=False).returncode
 
 
+# The Codex task prompt tells every delivery to map its requirement rows into
+# this file, so a plan that never lists it under Files must not fail the check
+# for obeying the prompt.
+DELIVERY_ALWAYS_ALLOWED = ("docs/testing/README.md",)
+
+
 def cmd_check_delivery(args: argparse.Namespace) -> int:
     """Judge one Codex delivery in code, not by reading its report.
 
@@ -1800,10 +1927,13 @@ def cmd_check_delivery(args: argparse.Namespace) -> int:
                _git(code, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines() if line]
     if not changed:
         findings.append("diff-empty: no commits since the dispatch base")
-    outside = sorted(set(changed) - set(task["files"]))
+    outside = sorted(set(changed) - set(task["files"]) - set(DELIVERY_ALWAYS_ALLOWED))
     if changed and outside:
         findings.append("diff-outside-allowlist: " + ", ".join(outside))
     if task["acceptance"]:
+        # The acceptance line is model-authored shell run with the conductor's
+        # privileges. Printing it is the whole of the visibility this gets.
+        print(f"acceptance: {task['acceptance']}")
         rc = run_acceptance(task["acceptance"], code)
         if rc != 0:
             findings.append(f"acceptance-failed: exit {rc}")
@@ -1893,7 +2023,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workspace")
     p.add_argument("--review", required=True)
     p.add_argument("--finding", required=True)
-    p.add_argument("--disposition", required=True, choices=["accepted", "rejected", "resolved"])
+    p.add_argument("--disposition", required=True,
+                   choices=["accepted", "rejected", "resolved", "noted"])
     p.set_defaults(func=cmd_record_disposition)
 
     p = record_sub.add_parser("status")
@@ -1935,6 +2066,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--slug", required=True)
     p.add_argument("--workspace")
     p.add_argument("--summary", required=True)
+    p.add_argument("--date", help="YYYY-MM-DD stamped as STATUS.md as_of (default: today)")
     p.add_argument("--changelog", action="append", default=[],
                    help="'<Added|Changed|Fixed|Removed|Security>: text', repeatable")
     p.set_defaults(func=cmd_record_close)
