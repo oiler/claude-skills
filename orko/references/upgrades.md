@@ -31,7 +31,7 @@ Two constraints pin this as an upgrade, not the everyday baseline. The Workflow 
 orko v1.0.0 shipped the build engagement with Linear as the record. v2.0.0 replaced that record and added a second executor. Both are shipped mechanisms, not design notes, and each has its own reference file:
 
 - **The scaffold docs repository is the record.** A run targets a workspace holding a `docs/` repository and a `code/` repository, and every decision commits as a spec, plan, review, decision, ADR, or research file with a stable ID. The script owns the write, orko never signs, and the build stops at a human acceptance. The contract is `record.md`.
-- **Codex is an optional executor.** `init build --executor codex` replaces the subagent-driven-development implementers at step 5 with a per-task Codex loop: a script-built dispatch, a delivery check that judges the repository rather than Codex's report, one retry, and two report-only Claude reviewers per task. This is where the retired `codex-orko` skill went. The loop is `codex.md`.
+- **Codex is an optional executor.** `init build --executor codex` replaces the subagent-driven-development implementers at step 5 with a per-task Codex loop: a script-built dispatch, a delivery check that judges the repository rather than Codex's report, a script-owned commit of each delivery, one retry, and two report-only Claude reviewers per task. This is where the retired `codex-orko` skill went. The loop is `codex.md`.
 
 ## Not yet built
 
