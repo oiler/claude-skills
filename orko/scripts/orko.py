@@ -140,7 +140,7 @@ PLAN_RED_FLAGS: tuple[tuple[re.Pattern[str], str], ...] = (
      "'Write tests for the above' without the actual test code"),
 )
 
-TASK_HEADING_RE = re.compile(r"^###\s+Task\s+\d+\s*:", re.MULTILINE)
+TASK_HEAD_RE = re.compile(r"^###\s+Task\s+(?P<n>\d+)\s*:\s*(?P<title>.*)$")
 # `[ \t]*`, never `\s*`: `\s` spans newlines, so an empty `**Acceptance:**` line
 # would harvest the next line as the command and hand `**Interfaces:**` to a
 # `--write` Codex dispatch as something to run.
@@ -173,17 +173,31 @@ def acceptance_command(block: str) -> str | None:
     return rest or None
 
 
+def task_heads(text: str) -> list[tuple[int, re.Match[str]]]:
+    """Every live `### Task N:` heading as (0-based line index, match).
+
+    The gate and the dispatch both enumerate blocks from here, over
+    fence-blanked lines, so a task a plan only *shows* inside a fence is
+    invisible to both. A block the gate never saw must not be dispatchable.
+    """
+    return [(index, match)
+            for index, line in enumerate(strip_fences(text).split("\n"))
+            if (match := TASK_HEAD_RE.match(line))]
+
+
 def parse_tasks(text: str) -> list[dict]:
     """One dict per `### Task N:` block of a `superpowers:writing-plans` file.
 
-    Parsed from the raw text, not `strip_code` output: the acceptance command
-    and the file paths live in backticks, and the Codex dispatch needs them.
+    The body is sliced from the raw text, fences and all: the acceptance
+    command and the file paths live in backticks, and the Codex dispatch needs
+    them as written.
     """
-    heads = list(re.finditer(r"^### Task (?P<n>\d+):\s*(?P<title>.+)$", text, re.MULTILINE))
+    raw_lines = text.split("\n")
+    heads = task_heads(text)
     tasks = []
-    for index, head in enumerate(heads):
-        end = heads[index + 1].start() if index + 1 < len(heads) else len(text)
-        block = text[head.start():end].rstrip() + "\n"
+    for index, (line, head) in enumerate(heads):
+        end = heads[index + 1][0] if index + 1 < len(heads) else len(raw_lines)
+        block = "\n".join(raw_lines[line:end]).rstrip() + "\n"
         tasks.append(dict(
             n=int(head.group("n")), title=head.group("title").strip(), body=block,
             files=[match.group("path").split(":")[0] for match in FILES_RE.finditer(block)],
@@ -213,23 +227,19 @@ def validate_plan(text: str) -> list[Finding]:
     if not re.search(r"^##\s+Global Constraints\s*$", scanned, re.MULTILINE):
         findings.append(Finding(1, "missing the '## Global Constraints' section"))
 
-    task_starts = [
-        (scanned[:match.start()].count("\n") + 1, match.start())
-        for match in TASK_HEADING_RE.finditer(scanned)
-    ]
-    if not task_starts:
+    heads = task_heads(text)
+    if not heads:
         findings.append(Finding(1, "no '### Task N:' task block found"))
 
-    # `strip_code` preserves the line count, so a block's line span indexes the
-    # raw text too. The acceptance line is read raw: its command lives in
-    # backticks, which the scan has blanked.
+    # Every scan preserves the line count, so one line span slices both views
+    # of a block: the scanned text for the structural rules, and the raw text
+    # for the acceptance line, whose command lives in backticks.
     raw_lines = text.split("\n")
-    for position, (line_no, offset) in enumerate(task_starts):
-        end = task_starts[position + 1][1] if position + 1 < len(task_starts) else len(scanned)
-        end_line = (task_starts[position + 1][0] if position + 1 < len(task_starts)
-                    else len(raw_lines) + 1)
-        block = scanned[offset:end]
-        raw_block = "\n".join(raw_lines[line_no - 1:end_line - 1])
+    for position, (line, _) in enumerate(heads):
+        end = heads[position + 1][0] if position + 1 < len(heads) else len(raw_lines)
+        line_no = line + 1
+        block = "\n".join(lines[line:end])
+        raw_block = "\n".join(raw_lines[line:end])
         if "**Files:**" not in block:
             findings.append(Finding(line_no, "task block has no '**Files:**' subsection"))
         if not re.search(r"^\s*-\s*\[ \]\s*\*\*Step", block, re.MULTILINE):
@@ -567,9 +577,13 @@ def cmd_init(args: argparse.Namespace) -> int:
         for finding in findings:
             print(f"workspace-invalid: {finding}", file=sys.stderr)
         return 2
-    if CONTROL_RE.search(args.topic):
-        print("orko: topic contains a control character", file=sys.stderr)
-        return 2
+    # The topic names the run; the two overrides ride on the dispatch line the
+    # conductor pastes, where a newline would split the flags from the sentence.
+    for name, value in (("topic", args.topic), ("--codex-model", args.codex_model),
+                        ("--codex-effort", args.codex_effort)):
+        if value and CONTROL_RE.search(value):
+            print(f"orko: {name} contains a control character", file=sys.stderr)
+            return 2
     version = args.version or read_active_version(ws)
     if not version:
         print("orko: docs/STATUS.md has no active_version; pass --version", file=sys.stderr)
@@ -920,7 +934,7 @@ def task_prompt_path(run: dict, task: dict) -> Path:
 
 
 def render_dispatch_line(run: dict, task: dict, attempt: str, prompt_path: Path) -> str:
-    """The two lines the conductor pastes into the dispatch, and nothing else.
+    """What the conductor pastes into the dispatch: flags, a blank, a sentence.
 
     The routing flags lead the text rather than riding on the dispatching tool's
     parameters, because the `Agent` tool's `model` cannot carry a Codex slug.
@@ -941,7 +955,7 @@ def render_dispatch_line(run: dict, task: dict, attempt: str, prompt_path: Path)
             "the task is in the prompt file.\n")
 
 
-def render_task_prompt(run: dict, task: dict, attempt: str, failure: str | None) -> str:
+def render_task_prompt(run: dict, task: dict, failure: str | None) -> str:
     """The task the dispatch writes to its prompt file."""
     spec_id = (record_for(Path(run["ledger"]), "spec", "spec") or {}).get("id", "SPEC-?")
     plan_id = (record_for(Path(run["ledger"]), "plan", "plan") or {}).get("id", "PLAN-?")
@@ -987,7 +1001,7 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         prompt_path = task_prompt_path(run, task)
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
         prompt_path.write_text(
-            render_task_prompt(run, task, args.attempt, args.failure), encoding="utf-8")
+            render_task_prompt(run, task, args.failure), encoding="utf-8")
         sys.stdout.write(render_dispatch_line(run, task, args.attempt, prompt_path))
         return 0
     # Every other kind files its findings under the step that asked for them, and
