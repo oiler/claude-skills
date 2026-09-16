@@ -1299,6 +1299,41 @@ def _dirty(repo: Path) -> bool:
                      "--untracked-files=no").stdout.strip())
 
 
+def committed_sha256(ws: Path, path: str) -> str | None:
+    """sha256 of `path`'s content at HEAD, or None when HEAD has no such file.
+
+    The overwrite guard's floor is committed content. Hashing the working tree
+    would move the floor onto an edit nobody has committed and nobody has read,
+    which is the one thing the guard exists to catch.
+    """
+    repo, _, rest = path.partition("/")
+    if not rest:
+        return None
+    result = subprocess.run(["git", "-C", str(ws / repo), "show", f"HEAD:{rest}"],
+                            capture_output=True, check=False)
+    if result.returncode != 0:
+        return None
+    return hashlib.sha256(result.stdout).hexdigest()
+
+
+def rehash_gate_records(ws: Path, run: dict) -> None:
+    """Move the guard's floor to what the gate's human committed.
+
+    The gate asks for `status: accepted` on the spec and `approved_by` on both
+    reviews, and which of the three a human touched is not knowable here, so
+    every record the ledger names is re-hashed. Only on a clean preflight, and
+    only from the commit.
+    """
+    ledger = Path(run["ledger"])
+    # Only a floor that actually moved is written: a run that resumes at step 5
+    # repeatedly would otherwise append the same lines every time.
+    floor = hashes(ledger)
+    for entry in records(ledger):
+        sha = committed_sha256(ws, entry["path"])
+        if sha is not None and floor.get(entry["path"]) != sha:
+            append_ledger(ledger, f"hash {entry['path']} {sha}")
+
+
 def cmd_preflight(args: argparse.Namespace) -> int:
     """Check in code what the prose used to ask the conductor to check.
 
@@ -1341,16 +1376,6 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         if path is None or read_frontmatter_field(path, "status") != "accepted":
             findings.append("spec-not-accepted: a human sets status: accepted "
                             "before execution begins")
-        else:
-            # The gate's edits are a human's — `status: accepted` on the spec,
-            # `approved_by` on both reviews — so re-hash every record the ledger
-            # names, or the next overwrite guard reports the human's own edit as
-            # tampering. Which of the three a human touched is not knowable here.
-            for entry in records(Path(run["ledger"])):
-                target = ws / entry["path"]
-                if target.exists():
-                    append_ledger(Path(run["ledger"]),
-                                  f"hash {entry['path']} {sha256_file(target)}")
     if run["executor"] == "codex":
         ready, detail = codex_setup_ready(Path(run["code"]))
         if not ready:
@@ -1366,6 +1391,10 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         print(finding)
     if findings:
         return 1
+    # After the findings, never beside them: a run that stops here has blessed
+    # nothing, and the edit it stopped on keeps tripping the guard.
+    if run["mode"] == "build" and run["next_step"] == 5:
+        rehash_gate_records(ws, run)
     # A silent exit 0 cannot be told from a preflight that never ran, and the
     # Codex readiness probe is the one check whose silence costs a wasted dispatch.
     print(f"preflight: ok ({checks} checks)")
@@ -1988,6 +2017,22 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=False)
 
 
+def stageable(repo: Path, path: str) -> bool:
+    """Whether `git add` can stage `path` as one file: a regular file on disk,
+    or a file tracked at HEAD that the delivery deleted.
+
+    A directory is neither. `git add -A -- <dir>` sweeps everything under it,
+    including the caches `check delivery` just ignored, and `sha256_file` has no
+    answer for it. A `**Files:**` entry is model-authored, so this is reachable.
+    """
+    target = repo / path
+    if target.is_file():
+        return True
+    if target.exists():
+        return False
+    return path in _git(repo, "ls-files", "-z", "--", path).stdout.split("\0")
+
+
 def cmd_commit(args: argparse.Namespace) -> int:
     """Stage this run's own paths in one repo, commit them with the run's IDs
     and trailers, then re-hash what landed so the overwrite guard has a floor.
@@ -2028,18 +2073,46 @@ def cmd_commit(args: argparse.Namespace) -> int:
             staged.append(path.removeprefix(args.repo + "/"))
     def keeps(path: str) -> bool:
         # Deleted-but-tracked counts: a delivery that removed a file it listed
-        # has to stage the removal, and `git add -A` is what stages it.
+        # has to stage the removal.
         return (not Path(path).is_absolute() and ".." not in Path(path).parts
-                and ((repo / path).exists()
-                     or bool(_git(repo, "ls-files", "--", path).stdout.strip())))
+                and stageable(repo, path))
 
+    # A directory names itself, because the fix for it is an edit to `tasks.md`
+    # rather than a retry.
+    for path in dict.fromkeys(staged + list(args.path)):
+        if (repo / path).is_dir():
+            print(f"orko: skipping {path} (directory; list files in **Files:**)",
+                  file=sys.stderr)
     # A typo'd `--path` that silently vanished meant the file never committed and
     # nothing said so, so every dropped one is named on stderr.
     for path in args.path:
-        if not keeps(path):
+        if not keeps(path) and not (repo / path).is_dir():
             print(f"orko: skipping {path} (missing, absolute, or outside {args.repo}/)",
                   file=sys.stderr)
     staged = list(dict.fromkeys(p for p in staged + list(args.path) if keeps(p)))
+
+    def already_landed() -> bool:
+        """Whether this task's delivery is already in `<base>..HEAD`.
+
+        Exit 2 is a stop everywhere in the skill, so a re-run of step 5 after a
+        compaction must report the commit it finds instead of ending the run.
+        """
+        if task is None:
+            return False
+        base = _dispatched_base(_ledger_entries(ledger), f"5.{args.task}")
+        if base is None:
+            return False
+        landed = _git(repo, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines()
+        return bool(set(landed) & set(task["files"]))
+
+    def report_landed() -> int:
+        print(json.dumps({"repo": args.repo,
+                          "commit": _git(repo, "rev-parse", "HEAD").stdout.strip(),
+                          "staged": [], "task": args.task, "already": True}, indent=2))
+        return 0
+
+    if not staged and already_landed():
+        return report_landed()
     if not staged:
         # Naming the escape hatch here, because exit 2 is a stop everywhere
         # else: `record` logs no path under `code/src`, so the step-6 commit of
@@ -2052,6 +2125,8 @@ def cmd_commit(args: argparse.Namespace) -> int:
         print(f"orko: git add failed: {result.stderr.strip()}", file=sys.stderr)
         return 2
     if _git(repo, "diff", "--cached", "--quiet", "--", *staged).returncode == 0:
+        if already_landed():
+            return report_landed()
         print(f"orko: nothing changed in {args.repo}", file=sys.stderr)
         return 2
     ids = sorted({e["id"] for e in records(ledger) if e["id"] != "-"})
@@ -2067,7 +2142,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
         print(f"orko: git commit failed: {result.stderr.strip()}", file=sys.stderr)
         return 2
     for p in staged:
-        if (repo / p).exists():
+        if (repo / p).is_file():
             append_ledger(ledger, f"hash {args.repo}/{p} {sha256_file(repo / p)}")
     payload = {"repo": args.repo, "commit": _git(repo, "rev-parse", "HEAD").stdout.strip(),
                "staged": staged}
@@ -2100,12 +2175,7 @@ TOOL_LEFTOVERS = (".venv/", "uv.lock", ".pytest_cache/", "__pycache__/",
 
 def is_tool_leftover(path: str) -> bool:
     segments = path.split("/")
-    for leftover in TOOL_LEFTOVERS:
-        if leftover.endswith("/") and path.startswith(leftover):
-            return True
-        if leftover.rstrip("/") in segments:
-            return True
-    return False
+    return any(leftover.rstrip("/") in segments for leftover in TOOL_LEFTOVERS)
 
 
 def worktree_paths(repo: Path) -> list[str]:
@@ -2158,12 +2228,15 @@ def cmd_check_delivery(args: argparse.Namespace) -> int:
         return 2
     code = ws / "code"
     findings: list[str] = []
+    allowed = set(task["files"]) | set(DELIVERY_ALWAYS_ALLOWED)
     committed = _git(code, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines()
+    # A leftover the task lists is a delivery, not a dropping: a dependency
+    # change is the ordinary reason a task's Files list names `uv.lock`.
     changed = sorted({path for path in worktree_paths(code) + committed
-                      if path and not is_tool_leftover(path)})
+                      if path and (path in allowed or not is_tool_leftover(path))})
     if not changed:
         findings.append("diff-empty: no changes since the dispatch base")
-    outside = sorted(set(changed) - set(task["files"]) - set(DELIVERY_ALWAYS_ALLOWED))
+    outside = sorted(set(changed) - allowed)
     if changed and outside:
         findings.append("diff-outside-allowlist: " + ", ".join(outside))
     if task["acceptance"]:

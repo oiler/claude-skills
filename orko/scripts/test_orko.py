@@ -1371,6 +1371,52 @@ class TestPreflight:
                         "--disposition", "rejected")
         assert code == 0, err
 
+    def test_a_failing_preflight_moves_no_hash_floor(self, workspace, capsys):
+        # An edit nobody has read must keep tripping the overwrite guard, so a
+        # preflight that stops the run must not bless it.
+        _, payload = init_run(workspace, capsys)
+        _, spec = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m",
+                   "--path", "STATUS.md", "--workspace", str(workspace)])
+        self._branch(workspace)
+        for step in "01234":
+            orko.main(["ledger", step, "complete", "--slug", "demo-topic",
+                       "--workspace", str(workspace)])
+        path = Path(spec["path"])
+        path.write_text(orko.set_frontmatter(
+            path.read_text(), {"status": "accepted", "approved_at": "2026-09-08"}))
+        subprocess.run(["git", "-C", str(workspace / "docs"), "commit", "-qam", "accept"],
+                       check=True)
+        assert self._pf(workspace, capsys)[0] == 0
+        before = orko.hashes(Path(payload["ledger"]))
+        path.write_text(path.read_text() + "\nA second hand edit, committed.\n")
+        subprocess.run(["git", "-C", str(workspace / "docs"), "commit", "-qam", "edit"],
+                       check=True)
+        (workspace / "code/CHANGELOG.md").write_text("edited\n")
+        code, out = self._pf(workspace, capsys)
+        assert code == 1 and "code-dirty" in out
+        assert orko.hashes(Path(payload["ledger"])) == before
+
+    def test_an_uncommitted_record_gets_no_hash_floor(self, workspace, capsys):
+        # The floor is committed content. A record with no commit has none, and
+        # hashing the working tree would bless a file the repository never saw.
+        _, payload = init_run(workspace, capsys)
+        _, spec = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        path = Path(spec["path"])
+        path.write_text(orko.set_frontmatter(
+            path.read_text(), {"status": "accepted", "approved_at": "2026-09-08"}))
+        # `-a` stages tracked changes only, so the spec itself stays untracked,
+        # which `preflight` ignores as it ignores every untracked file.
+        subprocess.run(["git", "-C", str(workspace / "docs"), "commit", "-qam", "intake"],
+                       check=True)
+        self._branch(workspace)
+        for step in "01234":
+            orko.main(["ledger", step, "complete", "--slug", "demo-topic",
+                       "--workspace", str(workspace)])
+        code, out = self._pf(workspace, capsys)
+        assert code == 0, out
+        assert orko.rel(workspace, path) not in orko.hashes(Path(payload["ledger"]))
+
     def test_codex_unavailable(self, workspace, capsys, monkeypatch):
         init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
         orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m", "--path", "STATUS.md", "--workspace", str(workspace)])
@@ -1937,6 +1983,69 @@ class TestCommitTask:
                           "--workspace", str(workspace)]) == 2
         assert "orko: nothing to stage in code" in capsys.readouterr().err
 
+    def test_a_directory_in_files_is_skipped_not_swept_in(self, workspace, capsys):
+        # `git add -A -- <dir>` would stage every leftover under it, and the
+        # hash line would then raise on the directory itself.
+        self._run(workspace, capsys)
+        tasks = workspace / ".orko/demo-topic/tasks.md"
+        tasks.write_text(tasks.read_text().replace(
+            "- Modify: `orko/scripts/orko.py` functions", "- Modify: `orko/scripts` functions", 1))
+        self._write(workspace, "orko/scripts/test_orko.py")
+        self._write(workspace, "orko/scripts/__pycache__/orko.pyc", "compiled\n")
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        captured = capsys.readouterr()
+        assert ("orko: skipping orko/scripts (directory; list files in **Files:**)"
+                in captured.err)
+        assert sorted(json.loads(captured.out)["staged"]) == ["docs/testing/README.md",
+                                                             "orko/scripts/test_orko.py"]
+        assert "__pycache__" not in git_out(workspace / "code", "show", "--name-only", "HEAD")
+
+    def test_a_second_commit_of_the_same_task_reports_the_first(self, workspace, capsys):
+        # A compaction between loop steps 5 and 6 leaves the conductor no way to
+        # tell the commit landed, and exit 2 would stop the run.
+        self._run(workspace, capsys)
+        orko.main(["ledger", "5.1", "dispatched", "--commit",
+                   git_out(workspace / "code", "rev-parse", "HEAD").strip(),
+                   "--slug", "demo-topic", "--workspace", str(workspace)])
+        self._write(workspace, "orko/scripts/orko.py")
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        head = git_out(workspace / "code", "rev-parse", "HEAD").strip()
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["already"] is True and payload["commit"] == head
+        assert git_out(workspace / "code", "rev-parse", "HEAD").strip() == head
+
+    def test_a_landed_deletion_only_task_reports_the_first_commit(self, workspace, capsys):
+        # The one shape where nothing is stageable on the re-run: the task's
+        # whole delivery was a deletion, so after it lands every path it names
+        # is both absent and untracked.
+        self._run(workspace, capsys)
+        tasks = workspace / ".orko/demo-topic/tasks.md"
+        tasks.write_text(tasks.read_text().replace(
+            "- Create: `orko/scripts/orko.py` (from", "- Delete: `CHANGELOG.md` (was", 1))
+        for path in ("docs/testing/README.md", "orko/scripts/test_orko.py"):
+            subprocess.run(["git", "-C", str(workspace / "code"), "rm", "-q", "--ignore-unmatch",
+                            path], check=True)
+        subprocess.run(["git", "-C", str(workspace / "code"), "commit", "-qm", "drop"], check=True)
+        orko.main(["ledger", "5.1", "dispatched", "--commit",
+                   git_out(workspace / "code", "rev-parse", "HEAD").strip(),
+                   "--slug", "demo-topic", "--workspace", str(workspace)])
+        (workspace / "code/CHANGELOG.md").unlink()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        head = git_out(workspace / "code", "rev-parse", "HEAD").strip()
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["already"] is True and payload["staged"] == []
+        assert git_out(workspace / "code", "rev-parse", "HEAD").strip() == head
+
     def test_a_deleted_listed_file_is_staged_as_a_deletion(self, workspace, capsys):
         self._run(workspace, capsys)
         self._write(workspace, "orko/scripts/orko.py")
@@ -2299,6 +2408,27 @@ class TestCheckDelivery:
         monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
         code, out = self._cd(workspace, capsys)
         assert code == 0, out
+
+    def test_a_listed_leftover_is_still_the_delivery(self, workspace, capsys, monkeypatch):
+        # A task that lists `uv.lock` delivers `uv.lock`: any dependency change
+        # does. The leftover filter must not swallow a path the task names.
+        self._task_run(workspace, capsys)
+        tasks = workspace / ".orko/demo-topic/tasks.md"
+        tasks.write_text(tasks.read_text().replace(
+            "- Create: `orko/scripts/orko.py` (from", "- Create: `uv.lock` (from", 1))
+        self._write(workspace, "uv.lock", "lock\n")
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        code, out = self._cd(workspace, capsys)
+        assert code == 0, out
+        assert "diff-empty" not in out and "diff-outside-allowlist" not in out
+
+    def test_worktree_paths_reports_both_sides_of_a_rename(self, workspace):
+        # `-z` spends a second NUL-terminated field on a rename's source, and
+        # the source is a change too: the delivery moved the file.
+        subprocess.run(["git", "-C", str(workspace / "code"), "mv",
+                        "CHANGELOG.md", "NOTES.md"], check=True)
+        paths = orko.worktree_paths(workspace / "code")
+        assert "NOTES.md" in paths and "CHANGELOG.md" in paths
 
     def test_a_deleted_listed_file_counts_as_changed(self, workspace, capsys, monkeypatch):
         self._task_run(workspace, capsys)
