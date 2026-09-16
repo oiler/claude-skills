@@ -1957,7 +1957,11 @@ def cmd_commit(args: argparse.Namespace) -> int:
                   file=sys.stderr)
     staged = [p for p in staged + list(args.path) if keeps(p)]
     if not staged:
-        print(f"orko: nothing to stage in {args.repo}", file=sys.stderr)
+        # Naming the escape hatch here, because exit 2 is a stop everywhere
+        # else: `record` logs no path under `code/src`, so the step-6 commit of
+        # an implementer's work has nothing recorded to stage.
+        print(f"orko: nothing to stage in {args.repo}; pass --path <repo-relative "
+              "file> for files the run wrote outside the record", file=sys.stderr)
         return 2
     result = _git(repo, "add", "--", *staged)
     if result.returncode != 0:

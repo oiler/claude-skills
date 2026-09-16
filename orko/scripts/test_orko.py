@@ -1776,7 +1776,12 @@ class TestCommit:
         assert orko.main(["commit", "code", "--slug", "demo-topic", "--message", "m",
                           "--path", "nope.py", "--workspace", str(workspace)]) == 2
         err = capsys.readouterr().err
-        assert "orko: skipping nope.py" in err and "nothing to stage" in err
+        assert "orko: skipping nope.py" in err
+        # The refusal names the escape hatch: exit 2 is a stop everywhere else
+        # in the skill, and step 6's own commit needs `--path` for code the run
+        # wrote outside the record.
+        assert ("orko: nothing to stage in code; pass --path <repo-relative file> "
+                "for files the run wrote outside the record") in err
 
     def test_nothing_to_stage_exits_2(self, workspace, capsys):
         init_run(workspace, capsys)
