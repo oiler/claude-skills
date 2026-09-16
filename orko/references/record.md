@@ -114,7 +114,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "<subject>"
 ```
 
-`commit docs` stages the run's own record paths in `docs/` plus every `touched` path the `record` commands logged there: `STATUS.md`, the version README, the changelog. `commit code` does the same for `code/`. Add an extra repo-relative path with `--path` (repeatable) when a run wrote something outside the record, such as `docs/adr/` files in the code repository. Nothing else is staged, and the commit is scoped to those paths, so a file the user had already staged in that repository stays staged rather than riding along under orko's message.
+`commit docs` stages the run's own record paths in `docs/` plus every `touched` path the `record` commands logged there: `STATUS.md`, the version README, the changelog. `commit code` does the same for `code/`. Add an extra repo-relative path with `--path` (repeatable) when a run wrote something outside the record, such as `docs/adr/` files in the code repository. Code an implementer wrote is the implementer's own commit, not this one: `commit code` has nothing recorded to stage for it, and it refuses with exit `2` rather than sweeping the tree. Nothing else is staged, and the commit is scoped to those paths, so a file the user had already staged in that repository stays staged rather than riding along under orko's message.
 
 The message the script builds is your `--message` subject, then a `Refs:` line naming every ID the run has minted, then the attribution trailers recorded at `init --trailer` (repeatable), verbatim. After the commit, the script records a `hash <path> <sha256>` ledger line for every file it staged.
 
@@ -127,7 +127,7 @@ Git calls you make yourself use `git -C docs` and `git -C code`, never a bare `g
 `record close --summary "<text>"` with zero or more `--changelog "<section>: <text>"` entries, where `<section>` is `Added`, `Changed`, `Fixed`, `Removed`, or `Security`:
 
 - Sets `STATUS.md` `as_of` and rewrites the run's In progress line to "awaiting acceptance".
-- Inserts each changelog entry under its subheading in the Unreleased section of both `code/CHANGELOG.md` and `docs/versions/<v>/CHANGELOG.md`. Changelog and STATUS lines cite only the SPEC and PLAN IDs: a reader asking what shipped is not served by a review or decision ID.
+- Inserts each changelog entry under its subheading in the Unreleased section of both `code/CHANGELOG.md` and `docs/versions/<v>/CHANGELOG.md`. Changelog and STATUS lines cite only the SPEC and PLAN IDs: a reader asking what shipped is not served by a review or decision ID. The script appends `(SPEC-NNN, PLAN-NNN)` to every entry itself, so the `--changelog` text must not cite them again.
 - Refreshes the version README index Status column from each record's current frontmatter.
 - Writes `<run_dir>/pr-docs.md` and `<run_dir>/pr-code.md` from each repository's `.github/PULL_REQUEST_TEMPLATE.md`, with the summary under Purpose and every minted ID listed under Artifacts.
 

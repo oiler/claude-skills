@@ -52,7 +52,7 @@ git -C docs checkout -b orko/<slug>
 git -C code checkout -b orko/<slug>
 ```
 
-On a resume the branches exist, so use `git -C docs checkout orko/<slug>` and the same for `code`; `checkout -b` fails on an existing branch. Then commit the In progress line `init` wrote, because `preflight` reports `docs-dirty` while it is uncommitted:
+On a resume the branches exist, so use `git -C docs checkout orko/<slug>` and the same for `code`; `checkout -b` fails on an existing branch. Then commit the In progress line `init` wrote, because `preflight` reports `docs-dirty` while it is uncommitted. On a resume `init` writes no line, so there is nothing to commit: skip this `commit docs` and go from the checkout straight to `preflight`, because `commit docs` with nothing staged exits `2`.
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "Start <topic>" --workspace <path>
@@ -61,7 +61,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py preflight --slug <slug> --workspace <
 
 `preflight` checks in code what prose used to ask you to check, and prints its findings in this order:
 
-`uv-missing` says `uv` is not on PATH, and every script call needs it. `workspace-invalid: <name>` names `docs-not-a-repo`, `code-not-a-repo`, `versions-missing`, or `spec-check-missing`. `docs-dirty` and `code-dirty` mean modified tracked files. Untracked files are ignored by preflight, because a reviewer seat that ran the test suite leaves caches and lockfiles behind and `commit` cannot sweep them in; `check delivery` still counts them, because a Codex delivery that left a file unstaged is incomplete. `docs-on-default-branch` and `code-on-default-branch` mean a build is sitting where it must never run. `dossier-inactive` means the version dossier is neither `active` nor `proposed`. `spec-not-accepted`, on a resume at step 5 only, means a human has not set `status: accepted`. `codex-unavailable: run /codex:setup (<detail>)`, with executor `codex` only, means the companion reports the CLI is not ready. `blocked-escalation` means `escalations.md` is non-empty, and only oiler empties it.
+`uv-missing` says `uv` is not on PATH, and every script call needs it. `workspace-invalid: <name>` names `docs-not-a-repo`, `code-not-a-repo`, `versions-missing`, or `spec-check-missing`. `docs-dirty` and `code-dirty` mean modified tracked files. Untracked files are ignored by preflight, because a reviewer seat that ran the test suite leaves caches and lockfiles behind and `commit` cannot sweep them in; `check delivery` ignores them for the same reason. `docs-on-default-branch` and `code-on-default-branch` mean a build is sitting where it must never run. `dossier-inactive` means the version dossier is neither `active` nor `proposed`. `spec-not-accepted`, on a resume at step 5 only, means a human has not set `status: accepted`. `codex-unavailable: run /codex:setup (<detail>)`, with executor `codex` only, means the companion reports the CLI is not ready. `blocked-escalation` means `escalations.md` is non-empty, and only oiler empties it.
 
 Exit `1` prints one finding per line and stops intake: fix the named condition and run it again. Exit `2` means the run could not be loaded, which is a bad slug or an unresolvable workspace, not an artifact defect. Run `preflight` after the branch switch and the startup commit, not before: run earlier, it reports the two default-branch findings and the `docs-dirty` line `init` itself wrote, on every fresh run. Two findings are resume-only and pass on a fresh run: `spec-not-accepted` fires only once the run reaches step 5, and `blocked-escalation` only once `escalations.md` could exist. On a fresh run their exit `0` means "not yet applicable", not "checked and clean". A clean run prints `preflight: ok (<n> checks)`, so a passing Codex readiness probe is visible rather than silent.
 
@@ -204,7 +204,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check spec SPEC-NNN --slug <slug> --r
 
 `preflight` at step 5 confirms the spec is `accepted` and re-records its hash, so the human's edit is not reported as tampering on the next write. Report the `check spec` output, which the workspace `AGENTS.md` asks for before implementation begins.
 
-**Executor `claude`.** Invoke `superpowers:subagent-driven-development` with the `tasks.md` path. It owns the task loop, its own ledger, per-task review, and its model selection; do not duplicate or override any of it.
+**Executor `claude`.** Invoke `superpowers:subagent-driven-development` with the `tasks.md` path. It owns the task loop, its own ledger, per-task review, and its model selection; do not duplicate or override any of it. Inside step 5 it runs that per-task loop only, an implementer plus a task review per task. orko's step 6 is the whole-branch review and step 7 owns the pull requests, so do not run SDD's Final Review, its fix wave, its workspace deletion, or `superpowers:finishing-a-development-branch`; record `ledger 5 complete` once the last task's review is clean. SDD's own ledger lands in `<the nearest git root above the workspace>/.superpowers/sdd/tasks/`, because the orko workspace is not a repository and every run's plan file is named `tasks.md`, so runs collide there. Leave it where it lands and never delete it from inside a run.
 
 **Executor `codex`.** Run the loop in [codex.md](codex.md), once per task, starting at the `next_task` that `status` reports. It records `ledger 5.<n> dispatched --commit <sha>` and `ledger 5.<n> complete` per task, and those sub-steps do not advance the run.
 
@@ -218,18 +218,19 @@ A requirement whose plan row says `Performed by: owner` is reported as pending a
 
 ### 6 Code review
 
-The diff range is the branch's own work in the code repository. Read the default branch ref, then the point the branch left it. `symbolic-ref` prints `origin/<name>`; when it prints nothing, fall back to `master`:
+The diff range is the branch's own work in the code repository. Read the default branch ref, then the point the branch left it. `symbolic-ref` prints `origin/<name>` when a remote sets one, and exits `128` with `fatal: ref refs/remotes/origin/HEAD is not a symbolic ref` when it does not. Read that exit as unset, not as a stop: it is the one non-zero git exit in this skill that is not one. Fall back to `master`, or `main` where that is the repository's default:
 
 ```bash
 git -C code symbolic-ref --short refs/remotes/origin/HEAD
 git -C code merge-base <origin/default> HEAD
+mkdir -p .orko/<slug>/findings/6 && git -C code diff <base>...HEAD > .orko/<slug>/findings/6/branch.diff
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 6 dispatched --slug <slug> --commit <base> --workspace <path>
 ```
 
-Every seat reviews `git -C code diff <base>..HEAD`, the same range. Dispatch, in one message:
+Every seat reviews `git -C code diff <base>..HEAD`, the same range, and reads it from `.orko/<slug>/findings/6/branch.diff`, which you write before dispatching. Name four things in every step-6 seat prompt: that file, the code repository's absolute path, the base sha, and the head sha. The two tool-running seats' prompts are yours to write, on `prompt seat`'s shape — the FINDINGS schema, substantiate every claim, write then return, never sign — because no script command builds them yet. A tool that reports a different repository, a different base, or an unreachable sha has not reviewed the range: the seat records that in its Confidence line as a failed tool run, reviews the diff file directly, and says so, and you name any such substitution in `REVIEW-NNN`'s Scope and method. Dispatch, in one message:
 
-- one `general-purpose` seat at `opus` whose job is to run `/code-review` over that range,
-- one `general-purpose` seat at `opus` whose job is to run `/security-review` over that range,
+- one `general-purpose` seat at `opus` that runs `/code-review` with the diff file as its target,
+- one `general-purpose` seat at `opus` that runs `/security-review` from inside the code repository,
 - any domain seats the branch warrants, at `sonnet`, dispatched through `prompt seat`.
 
 A domain seat needs a context file. Write it to `<context_dir>/<seat>.md` first, carrying the diff range, the paths to look at, the goal, and who the work is for, then:
@@ -238,7 +239,7 @@ A domain seat needs a context file. Write it to `<context_dir>/<seat>.md` first,
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt seat <slug> --seat <name> --question "<one question>" --context-file <run_dir>/context/<name>.md --workspace <path>
 ```
 
-Findings land in `findings/6/`. Mint the review over them with `record review --role code --reviews SPEC-NNN --revision <code sha> --from-findings .orko/<slug>/findings/6`, reading the SHA from `git -C code rev-parse HEAD` first. Decide every finding as in step 2, with one difference: an accepted finding is fixed on the branch by dispatching an implementer, or by re-dispatching Codex, not by you editing code. The conductor decides and records; it does not implement. A deferred finding keeps `Disposition: open` and gets a `record risk` bullet under the version README's risks, so it outlives the run. Two duties before you close the step. Check whether `code/ARCHITECTURE.md` or `code/DESIGN.md` describes something the branch changed materially, and update it. Write an `ADR-NNN` with `record adr` for any consequential in-bounds technical choice the implementation made; an in-bounds choice recorded as an ADR is not an escalation and does not stop the run. When a finding does escalate, write `escalations.md`, run `commit docs`, then add `ledger 6 escalated --slug <slug>` after the `complete` line, and stop.
+Findings land in `findings/6/`. Mint the review over them with `record review --role code --reviews SPEC-NNN --revision <code sha> --from-findings .orko/<slug>/findings/6`, reading the SHA from `git -C code rev-parse HEAD` first. Decide every finding as in step 2, with one difference: an accepted finding is fixed on the branch by dispatching an implementer, or by re-dispatching Codex, not by you editing code. The conductor decides and records; it does not implement. The implementer commits its own changes on the branch with the run's trailers and reports the sha, exactly as the task implementers do; `commit code` at this step is for what the script minted, an `ADR-NNN`, and for anything a `record` command touched, so pass `commit code --slug <slug> --message "<subject>" --path <file> --path <file> --workspace <path>` for code the run wrote outside the record. A finding escalates only when the work cannot be complete without acting on it and acting on it would leave the boundaries. Every other out-of-bounds finding is deferred: it keeps `Disposition: open` and gets a `record risk` bullet under the version README's risks, so it outlives the run. Two duties before you close the step. Check whether `code/ARCHITECTURE.md` or `code/DESIGN.md` describes something the branch changed materially, and update it. Write an `ADR-NNN` with `record adr` for any consequential in-bounds technical choice the implementation made; an in-bounds choice recorded as an ADR is not an escalation and does not stop the run. When a finding does escalate, write `escalations.md`, run `commit docs`, then add `ledger 6 escalated --slug <slug>` after the `complete` line, and stop.
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "<subject>" --workspace <path>
@@ -252,6 +253,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 6 complete --slug <slug> --wor
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py record close --slug <slug> --summary "<text>" --changelog "Added: <text>" --changelog "Fixed: <text>" --workspace <path>
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "Close <topic>" --workspace <path>
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "Close <topic>" --workspace <path>
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 7 complete --slug <slug> --workspace <path>
 ```
 
 `record close` sets `STATUS.md` `as_of` and rewrites the run's In progress line to "awaiting acceptance", inserts each `--changelog` entry under its subheading in both changelogs, refreshes the version README index, and writes the two pull request bodies. `--changelog` is repeatable and its section is `Added`, `Changed`, `Fixed`, `Removed`, or `Security`. It is idempotent, so a rerun after an interruption is safe.
@@ -263,10 +265,9 @@ git -C docs push -u origin orko/<slug>
 git -C code push -u origin orko/<slug>
 cd docs && gh pr create --title "<topic> (SPEC-NNN)" --body-file ../.orko/<slug>/pr-docs.md && cd ..
 cd code && gh pr create --title "<topic> (SPEC-NNN)" --body-file ../.orko/<slug>/pr-code.md && cd ..
-uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 7 complete --slug <slug> --workspace <path>
 ```
 
-Both `gh` lines end in `cd ..` for a reason: `cd` persists across Bash calls, so a `cd docs` that never returns leaves every later `git -C docs` and every relative body-file path resolving against the wrong directory. Push first: `gh pr create` on an unpushed branch asks the question interactively, and an interactive question inside a Bash call stalls the run with no visible prompt. If a push fails for want of a remote or credentials, or `gh` is missing or unauthenticated, nothing is lost: the body files are already written. Report both paths, both push commands, and both `gh` commands for the human to run.
+Both `gh` lines end in `cd ..` for a reason: `cd` persists across Bash calls, so a `cd docs` that never returns leaves every later `git -C docs` and every relative body-file path resolving against the wrong directory. Push first: `gh pr create` on an unpushed branch asks the question interactively, and an interactive question inside a Bash call stalls the run with no visible prompt. `ledger 7 complete` is recorded with the two close commits, before the pushes, so a barred or failed push leaves the ledger line standing and the publication pending. If a push fails for want of a remote or credentials, or `gh` is missing or unauthenticated, nothing is lost: the body files are already written. Report both paths, both push commands, and both `gh` commands to the human as pending.
 
 ## What check spec and check tasks require
 
