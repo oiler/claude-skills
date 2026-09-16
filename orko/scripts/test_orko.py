@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -137,6 +138,19 @@ class TestInit:
         init_run(workspace, capsys)
         _, payload = init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
         assert payload["resumed"] is True and payload["executor"] == "claude"
+
+    def test_resume_says_so_when_a_passed_trailer_differs(self, workspace, capsys):
+        init_run(workspace, capsys)
+        capsys.readouterr()
+        code = orko.main(["init", "build", "Demo Topic", "--workspace", str(workspace),
+                          "--owner", "oiler", "--boundaries", "code/ only",
+                          "--trailer", "Claude-Session: https://example.invalid/other"])
+        captured = capsys.readouterr()
+        assert code == 0
+        assert "trailers differ from the ledger's; the recorded pair stands" in captured.err
+        assert json.loads(captured.out)["trailers"] == [
+            "Co-Authored-By: T <t@example.invalid>",
+            "Claude-Session: https://example.invalid/s"]
 
     def test_mode_collision_is_refused(self, workspace, capsys):
         init_run(workspace, capsys)
@@ -573,6 +587,21 @@ class TestLedgerSubSteps:
                                    "path": "docs/versions/0.1/specs/SPEC-001-demo-topic.md",
                                    "sha": "a" * 64}]
 
+    def test_status_reports_the_dispatched_base_of_the_open_sub_step(
+        self, workspace, capsys
+    ):
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        for step in ("0", "1", "2", "3", "4"):
+            orko.main(["ledger", step, "complete", "--slug", "demo-topic",
+                       "--workspace", str(workspace)])
+        orko.main(["ledger", "5.1", "dispatched", "--commit", "f" * 40,
+                   "--slug", "demo-topic", "--workspace", str(workspace)])
+        capsys.readouterr()
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["next_step"] == 5 and payload["next_task"] == 1
+        assert payload["dispatched_base"] == "f" * 40
+
     def test_touched_paths_are_deduplicated_in_order(self, workspace, capsys):
         _, payload = init_run(workspace, capsys, "build", "Demo Topic",
                               "--executor", "codex")
@@ -616,6 +645,13 @@ class TestCheckTasksCLI:
         target.write_text(PLAN_OK + "\nTBD\n")
         assert orko.main(["check", "tasks", str(target)]) == 1
         assert "tasks.md:" in capsys.readouterr().out
+
+    def test_workspace_flag_is_accepted(self, tmp_path, capsys):
+        # Every orko.py call in build.md carries `--workspace <path>` uniformly.
+        target = tmp_path / "tasks.md"
+        target.write_text(PLAN_OK)
+        assert orko.main(["check", "tasks", str(target),
+                          "--workspace", str(tmp_path)]) == 0
 
     def test_missing_file_exits_two(self, tmp_path, capsys):
         assert orko.main(["check", "tasks", str(tmp_path / "nope.md")]) == 2
@@ -904,11 +940,34 @@ class TestPromptTask:
         capsys.readouterr()
         assert orko.main(["prompt", "task", "demo-topic", "--task", "1", "--workspace", str(workspace)]) == 0
         text = capsys.readouterr().out
-        assert text.startswith("--background --write --fresh --model gpt-5.6-sol --effort high\n")
+        assert text.startswith(f"--background --write --fresh --cwd {workspace / 'code'} "
+                               "--model gpt-5.6-sol --effort high\n")
         for needle in ("SPEC-001", "PLAN-001", "code/ only", str(workspace / "code"), "orko/demo-topic",
                        "Co-Authored-By: T", "Claude-Session:", "### Task 1", "docs/testing/README.md"):
             assert needle in text, needle
         assert "{{" not in text
+
+    def test_task_prompt_names_the_code_repository_as_the_job_cwd(self, workspace, capsys):
+        # The companion keys the job store and the sandbox root off `--cwd`; a
+        # `cd` in the conductor's shell never reaches the dispatched subagent.
+        self._codex_run(workspace, capsys)
+        capsys.readouterr()
+        orko.main(["prompt", "task", "demo-topic", "--task", "1",
+                   "--workspace", str(workspace)])
+        flags = capsys.readouterr().out.split("\n")[0]
+        assert f"--cwd {workspace / 'code'}" in flags
+        assert flags.count("--cwd") == 1
+
+    def test_task_prompt_puts_the_traceability_row_inside_the_boundaries(
+        self, workspace, capsys
+    ):
+        self._codex_run(workspace, capsys)
+        capsys.readouterr()
+        orko.main(["prompt", "task", "demo-topic", "--task", "1",
+                   "--workspace", str(workspace)])
+        text = capsys.readouterr().out
+        assert "docs/testing/README.md in the code repository is always inside them" in text
+        assert "no lockfiles" in text
 
     def test_resume_attempt_names_failure(self, workspace, capsys):
         self._codex_run(workspace, capsys)
@@ -980,6 +1039,20 @@ class TestPromptTask:
         text = (Path(orko.__file__).parent / "fixtures/tasks.md").read_text().replace("**Acceptance:**", "**Accept:**")
         p = tmp_path / "t.md"; p.write_text(text)
         assert orko.main(["check", "tasks", str(p)]) == 1
+
+    @pytest.mark.parametrize("line,expected", [
+        ("**Acceptance:** `uv run pytest -q` reports 7 passed.", "uv run pytest -q"),
+        ("**Acceptance:** uv run pytest -q", "uv run pytest -q"),
+        ("**Acceptance:**", None),
+    ])
+    def test_check_tasks_and_parse_tasks_read_the_same_command(
+        self, tmp_path, line, expected
+    ):
+        text = PLAN_OK.replace("**Acceptance:** `uv run pytest -q`", line)
+        target = tmp_path / "t.md"
+        target.write_text(text)
+        assert orko.main(["check", "tasks", str(target)]) == (0 if expected else 1)
+        assert orko.parse_tasks(text)[0]["acceptance"] == expected
 
     def test_parse_tasks_reads_files_and_acceptance(self):
         text = (Path(orko.__file__).parent / "fixtures/tasks.md").read_text()
@@ -1145,10 +1218,10 @@ class TestPreflight:
         init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
         orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m", "--path", "STATUS.md", "--workspace", str(workspace)])
         self._branch(workspace)
-        monkeypatch.setattr(orko, "codex_setup_ready", lambda: (False, "codex missing"))
+        monkeypatch.setattr(orko, "codex_setup_ready", lambda code: (False, "codex missing"))
         code, out = self._pf(workspace, capsys)
         assert code == 1 and "codex-unavailable: run /codex:setup" in out
-        monkeypatch.setattr(orko, "codex_setup_ready", lambda: (True, "ok"))
+        monkeypatch.setattr(orko, "codex_setup_ready", lambda code: (True, "ok"))
         assert self._pf(workspace, capsys)[0] == 0
 
     def test_codex_setup_without_node_is_a_finding_not_a_traceback(self, monkeypatch, tmp_path):
@@ -1160,8 +1233,23 @@ class TestPreflight:
             raise FileNotFoundError("node")
 
         monkeypatch.setattr(orko.subprocess, "run", no_node)
-        ready, detail = orko.codex_setup_ready()
+        ready, detail = orko.codex_setup_ready(tmp_path)
         assert ready is False and detail == "node is not on PATH"
+
+    def test_codex_setup_probe_names_the_code_repository(self, workspace, monkeypatch):
+        # The probe and the dispatch must address the same workspace root.
+        companion = workspace / "codex-companion.mjs"
+        companion.write_text("")
+        monkeypatch.setattr(orko, "codex_companion_path", lambda: companion)
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"ready": True}), "")
+
+        monkeypatch.setattr(orko.subprocess, "run", fake_run)
+        orko.codex_setup_ready(workspace / "code")
+        assert seen["argv"][-2:] == ["--cwd", str(workspace / "code")]
 
     def test_blocked_escalation(self, workspace, capsys):
         _, payload = init_run(workspace, capsys)
@@ -1917,9 +2005,38 @@ class TestCheckDelivery:
     def test_fails_tree_dirty(self, workspace, capsys, monkeypatch):
         self._task_run(workspace, capsys)
         self._commit_task_file(workspace)
-        (workspace / "code/stray").write_text("s")
+        # A tracked file left modified: the delivery is genuinely unfinished.
+        (workspace / "code/CHANGELOG.md").write_text("edited\n")
         monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
         assert "tree-dirty" in self._cd(workspace, capsys)[1]
+
+    def test_untracked_files_do_not_fail_delivery(self, workspace, capsys, monkeypatch):
+        # The acceptance command itself leaves `.venv/`, `uv.lock`, and caches
+        # behind, so untracked files cannot be a delivery finding.
+        self._task_run(workspace, capsys)
+        self._commit_task_file(workspace)
+        (workspace / "code/uv.lock").write_text("lock\n")
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        code, out = self._cd(workspace, capsys)
+        assert "tree-dirty" not in out
+        assert code == 0, out
+
+    def test_acceptance_announcement_precedes_the_command_output(
+        self, workspace, capsys
+    ):
+        # Out of process, on a real pipe: the defect is buffering, and pytest's
+        # own capture writes through, so nothing in process can show it.
+        self._task_run(workspace, capsys)
+        self._commit_task_file(workspace)
+        tasks = workspace / ".orko/demo-topic/tasks.md"
+        tasks.write_text(tasks.read_text().replace(
+            "**Acceptance:** `uv run pytest -q`", "**Acceptance:** `printf ran`", 1))
+        out = subprocess.run(
+            [sys.executable, orko.__file__, "check", "delivery", "--slug", "demo-topic",
+             "--task", "1", "--workspace", str(workspace)],
+            capture_output=True, text=True).stdout
+        assert "ran" in out
+        assert out.startswith("acceptance: printf ran")
 
     def test_fails_diff_empty(self, workspace, capsys, monkeypatch):
         self._task_run(workspace, capsys)
@@ -1965,7 +2082,7 @@ class TestCodexWait:
         init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
         calls = []
 
-        def fake(args):
+        def fake(args, cwd):
             calls.append(args)
             payload = ({"status": "completed"} if args[0] == "status"
                        else {"status": "completed", "output": "done"})
@@ -1982,7 +2099,7 @@ class TestCodexWait:
         init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
         calls = []
 
-        def fake(args):
+        def fake(args, cwd):
             calls.append(args)
             return subprocess.CompletedProcess(args, 0, json.dumps({"status": "completed"}), "")
 
@@ -1994,10 +2111,55 @@ class TestCodexWait:
                    "--timeout-ms", "5000", "--workspace", str(workspace)])
         assert calls[2][calls[2].index("--timeout-ms") + 1] == "5000"
 
+    def test_both_companion_calls_name_the_code_repository(
+        self, workspace, capsys, monkeypatch
+    ):
+        # The companion's job store keys off the git root of `--cwd`; a lookup
+        # from anywhere else reports a running job as missing.
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        calls = []
+        monkeypatch.setattr(
+            orko, "run_companion",
+            lambda args, cwd: calls.append((args, cwd)) or subprocess.CompletedProcess(
+                args, 0, json.dumps({"job": {"status": "completed"}}), ""))
+        orko.main(["codex", "wait", "job-1", "--slug", "demo-topic",
+                   "--workspace", str(workspace)])
+        assert [call[1] for call in calls] == [workspace / "code"] * 2
+        assert [call[0][0] for call in calls] == ["status", "result"]
+
+    def test_run_companion_appends_the_cwd_option(self, monkeypatch, tmp_path):
+        companion = tmp_path / "codex-companion.mjs"
+        companion.write_text("")
+        monkeypatch.setattr(orko, "codex_companion_path", lambda: companion)
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        monkeypatch.setattr(orko.subprocess, "run", fake_run)
+        orko.run_companion(["status", "job-1"], tmp_path / "code")
+        assert seen["argv"][-2:] == ["--cwd", str(tmp_path / "code")]
+
+    def test_envelope_status_decides_the_exit_code(
+        self, workspace, capsys, monkeypatch
+    ):
+        # `result --json` returns `{"job": ..., "storedJob": ...}`; the status
+        # lives inside `job`, not at the top level.
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        for status, expected in (("completed", 0), ("failed", 1)):
+            monkeypatch.setattr(
+                orko, "run_companion",
+                lambda a, cwd, status=status: subprocess.CompletedProcess(
+                    a, 0, json.dumps({"job": {"status": status, "threadId": "t"},
+                                      "storedJob": {"status": status}}), ""))
+            assert orko.main(["codex", "wait", "job-1", "--slug", "demo-topic",
+                              "--workspace", str(workspace)]) == expected
+
     def test_failed_job_exits_1(self, workspace, capsys, monkeypatch):
         init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
         monkeypatch.setattr(orko, "run_companion",
-                            lambda a: subprocess.CompletedProcess(a, 0, json.dumps({"status": "failed"}), ""))
+                            lambda a, cwd: subprocess.CompletedProcess(a, 0, json.dumps({"status": "failed"}), ""))
         assert orko.main(["codex", "wait", "job-1", "--slug", "demo-topic",
                           "--workspace", str(workspace)]) == 1
 
@@ -2009,6 +2171,6 @@ class TestCodexWait:
 
     def test_unknown_run_exits_2(self, workspace, capsys, monkeypatch):
         monkeypatch.setattr(orko, "run_companion",
-                            lambda a: subprocess.CompletedProcess(a, 0, json.dumps({"status": "completed"}), ""))
+                            lambda a, cwd: subprocess.CompletedProcess(a, 0, json.dumps({"status": "completed"}), ""))
         assert orko.main(["codex", "wait", "job-1", "--slug", "nope",
                           "--workspace", str(workspace)]) == 2

@@ -133,9 +133,28 @@ TASK_HEADING_RE = re.compile(r"^###\s+Task\s+\d+\s*:", re.MULTILINE)
 # `[ \t]*`, never `\s*`: `\s` spans newlines, so an empty `**Acceptance:**` line
 # would harvest the next line as the command and hand `**Interfaces:**` to a
 # `--write` Codex dispatch as something to run.
-ACCEPTANCE_RE = re.compile(r"^\*\*Acceptance:\*\*[ \t]*`?(?P<cmd>[^`\n]+)`?[ \t]*$",
-                           re.MULTILINE)
+ACCEPTANCE_LINE_RE = re.compile(r"^\*\*Acceptance:\*\*[ \t]*(?P<rest>[^\n]*)$",
+                                re.MULTILINE)
+ACCEPTANCE_QUOTED_RE = re.compile(r"^`(?P<cmd>[^`\n]+)`")
 FILES_RE = re.compile(r"^-\s+(?:Create|Modify|Test|Delete):\s*`(?P<path>[^`]+)`", re.MULTILINE)
+
+
+def acceptance_command(block: str) -> str | None:
+    """The one command on a task block's `**Acceptance:**` line, or None.
+
+    One reader for `check tasks` and for the dispatch, so a line that passes
+    the gate is always dispatchable. Three shapes: a backticked command with
+    optional prose after the closing backtick, a bare command with no
+    backticks, and an empty line.
+    """
+    match = ACCEPTANCE_LINE_RE.search(block)
+    if match is None:
+        return None
+    rest = match.group("rest").strip()
+    quoted = ACCEPTANCE_QUOTED_RE.match(rest)
+    if quoted:
+        return quoted.group("cmd").strip() or None
+    return rest or None
 
 
 def parse_tasks(text: str) -> list[dict]:
@@ -149,11 +168,10 @@ def parse_tasks(text: str) -> list[dict]:
     for index, head in enumerate(heads):
         end = heads[index + 1].start() if index + 1 < len(heads) else len(text)
         block = text[head.start():end].rstrip() + "\n"
-        acceptance = ACCEPTANCE_RE.search(block)
         tasks.append(dict(
             n=int(head.group("n")), title=head.group("title").strip(), body=block,
             files=[match.group("path").split(":")[0] for match in FILES_RE.finditer(block)],
-            acceptance=acceptance.group("cmd").strip() if acceptance else None,
+            acceptance=acceptance_command(block),
         ))
     return tasks
 
@@ -186,16 +204,23 @@ def validate_plan(text: str) -> list[Finding]:
     if not task_starts:
         findings.append(Finding(1, "no '### Task N:' task block found"))
 
+    # `strip_code` preserves the line count, so a block's line span indexes the
+    # raw text too. The acceptance line is read raw: its command lives in
+    # backticks, which the scan has blanked.
+    raw_lines = text.split("\n")
     for position, (line_no, offset) in enumerate(task_starts):
         end = task_starts[position + 1][1] if position + 1 < len(task_starts) else len(scanned)
+        end_line = (task_starts[position + 1][0] if position + 1 < len(task_starts)
+                    else len(raw_lines) + 1)
         block = scanned[offset:end]
+        raw_block = "\n".join(raw_lines[line_no - 1:end_line - 1])
         if "**Files:**" not in block:
             findings.append(Finding(line_no, "task block has no '**Files:**' subsection"))
         if not re.search(r"^\s*-\s*\[ \]\s*\*\*Step", block, re.MULTILINE):
             findings.append(Finding(line_no, "task block has no '- [ ] **Step' checkbox"))
         # The Codex loop dispatches one command per task and judges delivery on
         # its exit code. A task without one has no definition of done.
-        if not ACCEPTANCE_RE.search(block):
+        if acceptance_command(raw_block) is None:
             findings.append(Finding(line_no, "task block has no '**Acceptance:**' line"))
 
     return sorted(findings)
@@ -559,6 +584,12 @@ def cmd_init(args: argparse.Namespace) -> int:
             return 2
         resumed = True
         header = existing
+        # The header's trailers travel verbatim into every Codex commit. A
+        # resume that is handed different ones keeps the recorded pair, and
+        # says so rather than letting a stale session URL ship silently.
+        if args.trailer and list(args.trailer) != existing["trailers"]:
+            print("orko: trailers differ from the ledger's; the recorded pair stands",
+                  file=sys.stderr)
         paths = compute_paths(ws, slug, existing["date"])
     else:
         header = dict(mode=args.mode, topic=args.topic, slug=slug, date=date,
@@ -710,6 +741,12 @@ def _describe_run(ws: Path, slug: str) -> dict | None:
     entries = _ledger_entries(ledger)
     next_step = _next_step(ledger, header["mode"])
     steps = MODES[header["mode"]]
+    task = next_task(ledger)
+    # The Codex loop only ever writes `5.<n>` lines, so a resume of step 5 asks
+    # about the open sub-step before falling back to the whole step.
+    base = _dispatched_base(entries, next_step)
+    if next_step == 5 and header["executor"] == "codex":
+        base = _dispatched_base(entries, f"5.{task}") or base
     return dict(
         compute_paths(ws, slug, header["date"]),
         **header,
@@ -718,8 +755,8 @@ def _describe_run(ws: Path, slug: str) -> dict | None:
         # the intake step as already done.
         next_step_name=steps.get(next_step) if next_step is not None else None,
         last_status=entries[-1]["status"] if entries else None,
-        dispatched_base=_dispatched_base(entries, next_step),
-        next_task=next_task(ledger),
+        dispatched_base=base,
+        next_task=task,
         records=[dict(entry, sha=hashes(ledger).get(entry["path"]))
                  for entry in records(ledger)],
     )
@@ -867,7 +904,11 @@ def render_task_prompt(run: dict, task: dict, attempt: str, failure: str | None)
     The routing flags lead the text rather than riding on the dispatching tool's
     parameters, because the `Agent` tool's `model` cannot carry a Codex slug.
     """
-    flags = ["--background", "--write", "--fresh" if attempt == "fresh" else "--resume"]
+    # `--cwd` before any routing override: it is what registers the job under
+    # the code repository's git root, which the conductor's own `cd` cannot do
+    # across the dispatch tool's boundary.
+    flags = ["--background", "--write", "--fresh" if attempt == "fresh" else "--resume",
+             "--cwd", str(run["code"])]
     if run["codex_model"]:
         flags += ["--model", run["codex_model"]]
     if run["codex_effort"]:
@@ -878,7 +919,8 @@ def render_task_prompt(run: dict, task: dict, attempt: str, failure: str | None)
         " ".join(flags), "",
         f"Implement Task {task['n']} of the orko build for {run['topic']}.",
         f"Refs: {spec_id}, {plan_id}. Cite both in the commit message.",
-        f"Boundaries: {run['boundaries']}",
+        f"Boundaries: {run['boundaries']}. docs/testing/README.md in the code "
+        "repository is always inside them; the traceability row below goes there.",
         f"Working directory: {run['code']} (the code repository). Do not touch {run['docs']}.",
         f"Branch: orko/{run['slug']} (already checked out).",
         "",
@@ -890,8 +932,10 @@ def render_task_prompt(run: dict, task: dict, attempt: str, failure: str | None)
     ]
     if failure:
         lines += ["", f"The previous attempt failed: {failure}. Fix that first."]
-    lines += ["", "When the acceptance command passes, commit every change with a message that "
-              "starts with the task title, cites the Refs line, and ends with these trailers verbatim:",
+    lines += ["", "When the acceptance command passes, commit the files this task names plus "
+              "docs/testing/README.md, and nothing else: no caches, no virtual environments, "
+              "no lockfiles the acceptance command created. The message starts with the task "
+              "title, cites the Refs line, and ends with these trailers verbatim:",
               *run["trailers"], "", "Leave the tree clean. Report the commit sha."]
     return "\n".join(lines) + "\n"
 
@@ -1087,14 +1131,18 @@ def codex_companion_path() -> Path | None:
     return hits[-1] if hits else None
 
 
-def codex_setup_ready() -> tuple[bool, str]:
-    """Ask the openai-codex companion whether the CLI is usable right now."""
+def codex_setup_ready(code: Path) -> tuple[bool, str]:
+    """Ask the openai-codex companion whether the CLI is usable right now.
+
+    `code` is the repository the dispatch will name, and the probe asks about
+    that workspace root rather than whichever directory the conductor is in.
+    """
     companion = codex_companion_path()
     if companion is None:
         return False, "openai-codex plugin not installed"
     try:
         result = subprocess.run(
-            ["node", str(companion), "setup", "--json"],
+            ["node", str(companion), "setup", "--json", "--cwd", str(code)],
             capture_output=True, text=True, check=False,
         )
     except FileNotFoundError:
@@ -1108,24 +1156,31 @@ def codex_setup_ready() -> tuple[bool, str]:
     return payload.get("ready") is True, json.dumps(payload.get("codex", {}))
 
 
-def run_companion(args: list[str]) -> subprocess.CompletedProcess:
+def run_companion(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     """One call to the openai-codex companion. Isolated so tests can stand in
-    for a plugin this machine may not have installed."""
+    for a plugin this machine may not have installed.
+
+    Every call carries `--cwd`: the companion keys its job store, the sandbox's
+    writable root, and every `status`/`result` lookup off the git root of that
+    path, so a call made from anywhere else cannot see the job.
+    """
     companion = codex_companion_path()
     if companion is None:
         raise FileNotFoundError("openai-codex plugin not installed")
-    return subprocess.run(["node", str(companion), *args],
+    return subprocess.run(["node", str(companion), *args, "--cwd", str(cwd)],
                           capture_output=True, text=True, check=False)
 
 
 def cmd_codex_wait(args: argparse.Namespace) -> int:
     """Block until a background Codex job settles, then print its result."""
-    if _load_run(args) is None:
+    loaded = _load_run(args)
+    if loaded is None:
         return 2
+    code = Path(loaded[1]["code"])
     try:
         status = run_companion(["status", args.job_id, "--wait",
-                                "--timeout-ms", str(args.timeout_ms), "--json"])
-        result = run_companion(["result", args.job_id, "--json"])
+                                "--timeout-ms", str(args.timeout_ms), "--json"], code)
+        result = run_companion(["result", args.job_id, "--json"], code)
     except FileNotFoundError as error:
         print(f"orko: {error}", file=sys.stderr)
         return 2
@@ -1136,16 +1191,22 @@ def cmd_codex_wait(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
     print(json.dumps(payload, indent=2))
-    return 0 if payload.get("status") == "completed" else 1
+    # `result --json` answers with an envelope, `{"job": ..., "storedJob": ...}`;
+    # the job's own status is inside it, and a top-level read calls every
+    # successful job a failure.
+    job = payload.get("job") if isinstance(payload.get("job"), dict) else payload
+    return 0 if job.get("status") == "completed" else 1
 
 
 def _dirty(repo: Path, untracked: bool = True) -> bool:
     """Working-tree dirt. `untracked=False` counts modified and staged files only.
 
-    Preflight ignores untracked files: a reviewer seat that ran the test suite
-    leaves caches and lockfiles behind, and none of them can reach a commit
-    `commit` makes. `check delivery` still counts them, because a Codex delivery
-    that left a file unstaged is an incomplete delivery.
+    Every caller passes `untracked=False`. A reviewer seat, and `check
+    delivery`'s own acceptance command, leave `.venv/`, `uv.lock`, and caches
+    behind in a repository that need not ignore them, so untracked files cannot
+    be a finding: they are the checker's own droppings. A file Codex forgot to
+    commit shows up instead as missing from the branch diff, which the task
+    reviewers read.
     """
     flags = ["--porcelain"] if untracked else ["--porcelain", "--untracked-files=no"]
     return bool(_git(repo, "status", *flags).stdout.strip())
@@ -1199,7 +1260,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
             # overwrite guard reports the human's own edit as tampering.
             append_ledger(Path(run["ledger"]), f"hash {spec['path']} {sha256_file(path)}")
     if run["executor"] == "codex":
-        ready, detail = codex_setup_ready()
+        ready, detail = codex_setup_ready(Path(run["code"]))
         if not ready:
             findings.append(f"codex-unavailable: run /codex:setup ({detail})")
         checks += 1
@@ -1926,8 +1987,9 @@ def cmd_check_delivery(args: argparse.Namespace) -> int:
         return 2
     code = ws / "code"
     findings: list[str] = []
-    if _dirty(code):
-        findings.append("tree-dirty: uncommitted or untracked files in code/")
+    # Modified and staged only: see `_dirty`.
+    if _dirty(code, untracked=False):
+        findings.append("tree-dirty: uncommitted changes in code/")
     changed = [line for line in
                _git(code, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines() if line]
     if not changed:
@@ -1938,7 +2000,9 @@ def cmd_check_delivery(args: argparse.Namespace) -> int:
     if task["acceptance"]:
         # The acceptance line is model-authored shell run with the conductor's
         # privileges. Printing it is the whole of the visibility this gets.
-        print(f"acceptance: {task['acceptance']}")
+        # `flush=True`: the command writes to the same fd unbuffered, and an
+        # announcement printed after the output it announces is no announcement.
+        print(f"acceptance: {task['acceptance']}", flush=True)
         rc = run_acceptance(task["acceptance"], code)
         if rc != 0:
             findings.append(f"acceptance-failed: exit {rc}")
@@ -1984,6 +2048,9 @@ def build_parser() -> argparse.ArgumentParser:
     check_sub = p_check.add_subparsers(dest="kind", required=True)
     p_ct = check_sub.add_parser("tasks")
     p_ct.add_argument("path")
+    # Accepted and ignored: the validator reads a path, not a run, and every
+    # `orko.py` call in build.md carries `--workspace <path>` uniformly.
+    p_ct.add_argument("--workspace")
     p_ct.set_defaults(func=cmd_check_tasks)
 
     p_cs = check_sub.add_parser("spec")
