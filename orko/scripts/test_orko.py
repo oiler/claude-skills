@@ -152,6 +152,19 @@ class TestInit:
             "Co-Authored-By: T <t@example.invalid>",
             "Claude-Session: https://example.invalid/s"]
 
+    def test_resume_is_silent_when_no_trailer_differs(self, workspace, capsys):
+        init_run(workspace, capsys)
+        base = ["init", "build", "Demo Topic", "--workspace", str(workspace),
+                "--owner", "oiler", "--boundaries", "code/ only"]
+        capsys.readouterr()
+        # A resume passing the recorded pair, and one passing no trailer at all:
+        # the notice is for a differing value, not for every resume.
+        orko.main(base + ["--trailer", "Co-Authored-By: T <t@example.invalid>",
+                          "--trailer", "Claude-Session: https://example.invalid/s"])
+        assert "trailers differ" not in capsys.readouterr().err
+        orko.main(base)
+        assert "trailers differ" not in capsys.readouterr().err
+
     def test_mode_collision_is_refused(self, workspace, capsys):
         init_run(workspace, capsys)
         code, _ = init_run(workspace, capsys, "analysis")
@@ -602,6 +615,17 @@ class TestLedgerSubSteps:
         assert payload["next_step"] == 5 and payload["next_task"] == 1
         assert payload["dispatched_base"] == "f" * 40
 
+    def test_a_codex_run_falls_back_to_the_whole_step_base(self, workspace, capsys):
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        for step in ("0", "1", "2", "3", "4"):
+            orko.main(["ledger", step, "complete", "--slug", "demo-topic",
+                       "--workspace", str(workspace)])
+        orko.main(["ledger", "5", "dispatched", "--commit", "d" * 40,
+                   "--slug", "demo-topic", "--workspace", str(workspace)])
+        capsys.readouterr()
+        orko.main(["status", "demo-topic", "--workspace", str(workspace)])
+        assert json.loads(capsys.readouterr().out)["dispatched_base"] == "d" * 40
+
     def test_touched_paths_are_deduplicated_in_order(self, workspace, capsys):
         _, payload = init_run(workspace, capsys, "build", "Demo Topic",
                               "--executor", "codex")
@@ -935,17 +959,53 @@ class TestPromptTask:
         shutil.copy(Path(orko.__file__).parent / "fixtures/tasks.md", payload["tasks"])
         return payload
 
+    def _prompt_file(self, workspace, n=1) -> Path:
+        return workspace / ".orko/demo-topic/context" / f"task-{n}.md"
+
     def test_task_prompt_carries_every_input(self, workspace, capsys):
         self._codex_run(workspace, capsys)
         capsys.readouterr()
         assert orko.main(["prompt", "task", "demo-topic", "--task", "1", "--workspace", str(workspace)]) == 0
-        text = capsys.readouterr().out
-        assert text.startswith(f"--background --write --fresh --cwd {workspace / 'code'} "
-                               "--model gpt-5.6-sol --effort high\n")
+        out = capsys.readouterr().out
+        prompt = self._prompt_file(workspace)
+        assert out.startswith(
+            f"--background --write --fresh --cwd {workspace / 'code'} "
+            f"--prompt-file {prompt} --model gpt-5.6-sol --effort high\n")
+        text = prompt.read_text(encoding="utf-8")
         for needle in ("SPEC-001", "PLAN-001", "code/ only", str(workspace / "code"), "orko/demo-topic",
-                       "Co-Authored-By: T", "Claude-Session:", "### Task 1", "docs/testing/README.md"):
+                       "Co-Authored-By: T", "Claude-Session:", "### Task 1", "docs/testing/README.md",
+                       "Acceptance: run `uv run pytest -q`", "Leave the tree clean"):
             assert needle in text, needle
         assert "{{" not in text
+
+    def test_stdout_is_the_dispatch_line_and_nothing_the_forwarder_can_mangle(
+        self, workspace, capsys
+    ):
+        # The companion only re-splits a forwarded string in one argv shape, and
+        # that shape joins the prompt's lines with spaces. So the prompt travels
+        # in a file and stdout stays a single flag line plus one sentence.
+        self._codex_run(workspace, capsys)
+        capsys.readouterr()
+        orko.main(["prompt", "task", "demo-topic", "--task", "1",
+                   "--workspace", str(workspace)])
+        out = capsys.readouterr().out
+        assert out.splitlines() == [
+            out.splitlines()[0], "",
+            "Implement Task 1 of the orko build for Demo Topic; "
+            "the task is in the prompt file."]
+        assert "### Task 1" not in out and "Co-Authored-By" not in out
+
+    def test_resume_rewrites_the_prompt_file_with_the_failure(self, workspace, capsys):
+        self._codex_run(workspace, capsys)
+        orko.main(["prompt", "task", "demo-topic", "--task", "1",
+                   "--workspace", str(workspace)])
+        assert "previous attempt failed" not in self._prompt_file(workspace).read_text()
+        capsys.readouterr()
+        orko.main(["prompt", "task", "demo-topic", "--task", "1", "--attempt", "resume",
+                   "--failure", "diff-empty", "--workspace", str(workspace)])
+        text = self._prompt_file(workspace).read_text(encoding="utf-8")
+        assert "The previous attempt failed: diff-empty." in text
+        assert text.count("### Task 1") == 1
 
     def test_task_prompt_names_the_code_repository_as_the_job_cwd(self, workspace, capsys):
         # The companion keys the job store and the sandbox root off `--cwd`; a
@@ -956,6 +1016,7 @@ class TestPromptTask:
                    "--workspace", str(workspace)])
         flags = capsys.readouterr().out.split("\n")[0]
         assert f"--cwd {workspace / 'code'}" in flags
+        assert f"--prompt-file {self._prompt_file(workspace)}" in flags
         assert flags.count("--cwd") == 1
 
     def test_task_prompt_puts_the_traceability_row_inside_the_boundaries(
@@ -965,7 +1026,7 @@ class TestPromptTask:
         capsys.readouterr()
         orko.main(["prompt", "task", "demo-topic", "--task", "1",
                    "--workspace", str(workspace)])
-        text = capsys.readouterr().out
+        text = self._prompt_file(workspace).read_text(encoding="utf-8")
         assert "docs/testing/README.md in the code repository is always inside them" in text
         assert "no lockfiles" in text
 
@@ -974,8 +1035,8 @@ class TestPromptTask:
         capsys.readouterr()
         orko.main(["prompt", "task", "demo-topic", "--task", "1", "--attempt", "resume",
                    "--failure", "acceptance command exited 1", "--workspace", str(workspace)])
-        text = capsys.readouterr().out
-        assert text.startswith("--background --write --resume") and "acceptance command exited 1" in text
+        assert capsys.readouterr().out.startswith("--background --write --resume")
+        assert "acceptance command exited 1" in self._prompt_file(workspace).read_text()
 
     def test_unknown_task_exits_2(self, workspace, capsys):
         self._codex_run(workspace, capsys)
@@ -1044,6 +1105,12 @@ class TestPromptTask:
         ("**Acceptance:** `uv run pytest -q` reports 7 passed.", "uv run pytest -q"),
         ("**Acceptance:** uv run pytest -q", "uv run pytest -q"),
         ("**Acceptance:**", None),
+        # An empty backtick pair reaches `shell=True` as `sh -c ''`, which exits
+        # 0 with nothing run, so the definition of done would vanish.
+        ("**Acceptance:** ``", None),
+        # A bare line with a backticked span in it would run that span as a
+        # command substitution and then run its output.
+        ("**Acceptance:** run `uv run pytest -q` and see 7 passed", None),
     ])
     def test_check_tasks_and_parse_tasks_read_the_same_command(
         self, tmp_path, line, expected
@@ -1053,6 +1120,16 @@ class TestPromptTask:
         target.write_text(text)
         assert orko.main(["check", "tasks", str(target)]) == (0 if expected else 1)
         assert orko.parse_tasks(text)[0]["acceptance"] == expected
+
+    def test_a_fenced_acceptance_line_counts_for_neither_reader(self, tmp_path):
+        # build.md's fence doctrine: a document may document a marker without
+        # containing one, and the dispatch must read what the gate read.
+        text = PLAN_OK.replace("**Acceptance:** `uv run pytest -q`\n",
+                               "```\n**Acceptance:** `uv run pytest -q`\n```\n")
+        target = tmp_path / "t.md"
+        target.write_text(text)
+        assert orko.main(["check", "tasks", str(target)]) == 1
+        assert orko.parse_tasks(text)[0]["acceptance"] is None
 
     def test_parse_tasks_reads_files_and_acceptance(self):
         text = (Path(orko.__file__).parent / "fixtures/tasks.md").read_text()

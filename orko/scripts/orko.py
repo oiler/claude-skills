@@ -92,11 +92,12 @@ class Finding(NamedTuple):
     message: str
 
 
-def strip_code(text: str) -> str:
-    """Blank fenced blocks and inline code spans, preserving line count.
+def strip_fences(text: str) -> str:
+    """Blank fenced blocks, preserving line count and every inline code span.
 
-    Every validator scan runs against this, structural checks included: a
-    document that *documents* a marker in backticks does not *contain* one.
+    What `acceptance_command` reads: the command it must return lives in
+    backticks, so that rule cannot afford `strip_code`, but it still must not
+    see an acceptance line a document only *shows* inside a fence.
     """
     out: list[str] = []
     fence: str | None = None
@@ -111,8 +112,18 @@ def strip_code(text: str) -> str:
                 fence = None
             out.append("")
             continue
-        out.append(INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line))
+        out.append(line)
     return "\n".join(out)
+
+
+def strip_code(text: str) -> str:
+    """Blank fenced blocks and inline code spans, preserving line count.
+
+    Every validator scan runs against this, structural checks included: a
+    document that *documents* a marker in backticks does not *contain* one.
+    """
+    return "\n".join(INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line)
+                     for line in strip_fences(text).split("\n"))
 
 
 PLAN_RED_FLAGS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -145,7 +156,7 @@ def acceptance_command(block: str) -> str | None:
     One reader for `check tasks` and for the dispatch, so a line that passes
     the gate is always dispatchable. Three shapes: a backticked command with
     optional prose after the closing backtick, a bare command with no
-    backticks, and an empty line.
+    backticks, and an empty line. Callers blank the fences first.
     """
     match = ACCEPTANCE_LINE_RE.search(block)
     if match is None:
@@ -154,6 +165,11 @@ def acceptance_command(block: str) -> str | None:
     quoted = ACCEPTANCE_QUOTED_RE.match(rest)
     if quoted:
         return quoted.group("cmd").strip() or None
+    # A bare line holding a backtick is not a command. `run `make test` and
+    # see` reaches `run_acceptance`'s `shell=True` with the span live as a
+    # command substitution, and an empty pair runs nothing and exits 0.
+    if "`" in rest:
+        return None
     return rest or None
 
 
@@ -171,7 +187,7 @@ def parse_tasks(text: str) -> list[dict]:
         tasks.append(dict(
             n=int(head.group("n")), title=head.group("title").strip(), body=block,
             files=[match.group("path").split(":")[0] for match in FILES_RE.finditer(block)],
-            acceptance=acceptance_command(block),
+            acceptance=acceptance_command(strip_fences(block)),
         ))
     return tasks
 
@@ -220,7 +236,7 @@ def validate_plan(text: str) -> list[Finding]:
             findings.append(Finding(line_no, "task block has no '- [ ] **Step' checkbox"))
         # The Codex loop dispatches one command per task and judges delivery on
         # its exit code. A task without one has no definition of done.
-        if acceptance_command(raw_block) is None:
+        if acceptance_command(strip_fences(raw_block)) is None:
             findings.append(Finding(line_no, "task block has no '**Acceptance:**' line"))
 
     return sorted(findings)
@@ -898,25 +914,38 @@ def _task_or_exit(run: dict, n: int) -> dict | None:
     return None
 
 
-def render_task_prompt(run: dict, task: dict, attempt: str, failure: str | None) -> str:
-    """The whole Codex dispatch: routing line, then the task.
+def task_prompt_path(run: dict, task: dict) -> Path:
+    """Where the dispatch's own prompt file lives. Scratch, never committed."""
+    return Path(run["context_dir"]) / f"task-{task['n']}.md"
+
+
+def render_dispatch_line(run: dict, task: dict, attempt: str, prompt_path: Path) -> str:
+    """The two lines the conductor pastes into the dispatch, and nothing else.
 
     The routing flags lead the text rather than riding on the dispatching tool's
     parameters, because the `Agent` tool's `model` cannot carry a Codex slug.
+    The task itself travels in `--prompt-file`: the companion re-splits forwarded
+    text in only one of its two argv shapes, and that shape joins the prompt's
+    lines with spaces, which would fold the trailers it must reproduce verbatim
+    into one line. A file is read as written, and an absolute path resolves the
+    same whichever directory the companion resolves it against.
     """
-    # `--cwd` before any routing override: it is what registers the job under
-    # the code repository's git root, which the conductor's own `cd` cannot do
-    # across the dispatch tool's boundary.
     flags = ["--background", "--write", "--fresh" if attempt == "fresh" else "--resume",
-             "--cwd", str(run["code"])]
+             "--cwd", str(run["code"]), "--prompt-file", str(prompt_path)]
     if run["codex_model"]:
         flags += ["--model", run["codex_model"]]
     if run["codex_effort"]:
         flags += ["--effort", run["codex_effort"]]
+    return (" ".join(flags) + "\n\n"
+            f"Implement Task {task['n']} of the orko build for {run['topic']}; "
+            "the task is in the prompt file.\n")
+
+
+def render_task_prompt(run: dict, task: dict, attempt: str, failure: str | None) -> str:
+    """The task the dispatch writes to its prompt file."""
     spec_id = (record_for(Path(run["ledger"]), "spec", "spec") or {}).get("id", "SPEC-?")
     plan_id = (record_for(Path(run["ledger"]), "plan", "plan") or {}).get("id", "PLAN-?")
     lines = [
-        " ".join(flags), "",
         f"Implement Task {task['n']} of the orko build for {run['topic']}.",
         f"Refs: {spec_id}, {plan_id}. Cite both in the commit message.",
         f"Boundaries: {run['boundaries']}. docs/testing/README.md in the code "
@@ -953,7 +982,13 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         if task is None:
             return 2
     if args.kind == "task":
-        sys.stdout.write(render_task_prompt(run, task, args.attempt, args.failure))
+        # The script owns the write, so no model transcribes the prompt: the
+        # conductor forwards the dispatch line and Codex reads the file.
+        prompt_path = task_prompt_path(run, task)
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(
+            render_task_prompt(run, task, args.attempt, args.failure), encoding="utf-8")
+        sys.stdout.write(render_dispatch_line(run, task, args.attempt, prompt_path))
         return 0
     # Every other kind files its findings under the step that asked for them, and
     # a complete run has no such step. A `findings/None/` directory is a defect,
@@ -1198,18 +1233,17 @@ def cmd_codex_wait(args: argparse.Namespace) -> int:
     return 0 if job.get("status") == "completed" else 1
 
 
-def _dirty(repo: Path, untracked: bool = True) -> bool:
-    """Working-tree dirt. `untracked=False` counts modified and staged files only.
+def _dirty(repo: Path) -> bool:
+    """Modified or staged tracked files. Untracked files never count.
 
-    Every caller passes `untracked=False`. A reviewer seat, and `check
-    delivery`'s own acceptance command, leave `.venv/`, `uv.lock`, and caches
-    behind in a repository that need not ignore them, so untracked files cannot
-    be a finding: they are the checker's own droppings. A file Codex forgot to
-    commit shows up instead as missing from the branch diff, which the task
-    reviewers read.
+    A reviewer seat, and `check delivery`'s own acceptance command, leave
+    `.venv/`, `uv.lock`, and caches behind in a repository that need not ignore
+    them, so untracked files cannot be a finding: they are the checker's own
+    droppings. A file Codex forgot to commit shows up instead as missing from
+    the branch diff, which the task reviewers read.
     """
-    flags = ["--porcelain"] if untracked else ["--porcelain", "--untracked-files=no"]
-    return bool(_git(repo, "status", *flags).stdout.strip())
+    return bool(_git(repo, "status", "--porcelain",
+                     "--untracked-files=no").stdout.strip())
 
 
 def cmd_preflight(args: argparse.Namespace) -> int:
@@ -1233,8 +1267,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         findings.append(f"workspace-invalid: {name}")
     checks += 1
     for repo in ("docs", "code"):
-        # Modified and staged only: see `_dirty`.
-        if _dirty(ws / repo, untracked=False):
+        if _dirty(ws / repo):
             findings.append(f"{repo}-dirty: uncommitted changes in {repo}/")
         checks += 1
     # A second loop, not a second clause in the first: the findings print in
@@ -1987,8 +2020,7 @@ def cmd_check_delivery(args: argparse.Namespace) -> int:
         return 2
     code = ws / "code"
     findings: list[str] = []
-    # Modified and staged only: see `_dirty`.
-    if _dirty(code, untracked=False):
+    if _dirty(code):
         findings.append("tree-dirty: uncommitted changes in code/")
     changed = [line for line in
                _git(code, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines() if line]

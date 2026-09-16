@@ -17,7 +17,7 @@ The script builds the whole dispatch, including its routing flags. You do not co
 
 ## Where Codex runs
 
-The prompt's first line carries `--cwd <workspace>/code`. The companion reads it as the job's working directory and registers the job under that directory's git root, so Codex runs at the code repository with a `workspace-write` sandbox rooted there, `approvalPolicy: never`, and no network. The code repository is both the git root and the whole writable surface, so Codex cannot reach `docs/`. The record stays yours.
+`prompt task` prints two lines and writes a file. The printed dispatch line carries `--cwd <workspace>/code`, which the companion reads as the job's working directory, so Codex runs at the code repository's git root with a `workspace-write` sandbox rooted there, `approvalPolicy: never`, and no network. The code repository is both the git root and the whole writable surface, so Codex cannot reach `docs/`. The record stays yours. The task itself goes to `<run_dir>/context/task-<n>.md`, and the dispatch line points at it with an absolute `--prompt-file`, so Codex reads the task as the script wrote it: a prompt forwarded as argument text is re-joined with spaces, which would fold the trailers it must reproduce verbatim into one line.
 
 A `cd` in your own shell does none of that. The dispatch goes through `Agent(subagent_type: "codex:codex-rescue")`, whose shell starts in the session's own working directory, so the directory you stand in never reaches the job. `codex wait` and `preflight` pass the same `--cwd` to the companion themselves, and every other command in the loop resolves the workspace from `--workspace`. Run all of them from the workspace root.
 
@@ -42,9 +42,9 @@ The sha is the base the delivery check diffs against. Two commands, never one su
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task <slug> --task <n> --attempt fresh
 ```
 
-The first line of stdout is the routing flags: `--background --write --fresh --cwd <workspace>/code`, plus `--model <M>` and `--effort <E>` when intake recorded them. Everything after it is the task: the objective, the `SPEC-NNN R<n>` rows it satisfies, the files, the steps, the acceptance command, the branch, the boundaries, the testing-README row it must add, and the commit instruction with the trailers verbatim.
+Stdout is two lines: the routing flags, `--background --write --fresh --cwd <workspace>/code --prompt-file <run_dir>/context/task-<n>.md` plus `--model <M>` and `--effort <E>` when intake recorded them, then one sentence naming the task. The file at `--prompt-file` holds the task itself: the objective, the `SPEC-NNN R<n>` rows it satisfies, the files, the steps, the acceptance command, the branch, the boundaries, the testing-README row it must add, and the commit instruction with the trailers verbatim.
 
-Dispatch the whole stdout verbatim through `Agent(subagent_type: "codex:codex-rescue")`. Do not summarize it, reorder it, or drop the flag line: the routing flags travel inside the prompt text because the `Agent` tool's `model` parameter cannot carry a Codex slug. The agent returns the job id.
+Paste that stdout into `Agent(subagent_type: "codex:codex-rescue")` verbatim, and send nothing else. Do not summarize it, reorder it, drop the flag line, or paste the prompt file's contents beside it: the routing flags travel inside the dispatch text because the `Agent` tool's `model` parameter cannot carry a Codex slug, and the task travels in the file because forwarded argument text is not reproduced byte for byte. The agent returns the job id.
 
 `prompt` refuses a task with no `**Acceptance:**` command and exits non-zero. That is not a bug to work around. The acceptance command is the entire definition of done for the dispatch; fix `tasks.md` and re-run `check tasks <path>` before dispatching.
 
@@ -54,7 +54,7 @@ Dispatch the whole stdout verbatim through `Agent(subagent_type: "codex:codex-re
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py codex wait <job-id> --slug <slug>
 ```
 
-This polls the companion script, naming the code repository as the job's workspace root, and prints the result JSON. The default timeout is 1800000 milliseconds; override it with `--timeout-ms <n>` for a task you expect to run longer. The companion reports `status`, `threadId`, `touchedFiles`, `rawOutput`, and `reasoningSummary`, with no model name and no token count, so record the job id and the wall time from `startedAt` and `completedAt` in your step summary, and say the model is whatever `~/.codex/config.toml` sets when intake recorded no override. Exit `0` means the job completed; delivery is still judged by `check delivery`. An empty return from the agent, a missing job id, or a failed job is a delivery failure.
+This polls the companion script, naming the code repository as the job's workspace root, and prints the result JSON. `No job found for "<id>"` means the job registered under a different root, because the forwarder dropped `--cwd` from the dispatch line: count it as that attempt's delivery failure and retry as in step 5. If the second attempt answers the same way, record the dispatch line you sent in `escalations.md` alongside the escalation. The default timeout is 1800000 milliseconds; override it with `--timeout-ms <n>` for a task you expect to run longer. The companion reports `status`, `threadId`, `touchedFiles`, `rawOutput`, and `reasoningSummary`, with no model name and no token count, so record the job id and the wall time from `startedAt` and `completedAt` in your step summary, and say the model is whatever `~/.codex/config.toml` sets when intake recorded no override. Exit `0` means the job completed; delivery is still judged by `check delivery`. An empty return from the agent, a missing job id, or a failed job is a delivery failure.
 
 **4. Check the delivery.**
 
