@@ -985,9 +985,14 @@ class TestPromptTask:
             f"--prompt-file {prompt} --model gpt-5.6-sol --effort high\n")
         text = prompt.read_text(encoding="utf-8")
         for needle in ("SPEC-001", "PLAN-001", "code/ only", str(workspace / "code"), "orko/demo-topic",
-                       "Co-Authored-By: T", "Claude-Session:", "### Task 1", "docs/testing/README.md",
-                       "Acceptance: run `uv run pytest -q`", "Leave the tree clean"):
+                       "### Task 1", "docs/testing/README.md",
+                       "Acceptance: run `uv run pytest -q`", "Do not commit",
+                       "Leave nothing else behind. Report the files you changed."):
             assert needle in text, needle
+        # The sandbox mounts `.git` read-only, so the script commits the
+        # delivery: the prompt carries no commit step and no trailers to copy.
+        for absent in ("Co-Authored-By: T", "Claude-Session:", "Leave the tree clean"):
+            assert absent not in text, absent
         assert "{{" not in text
 
     def test_stdout_is_the_dispatch_line_and_nothing_the_forwarder_can_mangle(
@@ -1040,7 +1045,7 @@ class TestPromptTask:
                    "--workspace", str(workspace)])
         text = self._prompt_file(workspace).read_text(encoding="utf-8")
         assert "docs/testing/README.md in the code repository is always inside them" in text
-        assert "no lockfiles" in text
+        assert "lockfile the acceptance command creates are ignored" in text
 
     def test_resume_attempt_names_failure(self, workspace, capsys):
         self._codex_run(workspace, capsys)
@@ -1332,6 +1337,39 @@ class TestPreflight:
         code, out = self._pf(workspace, capsys)
         assert code == 0, out
         assert orko.hashes(Path(payload["ledger"]))[orko.rel(workspace, path)] == orko.sha256_file(path)
+
+    def test_the_gate_rehashes_every_record_the_ledger_names(self, workspace, capsys):
+        # The gate asks a human for `status: accepted` on the spec and
+        # `approved_by` on both reviews. Every record the ledger names needs a
+        # new hash floor, or the next guarded write reads the human's own edit
+        # as tampering.
+        init_run(workspace, capsys)
+        _, spec = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        shutil.copytree(Path(orko.__file__).parent / "fixtures/findings",
+                        workspace / ".orko/demo-topic/findings/2")
+        _, review = rec(workspace, capsys, "review", "--slug", "demo-topic", "--role", "spec",
+                        "--reviews", "SPEC-001", "--revision", "abc1234", "--title", "Spec review",
+                        "--from-findings", str(workspace / ".orko/demo-topic/findings/2"))
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "records",
+                   "--path", "STATUS.md", "--workspace", str(workspace)])
+        self._branch(workspace)
+        for step in "01234":
+            orko.main(["ledger", step, "complete", "--slug", "demo-topic",
+                       "--workspace", str(workspace)])
+        spec_path = Path(spec["path"])
+        spec_path.write_text(orko.set_frontmatter(
+            spec_path.read_text(), {"status": "accepted", "approved_at": "2026-09-08"}))
+        review_path = Path(review["path"])
+        review_path.write_text(orko.set_frontmatter(
+            review_path.read_text(), {"approved_by": "oiler"}))
+        subprocess.run(["git", "-C", str(workspace / "docs"), "commit", "-qam", "accept"],
+                       check=True)
+        code, out = self._pf(workspace, capsys)
+        assert code == 0, out
+        code, err = rec(workspace, capsys, "disposition", "--slug", "demo-topic",
+                        "--review", "REVIEW-001", "--finding", "F2",
+                        "--disposition", "rejected")
+        assert code == 0, err
 
     def test_codex_unavailable(self, workspace, capsys, monkeypatch):
         init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
@@ -1831,6 +1869,87 @@ class TestCommit:
                           "--workspace", str(workspace)]) == 2
 
 
+class TestCommitTask:
+    """`commit code --task N` — the commit Codex cannot make for itself."""
+
+    def _run(self, workspace, capsys):
+        _, payload = init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        rec(workspace, capsys, "plan", "--slug", "demo-topic", "--title", "Plan",
+            "--implements", "SPEC-001")
+        shutil.copy(Path(orko.__file__).parent / "fixtures/tasks.md", payload["tasks"])
+        return payload
+
+    def _write(self, workspace, path, content="x = 1\n"):
+        f = workspace / "code" / path
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(content)
+
+    def test_the_task_files_and_the_readme_are_staged_and_the_leftovers_are_not(
+        self, workspace, capsys
+    ):
+        self._run(workspace, capsys)
+        for path in orko.parse_tasks((workspace / ".orko/demo-topic/tasks.md").read_text())[0]["files"]:
+            self._write(workspace, path)
+        readme = workspace / "code/docs/testing/README.md"
+        readme.write_text(readme.read_text() + "\n| SPEC-001 R1 | test_moves |\n")
+        self._write(workspace, ".venv/x", "v\n")
+        self._write(workspace, "uv.lock", "lock\n")
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert sorted(payload["staged"]) == ["docs/testing/README.md",
+                                             "orko/scripts/orko.py",
+                                             "orko/scripts/test_orko.py"]
+        assert payload["task"] == 1
+        body = git_out(workspace / "code", "log", "-1", "--format=%B")
+        assert body.startswith("Task 1: Move the script into orko and rebase its paths\n\n"
+                               "Refs: PLAN-001, SPEC-001\n")
+        assert "Co-Authored-By: T <t@example.invalid>" in body and "Claude-Session:" in body
+        # The acceptance command's droppings are the script's to leave alone.
+        status = git_out(workspace / "code", "status", "--porcelain", "--untracked-files=all")
+        assert "?? uv.lock" in status and "?? .venv/x" in status
+
+    def test_an_explicit_message_wins_over_the_task_subject(self, workspace, capsys):
+        self._run(workspace, capsys)
+        self._write(workspace, "orko/scripts/orko.py")
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--message", "hand-written subject",
+                          "--workspace", str(workspace)]) == 0
+        assert git_out(workspace / "code", "log", "-1", "--format=%s") == "hand-written subject\n"
+
+    def test_task_on_docs_is_a_usage_error(self, workspace, capsys):
+        self._run(workspace, capsys)
+        capsys.readouterr()
+        assert orko.main(["commit", "docs", "--slug", "demo-topic", "--task", "1",
+                          "--message", "m", "--workspace", str(workspace)]) == 2
+        assert "orko: --task" in capsys.readouterr().err
+
+    def test_a_task_whose_files_are_all_missing_exits_2(self, workspace, capsys):
+        self._run(workspace, capsys)
+        # Without the testing README the task has nothing left that exists.
+        subprocess.run(["git", "-C", str(workspace / "code"), "rm", "-q", "-r",
+                        "docs/testing"], check=True)
+        subprocess.run(["git", "-C", str(workspace / "code"), "commit", "-qm", "drop"], check=True)
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 2
+        assert "orko: nothing to stage in code" in capsys.readouterr().err
+
+    def test_a_deleted_listed_file_is_staged_as_a_deletion(self, workspace, capsys):
+        self._run(workspace, capsys)
+        self._write(workspace, "orko/scripts/orko.py")
+        subprocess.run(["git", "-C", str(workspace / "code"), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(workspace / "code"), "commit", "-qm", "seed"], check=True)
+        (workspace / "code/orko/scripts/orko.py").unlink()
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        assert "orko/scripts/orko.py" in git_out(
+            workspace / "code", "show", "--name-only", "--diff-filter=D", "HEAD")
+
+
 class TestOverwriteGuard:
     def _committed_spec(self, workspace, capsys):
         _, payload = init_run(workspace, capsys)
@@ -2111,39 +2230,85 @@ class TestCheckDelivery:
                           "--workspace", str(workspace)])
         return code, capsys.readouterr().out
 
-    def _commit_task_file(self, workspace, content="x = 1\n"):
-        f = workspace / "code" / orko.parse_tasks(
-            (workspace / ".orko/demo-topic/tasks.md").read_text())[0]["files"][0]
+    def _write(self, workspace, path, content="x = 1\n") -> Path:
+        f = workspace / "code" / path
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(content)
+        return f
+
+    def _task_file(self, workspace) -> str:
+        return orko.parse_tasks(
+            (workspace / ".orko/demo-topic/tasks.md").read_text())[0]["files"][0]
+
+    def _commit_task_file(self, workspace, content="x = 1\n"):
+        self._write(workspace, self._task_file(workspace), content)
         subprocess.run(["git", "-C", str(workspace / "code"), "add", "-A"], check=True)
         subprocess.run(["git", "-C", str(workspace / "code"), "commit", "-qm", "task"], check=True)
 
-    def test_clean_committed_task_passes(self, workspace, capsys, monkeypatch):
+    def _rebase_dispatch(self, workspace):
+        """Re-record the dispatch at the current HEAD, so the committed diff is
+        empty and only the working tree can carry the delivery."""
+        orko.main(["ledger", "5.1", "dispatched", "--commit",
+                   git_out(workspace / "code", "rev-parse", "HEAD").strip(),
+                   "--slug", "demo-topic", "--workspace", str(workspace)])
+
+    def test_a_committed_only_delivery_passes(self, workspace, capsys, monkeypatch):
+        # The re-check after `commit code --task`: nothing is left in the
+        # working tree and the delivery lives in `<base>..HEAD`.
         self._task_run(workspace, capsys)
         self._commit_task_file(workspace)
         monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
         # The acceptance line is model-authored shell; the check prints it.
         assert self._cd(workspace, capsys) == (0, "acceptance: uv run pytest -q\n")
 
-    def test_fails_tree_dirty(self, workspace, capsys, monkeypatch):
+    def test_an_uncommitted_listed_file_is_the_delivery(self, workspace, capsys, monkeypatch):
+        # Codex cannot commit: `.git` is read-only inside its sandbox, so the
+        # delivery arrives as an untracked file and the script commits it later.
         self._task_run(workspace, capsys)
-        self._commit_task_file(workspace)
-        # A tracked file left modified: the delivery is genuinely unfinished.
-        (workspace / "code/CHANGELOG.md").write_text("edited\n")
-        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
-        assert "tree-dirty" in self._cd(workspace, capsys)[1]
-
-    def test_untracked_files_do_not_fail_delivery(self, workspace, capsys, monkeypatch):
-        # The acceptance command itself leaves `.venv/`, `uv.lock`, and caches
-        # behind, so untracked files cannot be a delivery finding.
-        self._task_run(workspace, capsys)
-        self._commit_task_file(workspace)
-        (workspace / "code/uv.lock").write_text("lock\n")
+        self._write(workspace, self._task_file(workspace))
         monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
         code, out = self._cd(workspace, capsys)
-        assert "tree-dirty" not in out
         assert code == 0, out
+        assert "diff-empty" not in out and "diff-outside-allowlist" not in out
+
+    def test_an_uncommitted_file_outside_the_list_is_a_finding(
+        self, workspace, capsys, monkeypatch
+    ):
+        self._task_run(workspace, capsys)
+        self._write(workspace, "other.py", "y\n")
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        assert "diff-outside-allowlist: other.py" in self._cd(workspace, capsys)[1]
+
+    def test_tool_leftovers_are_not_a_delivery(self, workspace, capsys, monkeypatch):
+        # The acceptance command leaves a virtual environment and caches behind.
+        # They are neither the delivery nor a breach of the allowlist.
+        self._task_run(workspace, capsys)
+        self._write(workspace, ".venv/lib/x", "v\n")
+        self._write(workspace, "tests/__pycache__/x.pyc", "c\n")
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        code, out = self._cd(workspace, capsys)
+        assert code == 1 and "diff-empty" in out
+        assert "diff-outside-allowlist" not in out
+
+    def test_a_leftover_lockfile_rides_alongside_a_real_delivery(
+        self, workspace, capsys, monkeypatch
+    ):
+        self._task_run(workspace, capsys)
+        self._write(workspace, self._task_file(workspace))
+        self._write(workspace, "uv.lock", "lock\n")
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        code, out = self._cd(workspace, capsys)
+        assert code == 0, out
+
+    def test_a_deleted_listed_file_counts_as_changed(self, workspace, capsys, monkeypatch):
+        self._task_run(workspace, capsys)
+        self._commit_task_file(workspace)
+        self._rebase_dispatch(workspace)
+        (workspace / "code" / self._task_file(workspace)).unlink()
+        monkeypatch.setattr(orko, "run_acceptance", lambda cmd, cwd: 0)
+        code, out = self._cd(workspace, capsys)
+        assert code == 0, out
+        assert "diff-empty" not in out
 
     def test_acceptance_announcement_precedes_the_command_output(
         self, workspace, capsys
@@ -2298,3 +2463,50 @@ class TestCodexWait:
                             lambda a, cwd: subprocess.CompletedProcess(a, 0, json.dumps({"status": "completed"}), ""))
         assert orko.main(["codex", "wait", "job-1", "--slug", "nope",
                           "--workspace", str(workspace)]) == 2
+
+
+class TestCodexWaitLatest:
+    """`codex wait latest` — the forwarder does not reliably return a job id."""
+
+    # The shape `status --all --json` answers with: a background dispatch can
+    # be in `running`, in `latestFinished`, or in `recent`.
+    SNAPSHOT = {
+        "workspaceRoot": "/ws/code",
+        "running": [{"id": "task-newest", "status": "running",
+                     "startedAt": "2026-09-16T22:20:54.763Z"}],
+        "latestFinished": {"id": "task-middle", "status": "completed",
+                           "startedAt": "2026-09-16T22:17:02.444Z"},
+        "recent": [{"id": "task-oldest", "status": "completed",
+                    "startedAt": "2026-09-15T10:00:00.000Z"}],
+    }
+
+    def _fake(self, monkeypatch, snapshot, calls):
+        def fake(args, cwd):
+            calls.append(args)
+            payload = snapshot if args[:1] == ["status"] and "--all" in args else {
+                "job": {"status": "completed"}}
+            return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+        monkeypatch.setattr(orko, "run_companion", fake)
+
+    def test_latest_resolves_the_newest_started_job(self, workspace, capsys, monkeypatch):
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        calls = []
+        self._fake(monkeypatch, self.SNAPSHOT, calls)
+        capsys.readouterr()
+        assert orko.main(["codex", "wait", "latest", "--slug", "demo-topic",
+                          "--workspace", str(workspace)]) == 0
+        captured = capsys.readouterr()
+        assert "orko: latest job is task-newest" in captured.err
+        assert calls[0] == ["status", "--all", "--json"]
+        assert calls[1][:2] == ["status", "task-newest"]
+        assert calls[2][:2] == ["result", "task-newest"]
+
+    def test_no_job_under_the_code_repository_exits_1(self, workspace, capsys, monkeypatch):
+        init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
+        calls = []
+        self._fake(monkeypatch, {"running": [], "latestFinished": None, "recent": []}, calls)
+        capsys.readouterr()
+        assert orko.main(["codex", "wait", "latest", "--slug", "demo-topic",
+                          "--workspace", str(workspace)]) == 1
+        assert f"orko: no Codex job registered under {workspace / 'code'}" in capsys.readouterr().err

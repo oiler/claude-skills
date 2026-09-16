@@ -961,7 +961,7 @@ def render_task_prompt(run: dict, task: dict, failure: str | None) -> str:
     plan_id = (record_for(Path(run["ledger"]), "plan", "plan") or {}).get("id", "PLAN-?")
     lines = [
         f"Implement Task {task['n']} of the orko build for {run['topic']}.",
-        f"Refs: {spec_id}, {plan_id}. Cite both in the commit message.",
+        f"Refs: {spec_id}, {plan_id}. The conductor's commit cites both.",
         f"Boundaries: {run['boundaries']}. docs/testing/README.md in the code "
         "repository is always inside them; the traceability row below goes there.",
         f"Working directory: {run['code']} (the code repository). Do not touch {run['docs']}.",
@@ -975,11 +975,15 @@ def render_task_prompt(run: dict, task: dict, failure: str | None) -> str:
     ]
     if failure:
         lines += ["", f"The previous attempt failed: {failure}. Fix that first."]
-    lines += ["", "When the acceptance command passes, commit the files this task names plus "
-              "docs/testing/README.md, and nothing else: no caches, no virtual environments, "
-              "no lockfiles the acceptance command created. The message starts with the task "
-              "title, cites the Refs line, and ends with these trailers verbatim:",
-              *run["trailers"], "", "Leave the tree clean. Report the commit sha."]
+    # No commit step and no trailers: the dispatch sandbox mounts `.git`
+    # read-only, so a delivery that tried to commit could only fail, and the
+    # script owns the subject, the staged set, the Refs line, and the trailers.
+    lines += ["", "Do not commit and do not run git: the sandbox mounts .git read-only, "
+              "and the conductor commits your delivery. Leave every change in the working "
+              "tree and report the files you changed. Create no files outside the task's "
+              "Files list and docs/testing/README.md; the caches, virtual environment, and "
+              "lockfile the acceptance command creates are ignored.",
+              "", "Leave nothing else behind. Report the files you changed."]
     return "\n".join(lines) + "\n"
 
 
@@ -1220,16 +1224,50 @@ def run_companion(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
                           capture_output=True, text=True, check=False)
 
 
+def latest_job_id(code: Path) -> str | None:
+    """The newest job the companion has registered under the code repository.
+
+    `status --all --json` splits the jobs across `running`, `latestFinished`,
+    and `recent`, and a dispatch this loop just sent can be in any of them, so
+    the newest `startedAt` across all three is the one to wait on.
+    """
+    result = run_companion(["status", "--all", "--json"], code)
+    try:
+        snapshot = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    jobs = [*(snapshot.get("running") or []), *(snapshot.get("recent") or [])]
+    finished = snapshot.get("latestFinished")
+    if isinstance(finished, dict):
+        jobs.append(finished)
+    jobs = [job for job in jobs if isinstance(job, dict) and job.get("id")]
+    if not jobs:
+        return None
+    return max(jobs, key=lambda job: job.get("startedAt") or job.get("createdAt") or "")["id"]
+
+
 def cmd_codex_wait(args: argparse.Namespace) -> int:
-    """Block until a background Codex job settles, then print its result."""
+    """Block until a background Codex job settles, then print its result.
+
+    The job id is `latest` when the forwarder returned a companion handle or
+    nothing at all instead of the `task-...` id: the job itself registered
+    correctly, and the code repository is the only root it can be under.
+    """
     loaded = _load_run(args)
     if loaded is None:
         return 2
     code = Path(loaded[1]["code"])
+    job_id = args.job_id
     try:
-        status = run_companion(["status", args.job_id, "--wait",
+        if job_id == "latest":
+            job_id = latest_job_id(code)
+            if job_id is None:
+                print(f"orko: no Codex job registered under {code}", file=sys.stderr)
+                return 1
+            print(f"orko: latest job is {job_id}", file=sys.stderr)
+        status = run_companion(["status", job_id, "--wait",
                                 "--timeout-ms", str(args.timeout_ms), "--json"], code)
-        result = run_companion(["result", args.job_id, "--json"], code)
+        result = run_companion(["result", job_id, "--json"], code)
     except FileNotFoundError as error:
         print(f"orko: {error}", file=sys.stderr)
         return 2
@@ -1253,8 +1291,9 @@ def _dirty(repo: Path) -> bool:
     A reviewer seat, and `check delivery`'s own acceptance command, leave
     `.venv/`, `uv.lock`, and caches behind in a repository that need not ignore
     them, so untracked files cannot be a finding: they are the checker's own
-    droppings. A file Codex forgot to commit shows up instead as missing from
-    the branch diff, which the task reviewers read.
+    droppings. `preflight` is the only caller. A Codex delivery sitting
+    uncommitted is `check delivery`'s business, read from the working tree;
+    here, before a dispatch, a modified tracked file is unfinished work.
     """
     return bool(_git(repo, "status", "--porcelain",
                      "--untracked-files=no").stdout.strip())
@@ -1303,9 +1342,15 @@ def cmd_preflight(args: argparse.Namespace) -> int:
             findings.append("spec-not-accepted: a human sets status: accepted "
                             "before execution begins")
         else:
-            # The acceptance edit is a human's, so re-hash here or the next
-            # overwrite guard reports the human's own edit as tampering.
-            append_ledger(Path(run["ledger"]), f"hash {spec['path']} {sha256_file(path)}")
+            # The gate's edits are a human's — `status: accepted` on the spec,
+            # `approved_by` on both reviews — so re-hash every record the ledger
+            # names, or the next overwrite guard reports the human's own edit as
+            # tampering. Which of the three a human touched is not knowable here.
+            for entry in records(Path(run["ledger"])):
+                target = ws / entry["path"]
+                if target.exists():
+                    append_ledger(Path(run["ledger"]),
+                                  f"hash {entry['path']} {sha256_file(target)}")
     if run["executor"] == "codex":
         ready, detail = codex_setup_ready(Path(run["code"]))
         if not ready:
@@ -1945,14 +1990,36 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
 
 def cmd_commit(args: argparse.Namespace) -> int:
     """Stage this run's own paths in one repo, commit them with the run's IDs
-    and trailers, then re-hash what landed so the overwrite guard has a floor."""
+    and trailers, then re-hash what landed so the overwrite guard has a floor.
+
+    `--task N` is the Codex delivery's commit: its sandbox mounts `.git`
+    read-only, so the script stages the task's own paths and owns the subject,
+    the Refs line, and the trailers.
+    """
     loaded = _load_run(args)
     if loaded is None:
         return 2
     ws, run = loaded
     repo = ws / args.repo
     ledger = Path(run["ledger"])
+    task = None
+    if args.task is not None:
+        if args.repo != "code":
+            print("orko: --task commits a Codex delivery, which lands in code/ only",
+                  file=sys.stderr)
+            return 2
+        task = _task_or_exit(run, args.task)
+        if task is None:
+            return 2
+    if args.message is None and task is None:
+        print("orko: commit needs --message, or --task N to take the task's own subject",
+              file=sys.stderr)
+        return 2
     staged: list[str] = []
+    if task is not None:
+        # The delivery's allowlist, not the whole dirty tree: nothing Codex left
+        # outside the task's Files list and the testing README can be staged.
+        staged += list(task["files"]) + list(DELIVERY_ALWAYS_ALLOWED)
     for entry in records(ledger):
         if entry["path"].startswith(args.repo + "/"):
             staged.append(entry["path"].removeprefix(args.repo + "/"))
@@ -1960,8 +2027,11 @@ def cmd_commit(args: argparse.Namespace) -> int:
         if path.startswith(args.repo + "/"):
             staged.append(path.removeprefix(args.repo + "/"))
     def keeps(path: str) -> bool:
-        return ((repo / path).exists() and not Path(path).is_absolute()
-                and ".." not in Path(path).parts)
+        # Deleted-but-tracked counts: a delivery that removed a file it listed
+        # has to stage the removal, and `git add -A` is what stages it.
+        return (not Path(path).is_absolute() and ".." not in Path(path).parts
+                and ((repo / path).exists()
+                     or bool(_git(repo, "ls-files", "--", path).stdout.strip())))
 
     # A typo'd `--path` that silently vanished meant the file never committed and
     # nothing said so, so every dropped one is named on stderr.
@@ -1969,7 +2039,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
         if not keeps(path):
             print(f"orko: skipping {path} (missing, absolute, or outside {args.repo}/)",
                   file=sys.stderr)
-    staged = [p for p in staged + list(args.path) if keeps(p)]
+    staged = list(dict.fromkeys(p for p in staged + list(args.path) if keeps(p)))
     if not staged:
         # Naming the escape hatch here, because exit 2 is a stop everywhere
         # else: `record` logs no path under `code/src`, so the step-6 commit of
@@ -1977,7 +2047,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
         print(f"orko: nothing to stage in {args.repo}; pass --path <repo-relative "
               "file> for files the run wrote outside the record", file=sys.stderr)
         return 2
-    result = _git(repo, "add", "--", *staged)
+    result = _git(repo, "add", "-A", "--", *staged)
     if result.returncode != 0:
         print(f"orko: git add failed: {result.stderr.strip()}", file=sys.stderr)
         return 2
@@ -1985,7 +2055,8 @@ def cmd_commit(args: argparse.Namespace) -> int:
         print(f"orko: nothing changed in {args.repo}", file=sys.stderr)
         return 2
     ids = sorted({e["id"] for e in records(ledger) if e["id"] != "-"})
-    message = args.message.rstrip() + "\n\n" + (f"Refs: {', '.join(ids)}\n" if ids else "")
+    subject = args.message if args.message is not None else f"Task {args.task}: {task['title']}"
+    message = subject.rstrip() + "\n\n" + (f"Refs: {', '.join(ids)}\n" if ids else "")
     message += "\n" + "\n".join(run["trailers"]) + "\n"
     # `-- *staged` scopes the commit to orko's own paths: anything the user had
     # already staged in this repo stays staged rather than riding along under
@@ -1996,9 +2067,13 @@ def cmd_commit(args: argparse.Namespace) -> int:
         print(f"orko: git commit failed: {result.stderr.strip()}", file=sys.stderr)
         return 2
     for p in staged:
-        append_ledger(ledger, f"hash {args.repo}/{p} {sha256_file(repo / p)}")
-    print(json.dumps({"repo": args.repo, "commit": _git(repo, "rev-parse", "HEAD").stdout.strip(),
-                      "staged": staged}, indent=2))
+        if (repo / p).exists():
+            append_ledger(ledger, f"hash {args.repo}/{p} {sha256_file(repo / p)}")
+    payload = {"repo": args.repo, "commit": _git(repo, "rev-parse", "HEAD").stdout.strip(),
+               "staged": staged}
+    if args.task is not None:
+        payload["task"] = args.task
+    print(json.dumps(payload, indent=2))
     return 0
 
 
@@ -2016,9 +2091,54 @@ def run_acceptance(cmd: str, cwd: Path) -> int:
 # for obeying the prompt.
 DELIVERY_ALWAYS_ALLOWED = ("docs/testing/README.md",)
 
+# What the acceptance command leaves behind in a repository that need not
+# ignore it. Never part of a delivery, so neither a change nor a breach of the
+# allowlist, whichever prefix or directory level it lands at.
+TOOL_LEFTOVERS = (".venv/", "uv.lock", ".pytest_cache/", "__pycache__/",
+                  ".ruff_cache/", ".mypy_cache/", "node_modules/")
+
+
+def is_tool_leftover(path: str) -> bool:
+    segments = path.split("/")
+    for leftover in TOOL_LEFTOVERS:
+        if leftover.endswith("/") and path.startswith(leftover):
+            return True
+        if leftover.rstrip("/") in segments:
+            return True
+    return False
+
+
+def worktree_paths(repo: Path) -> list[str]:
+    """Every path git reports changed in the working tree: modified, staged,
+    deleted, or untracked.
+
+    `-z` rather than the default: it never quotes a path, and it spends a second
+    NUL-terminated field on a rename's source instead of an ` -> ` separator a
+    filename could contain. Both sides of a rename are changes.
+    """
+    fields = _git(repo, "status", "--porcelain", "-z",
+                  "--untracked-files=all").stdout.split("\0")
+    paths: list[str] = []
+    index = 0
+    while index < len(fields):
+        entry = fields[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        paths.append(entry[3:])
+        if entry[0] in "RC" and index < len(fields):
+            paths.append(fields[index])
+            index += 1
+    return paths
+
 
 def cmd_check_delivery(args: argparse.Namespace) -> int:
     """Judge one Codex delivery in code, not by reading its report.
+
+    The delivery is the working tree: Codex's sandbox mounts `.git` read-only,
+    so a dispatch can never commit and the script commits afterwards. A tree
+    that is already committed still passes, so a re-check after
+    `commit code --task` reads the same delivery.
 
     Each condition is one finding, so a test can remove exactly one and see
     exactly one test go red.
@@ -2038,12 +2158,11 @@ def cmd_check_delivery(args: argparse.Namespace) -> int:
         return 2
     code = ws / "code"
     findings: list[str] = []
-    if _dirty(code):
-        findings.append("tree-dirty: uncommitted changes in code/")
-    changed = [line for line in
-               _git(code, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines() if line]
+    committed = _git(code, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines()
+    changed = sorted({path for path in worktree_paths(code) + committed
+                      if path and not is_tool_leftover(path)})
     if not changed:
-        findings.append("diff-empty: no commits since the dispatch base")
+        findings.append("diff-empty: no changes since the dispatch base")
     outside = sorted(set(changed) - set(task["files"]) - set(DELIVERY_ALWAYS_ALLOWED))
     if changed and outside:
         findings.append("diff-outside-allowlist: " + ", ".join(outside))
@@ -2216,7 +2335,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_commit.add_argument("repo", choices=["docs", "code"])
     p_commit.add_argument("--slug", required=True)
     p_commit.add_argument("--workspace")
-    p_commit.add_argument("--message", required=True)
+    p_commit.add_argument("--message",
+                          help="commit subject; optional with --task, which writes its own")
+    p_commit.add_argument("--task", type=int,
+                          help="commit task N's Codex delivery from code/")
     p_commit.add_argument("--path", action="append", default=[],
                           help="extra repo-relative path to stage, repeatable")
     p_commit.set_defaults(func=cmd_commit)
@@ -2224,7 +2346,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_codex = sub.add_parser("codex", help="drive a background Codex job")
     codex_sub = p_codex.add_subparsers(dest="codex_command", required=True)
     p_wait = codex_sub.add_parser("wait")
-    p_wait.add_argument("job_id")
+    p_wait.add_argument("job_id", help="the task-... id, or `latest` to resolve it")
     p_wait.add_argument("--slug", required=True)
     p_wait.add_argument("--workspace")
     p_wait.add_argument("--timeout-ms", type=int, default=1800000)
