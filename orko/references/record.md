@@ -57,7 +57,7 @@ The failure is silent. `spec-check.sh` reports a warning rather than a failure a
 
 That is why the gate asks the human to approve the spec review and the plan review as well as accept the spec. It is consistent with the scaffold, because a review's dispositions are proposals until a human sets `approved_by`. It is also a scaffold fragility worth a follow-up: `release-check.sh` could check every review that names the spec rather than the first. Report it to oiler at the gate. Do not change the scaffold's scripts from inside a run.
 
-So the gate asks a human for four fields in total: `status: accepted` and `approved_at` on the spec, `approved_by` on the spec review, and `approved_by` on the plan review. Name all four when you stop. `preflight` at step 5 confirms the spec is `accepted` and then re-records its hash, so the human's edit is not reported as tampering on the next write.
+So the gate asks a human for four fields in total: `status: accepted` and `approved_at` on the spec, `approved_by` on the spec review, and `approved_by` on the plan review. Name all four when you stop. `preflight` at step 5 confirms the spec is `accepted` and then re-records the committed hash of every record the ledger names, so none of those four edits is reported as tampering on the next write. A preflight with findings re-records nothing.
 
 ## Findings to F blocks
 
@@ -118,7 +118,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --message "
 
 The message the script builds is your `--message` subject, then a `Refs:` line naming every ID the run has minted, then the attribution trailers recorded at `init --trailer` (repeatable), verbatim. After the commit, the script records a `hash <path> <sha256>` ledger line for every file it staged.
 
-Those hash lines are the overwrite guard. `record` refuses to write a file when all three hold: a hash is recorded for that path, the file exists, and its current sha differs from the recorded one. That means a human edited a record orko wrote. Read the change, report it, and continue from the human's version rather than overwriting it. The gate's expected edit is exempt: `preflight` re-records the spec's hash at step 5 when it confirms `status: accepted`, so the human's acceptance is not reported as tampering on the next write.
+Those hash lines are the overwrite guard. `record` refuses to write a file when all three hold: a hash is recorded for that path, the file exists, and its current sha differs from the recorded one. That means a human edited a record orko wrote. Read the change, report it, and continue from the human's version rather than overwriting it. The gate's expected edits are exempt: a clean `preflight` at step 5 re-records the committed hash of every record the ledger names once it confirms `status: accepted`, so neither the spec's acceptance nor an `approved_by` on either review is reported as tampering on the next write. An uncommitted edit stays unexempt, because the floor the script re-records is the commit.
 
 Git calls you make yourself use `git -C docs` and `git -C code`, never a bare `git` from the workspace root. The workspace root is not a repository.
 
