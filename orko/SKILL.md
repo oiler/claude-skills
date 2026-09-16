@@ -81,7 +81,7 @@ Git calls you make yourself are `git -C docs ...` and `git -C code ...`. The wor
    uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py preflight --slug <slug> --workspace <path>
    ```
 
-   Name the base explicitly. `docs/` may be sitting on another run's branch, and a branch cut from wherever `HEAD` happens to be carries that run's unmerged records into this one. Use `main` where that is the repository's default, or `origin/HEAD` when a remote sets one: `git -C docs symbolic-ref --short refs/remotes/origin/HEAD` prints it, and exits `128` with `fatal: ref refs/remotes/origin/HEAD is not a symbolic ref` when it is unset, which means unset rather than stop. An analysis needs no `commit docs` at open, because `init` writes no record for one. Name the branch the record will land on, `orko/<slug>` in `docs/`, as part of the restated request, so a reviewer's first question does not silently commit to the default branch.
+   Name the base explicitly. `docs/` may be sitting on another run's branch, and a branch cut from wherever `HEAD` happens to be carries that run's unmerged records into this one. Use `main` where that is the repository's default, or `origin/HEAD` when a remote sets one: `git -C docs symbolic-ref --short refs/remotes/origin/HEAD` prints it, and exits `128` with `fatal: ref refs/remotes/origin/HEAD is not a symbolic ref` when it is unset, which means unset rather than stop: keep the default-branch base named above. An analysis needs no `commit docs` at open, because `init` writes no record for one. Name the branch the record will land on, `orko/<slug>` in `docs/`, as part of the restated request, so a reviewer's first question does not silently commit to the default branch.
 2. **Propose (the gate).** Write `brief.md` to the `brief` path from `init`, then present its seat list (each as *role / model tier / what it investigates*) and dispatch plan for approval. **Wait for the user's go** before any expert runs. State the cost shape plainly: verification roughly doubles the dispatch, one verifier per seat, so present it as a cost choice the user opts into rather than a silent default.
 3. **Dispatch.** Run every seat of a round concurrently, then check what came back.
    1. One subagent call (the `Agent` or `Task` tool) per seat, all **in a single message**. That is what makes them parallel.
@@ -156,7 +156,7 @@ A committee of cheap seats synthesized by a frontier conductor can still underpe
 
 ## The workspace and the record
 
-A run targets a scaffold workspace: a directory that is not a repository and holds two that are. `init` refuses anything else, so the layout is a precondition and not an assumption. Change directory to the workspace root at intake and stay there for the whole run. A Codex dispatch is no exception: its working directory travels in the prompt, per [references/codex.md](references/codex.md).
+A run targets a scaffold workspace: a directory that is not a repository and holds two that are. `init` refuses anything else, so the layout is a precondition and not an assumption. Change directory to the workspace root at intake and stay there for the whole run. A Codex dispatch is no exception: its working directory travels on the dispatch line as `--cwd`, and the task in a prompt file beside it, per [references/codex.md](references/codex.md).
 
 ```
 <workspace>/

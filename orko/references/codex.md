@@ -42,7 +42,7 @@ The sha is the base the delivery check diffs against. Two commands, never one su
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task <slug> --task <n> --attempt fresh
 ```
 
-Stdout is two lines: the routing flags, `--background --write --fresh --cwd <workspace>/code --prompt-file <run_dir>/context/task-<n>.md` plus `--model <M>` and `--effort <E>` when intake recorded them, then one sentence naming the task. The file at `--prompt-file` holds the task itself: the objective, the `SPEC-NNN R<n>` rows it satisfies, the files, the steps, the acceptance command, the branch, the boundaries, the testing-README row it must add, and the commit instruction with the trailers verbatim.
+Stdout is three lines: the routing flags, `--background --write --fresh --cwd <workspace>/code --prompt-file <run_dir>/context/task-<n>.md` plus `--model <M>` and `--effort <E>` when intake recorded them, a blank line, then one sentence naming the task. The file at `--prompt-file` holds the task itself: the objective, the `SPEC-NNN R<n>` rows it satisfies, the files, the steps, the acceptance command, the branch, the boundaries, the testing-README row it must add, and the commit instruction with the trailers verbatim.
 
 Paste that stdout into `Agent(subagent_type: "codex:codex-rescue")` verbatim, and send nothing else. Do not summarize it, reorder it, drop the flag line, or paste the prompt file's contents beside it: the routing flags travel inside the dispatch text because the `Agent` tool's `model` parameter cannot carry a Codex slug, and the task travels in the file because forwarded argument text is not reproduced byte for byte. The agent returns the job id.
 
