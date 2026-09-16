@@ -74,14 +74,14 @@ Git calls you make yourself are `git -C docs ...` and `git -C code ...`. The wor
 
 ## Analysis engagement
 
-1. **Open.** Restate the request. If it is genuinely underspecified, ask one or two scoping questions; otherwise proceed. Then run `init analysis "<question>" --workspace <path> --owner <name> --boundaries "<what the seats may read and what is out of scope>" --trailer "<line>" --trailer "<line>"` and read `slug`, `run_dir`, `findings_dir`, and `context_dir` out of the JSON. `init` refuses a workspace that is not a scaffold, so a refusal is a path to fix and not a check to skip. Then branch the docs repository and check the workspace:
+1. **Open.** Restate the request. If it is genuinely underspecified, ask one or two scoping questions; otherwise proceed. Then run `init analysis "<question>" --workspace <path> --owner <name> --boundaries "<what the seats may read and what is out of scope>" --trailer "<line>" --trailer "<line>"` and read `slug`, `run_dir`, `findings_dir`, and `context_dir` out of the JSON. `init` refuses a workspace that is not a scaffold, so a refusal is a path to fix and not a check to skip. Then branch the docs repository from its default branch and check the workspace:
 
    ```bash
-   git -C docs checkout -b orko/<slug>
+   git -C docs checkout -b orko/<slug> master
    uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py preflight --slug <slug> --workspace <path>
    ```
 
-   An analysis needs no `commit docs` at open, because `init` writes no record for one. Name the branch the record will land on, `orko/<slug>` in `docs/`, as part of the restated request, so a reviewer's first question does not silently commit to the default branch.
+   Name the base explicitly. `docs/` may be sitting on another run's branch, and a branch cut from wherever `HEAD` happens to be carries that run's unmerged records into this one. Use `main` where that is the repository's default, or `origin/HEAD` when a remote sets one: `git -C docs symbolic-ref --short refs/remotes/origin/HEAD` prints it, and prints nothing when it is unset. An analysis needs no `commit docs` at open, because `init` writes no record for one. Name the branch the record will land on, `orko/<slug>` in `docs/`, as part of the restated request, so a reviewer's first question does not silently commit to the default branch.
 2. **Propose (the gate).** Write `brief.md` to the `brief` path from `init`, then present its seat list (each as *role / model tier / what it investigates*) and dispatch plan for approval. **Wait for the user's go** before any expert runs. State the cost shape plainly: verification roughly doubles the dispatch, one verifier per seat, so present it as a cost choice the user opts into rather than a silent default.
 3. **Dispatch.** Run every seat of a round concurrently, then check what came back.
    1. One subagent call (the `Agent` or `Task` tool) per seat, all **in a single message**. That is what makes them parallel.
