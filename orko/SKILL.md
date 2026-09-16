@@ -156,7 +156,7 @@ A committee of cheap seats synthesized by a frontier conductor can still underpe
 
 ## The workspace and the record
 
-A run targets a scaffold workspace: a directory that is not a repository and holds two that are. `init` refuses anything else, so the layout is a precondition and not an assumption. Change directory to the workspace root at intake and stay there for the whole run, except a Codex dispatch, which runs from `code/`.
+A run targets a scaffold workspace: a directory that is not a repository and holds two that are. `init` refuses anything else, so the layout is a precondition and not an assumption. Change directory to the workspace root at intake and stay there for the whole run. A Codex dispatch is no exception: its working directory travels in the prompt, per [references/codex.md](references/codex.md).
 
 ```
 <workspace>/

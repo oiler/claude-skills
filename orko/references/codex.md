@@ -2,7 +2,7 @@
 
 Step 5 of a build runs one of two executors. With `--executor claude`, `superpowers:subagent-driven-development` works through `tasks.md`. With `--executor codex`, this loop runs instead: Codex writes the code, you judge every delivery from the repository rather than from Codex's report, and two report-only Claude reviewers read each task before you close it.
 
-`init` records the executor, the Codex model plus effort overrides, the boundaries, and the attribution trailers in the ledger header. None of them change on resume.
+`init` records the executor, the Codex model plus effort overrides, the boundaries, and the attribution trailers in the ledger header. None of them change on resume, and `init` says so on stderr when a passed trailer differs from the recorded one.
 
 Every script call in this file is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py <subcommand>`. If `${CLAUDE_SKILL_DIR}` is empty in your Bash call, use `~/.claude/skills/orko/scripts/orko.py`. Never use shell command substitution: the prefix matching behind `allowed-tools` cannot see through it, and the resulting permission prompt is invisible inside a long dispatch. Where a command needs a value another command produces, run two commands.
 
@@ -17,15 +17,11 @@ The script builds the whole dispatch, including its routing flags. You do not co
 
 ## Where Codex runs
 
-Change directory to `<workspace>/code` before every dispatch, and change back to the workspace root after.
+The prompt's first line carries `--cwd <workspace>/code`. The companion reads it as the job's working directory and registers the job under that directory's git root, so Codex runs at the code repository with a `workspace-write` sandbox rooted there, `approvalPolicy: never`, and no network. The code repository is both the git root and the whole writable surface, so Codex cannot reach `docs/`. The record stays yours.
 
-```bash
-cd <workspace>/code
-```
+A `cd` in your own shell does none of that. The dispatch goes through `Agent(subagent_type: "codex:codex-rescue")`, whose shell starts in the session's own working directory, so the directory you stand in never reaches the job. `codex wait` and `preflight` pass the same `--cwd` to the companion themselves, and every other command in the loop resolves the workspace from `--workspace`. Run all of them from the workspace root.
 
-Codex runs at the git root of its cwd, with a `workspace-write` sandbox when `--write` is set, `approvalPolicy: never`, and no network. Dispatching from `code/` makes the code repository both the git root and the whole writable surface, so Codex cannot reach `docs/`. The record stays yours. Dispatching from the workspace root would leave Codex with no git root at all, since the workspace root is not a repository.
-
-Every other command in the loop resolves the workspace itself, so run them from the workspace root.
+Pass no `model` on the dispatch. `codex:codex-rescue` is a forwarder whose model the plugin sets, and the Codex model rides on the flags line when intake recorded one.
 
 ## The loop
 
@@ -46,7 +42,7 @@ The sha is the base the delivery check diffs against. Two commands, never one su
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task <slug> --task <n> --attempt fresh
 ```
 
-The first line of stdout is the routing flags: `--background --write --fresh` plus `--model <M>` and `--effort <E>` when intake recorded them. Everything after it is the task: the objective, the `SPEC-NNN R<n>` rows it satisfies, the files, the steps, the acceptance command, the branch, the boundaries, the testing-README row it must add, and the commit instruction with the trailers verbatim.
+The first line of stdout is the routing flags: `--background --write --fresh --cwd <workspace>/code`, plus `--model <M>` and `--effort <E>` when intake recorded them. Everything after it is the task: the objective, the `SPEC-NNN R<n>` rows it satisfies, the files, the steps, the acceptance command, the branch, the boundaries, the testing-README row it must add, and the commit instruction with the trailers verbatim.
 
 Dispatch the whole stdout verbatim through `Agent(subagent_type: "codex:codex-rescue")`. Do not summarize it, reorder it, or drop the flag line: the routing flags travel inside the prompt text because the `Agent` tool's `model` parameter cannot carry a Codex slug. The agent returns the job id.
 
@@ -58,7 +54,7 @@ Dispatch the whole stdout verbatim through `Agent(subagent_type: "codex:codex-re
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py codex wait <job-id> --slug <slug>
 ```
 
-This polls the companion script and prints the result JSON. The default timeout is 1800000 milliseconds; override it with `--timeout-ms <n>` for a task you expect to run longer. An empty return from the agent, a missing job id, or a failed job is a delivery failure.
+This polls the companion script, naming the code repository as the job's workspace root, and prints the result JSON. The default timeout is 1800000 milliseconds; override it with `--timeout-ms <n>` for a task you expect to run longer. The companion reports `status`, `threadId`, `touchedFiles`, `rawOutput`, and `reasoningSummary`, with no model name and no token count, so record the job id and the wall time from `startedAt` and `completedAt` in your step summary, and say the model is whatever `~/.codex/config.toml` sets when intake recorded no override. Exit `0` means the job completed; delivery is still judged by `check delivery`. An empty return from the agent, a missing job id, or a failed job is a delivery failure.
 
 **4. Check the delivery.**
 
@@ -66,11 +62,11 @@ This polls the companion script and prints the result JSON. The default timeout 
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check delivery --slug <slug> --task <n>
 ```
 
-The script judges the repository, not Codex's report. It prints `acceptance: <cmd>` before it runs that command, so the line it executes is visible in the transcript. Read every `**Acceptance:**` line in `tasks.md` yourself before the first dispatch, and reject any that is not the repository's own test or lint runner: the script runs it as a shell command with your privileges. Its findings:
+The script judges the repository, not Codex's report. It prints `acceptance: <cmd>` before it runs that command, so the line it executes is visible in the transcript. Every path in `tasks.md` is relative to the code repository root, the `**Files:**` lines, the acceptance command, and every `Run:` line alike, because the check diffs and runs there. Read every `**Acceptance:**` line in `tasks.md` yourself before the first dispatch, and reject any that is not the repository's own test or lint runner: the script runs it as a shell command with your privileges. It ignores untracked files, as `preflight` does, because the acceptance command it just ran leaves `.venv/`, `uv.lock`, and caches of its own behind; a file Codex left uncommitted is missing from the diff instead, and the task reviewers read the diff. Its findings:
 
 | Finding | What it means |
 |---|---|
-| `tree-dirty` | uncommitted or untracked files in `code/`; Codex did not commit |
+| `tree-dirty` | uncommitted changes to tracked files in `code/`; Codex did not commit |
 | `diff-empty` | no commits since the dispatch base |
 | `diff-outside-allowlist: <paths>` | the diff touches files the task did not list. `docs/testing/README.md` is always inside the allowlist, because the task prompt tells every delivery to write it |
 | `acceptance-failed: exit <n>` | the script ran the acceptance command and it did not exit `0` |
@@ -128,10 +124,11 @@ An empty return from `Agent(subagent_type: "codex:codex-rescue")` is a delivery 
 
 Two delivery failures on one task stop the run. Do not try a third dispatch, and do not write the code yourself.
 
-1. Route the blocker per the rule in `references/record.md`: `record decision` for a product-scope question, `record adr` for a choice with long-lived architectural consequence.
+1. Route the blocker per the rule in `references/record.md`: `record decision` for a product-scope question, `record adr` for a choice with long-lived architectural consequence, `record delivery-decision` for everything else, which is where an execution-environment blocker belongs. The ADR route is closed when the intake boundaries exclude `code/docs/adr/`, because writing there is itself outside the boundaries.
 2. Write the escalation into `<run_dir>/escalations.md` yourself, naming the task, both `check delivery` finding sets, and the record ID.
-3. `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5.<n> escalated --slug <slug>`
-4. Stop and report. `escalations` exits `1` while that file is non-empty, and `preflight` reports `blocked-escalation` until oiler empties it.
+3. `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "<subject>"`. A record that is not committed has no hash in the ledger, and the next write to it trips the overwrite guard.
+4. `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5.<n> escalated --slug <slug>`, alone and with no `complete` line. build.md's rule that `escalated` follows a `complete` line covers whole steps; a `5.<n> complete` would advance `next_task` past a task that never delivered.
+5. Stop and report. `escalations` exits `1` while that file is non-empty, and `preflight` reports `blocked-escalation` until oiler empties it.
 
 ## One session per task
 
