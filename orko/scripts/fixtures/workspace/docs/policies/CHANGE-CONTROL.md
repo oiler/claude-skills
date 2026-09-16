@@ -2,7 +2,11 @@
 
 ## Living documents
 
-Objectives, roadmaps, research, status reports, draft specifications, and draft plans may evolve. Material changes should explain what changed and why.
+Objectives, roadmaps, backlog, research, status reports, draft specifications, and draft plans may evolve. Material changes should explain what changed and why.
+
+## The objective
+
+`OBJECTIVE.md` is living for wording, controlled for substance. Adding, removing, or changing an outcome, principle, constraint, or non-goal requires an accepted decision record, cited in the objective's change log. This is what makes a change of direction visible as a change rather than as drift.
 
 ## Controlled documents
 

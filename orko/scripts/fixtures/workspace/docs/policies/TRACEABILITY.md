@@ -2,12 +2,13 @@
 
 Use stable IDs so product intent can be traced without copying entire documents:
 
-`research → decision → specification → plan → code review → test/acceptance → release`
+`objective outcome → research → decision → specification → plan → code review → test/acceptance → release`
 
 ## Identifier conventions
 
 | Artifact | Example |
 | --- | --- |
+| Objective outcome, principle, non-goal | `OUT-1`, `PRIN-1`, `NG-1` |
 | Product decision | `DEC-001` |
 | Specification | `SPEC-001` |
 | Delivery plan | `PLAN-001` |
@@ -22,7 +23,7 @@ Record files are named `ID-NNN-short-title.md` inside the dossier directory for 
 
 ## Expected references
 
-- Specifications cite relevant evidence and decisions.
+- Specifications cite the objective outcome they serve, plus relevant evidence and decisions.
 - Plans identify every implemented specification and map requirements to verification.
 - Code branches, pull requests, or change descriptions cite relevant IDs.
 - Acceptance records map results to requirement IDs.

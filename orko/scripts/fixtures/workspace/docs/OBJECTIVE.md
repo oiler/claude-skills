@@ -16,11 +16,15 @@ last_reviewed: "[YYYY-MM-DD]"
 
 ## Intended outcomes
 
-<!-- Describe observable changes for users or the business. Distinguish outcomes from shipped features. -->
+<!-- Describe observable changes for users or the business. Distinguish outcomes from shipped features. Give each a stable ID; specifications cite the outcome they serve. -->
+
+- `OUT-1` [Outcome]
 
 ## Principles
 
-<!-- List durable rules that guide tradeoffs. -->
+<!-- List durable rules that guide tradeoffs. Give each a stable ID. -->
+
+- `PRIN-1` [Principle]
 
 ## Constraints
 
@@ -28,7 +32,9 @@ last_reviewed: "[YYYY-MM-DD]"
 
 ## Non-goals
 
-<!-- State adjacent problems the product intentionally does not solve. -->
+<!-- State adjacent problems the product intentionally does not solve. Give each a stable ID. A specification that touches a non-goal halts until a decision changes this list. -->
+
+- `NG-1` [Non-goal]
 
 ## Success measures
 
@@ -37,3 +43,11 @@ last_reviewed: "[YYYY-MM-DD]"
 ## Assumptions and open questions
 
 <!-- Label each item as an assumption, hypothesis, or open question. -->
+
+## Change log
+
+Outcomes, principles, constraints, and non-goals change only by decision. Record each change here; wording clarifications need no entry.
+
+| Date | Changed | Decision |
+| --- | --- | --- |
+| [YYYY-MM-DD] | [OUT-1 added] | [DEC-001] |

@@ -3,6 +3,8 @@ id: SPEC-NNN
 title: "[Capability]"
 status: draft
 product_version: "[MAJOR.MINOR]"
+serves:
+  - OUT-1
 owner: "[owner]"
 approved_at: null
 supersedes: null

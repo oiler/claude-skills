@@ -55,6 +55,16 @@ case $st in
   *) warn "status is $st; implementation should wait for accepted" ;;
 esac
 
+# Serves a listed outcome
+serves=$(sed -nE '/^serves:/,/^[a-z_]+:/p' "$spec" | grep -oE 'OUT-[0-9]+' || true)
+if [[ -z $serves ]]; then
+  fail "serves: names no OUT-N outcome; a spec that serves no objective outcome is drift or an objective gap"
+else
+  for o in $serves; do
+    grep -qE "^- \`$o\`" "$docs/OBJECTIVE.md" && ok "serves $o" || fail "serves $o but OBJECTIVE.md lists no such outcome"
+  done
+fi
+
 # Placeholders
 left=$(placeholders "$spec")
 [[ -z $left ]] && ok "no placeholders" || fail "placeholders remain:"$'\n'"$left"
