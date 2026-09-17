@@ -738,6 +738,13 @@ class TestValidatePlan:
         messages = " ".join(f.message for f in orko.validate_plan(text))
         assert "task block" in messages.lower()
 
+    def test_a_task_with_no_title_is_reported(self):
+        # `commit --task` builds its subject from the title; an empty one would
+        # otherwise surface there as a complaint about a `--message` never passed.
+        text = PLAN_OK.replace("### Task 1: First component", "### Task 1:")
+        messages = " ".join(f.message for f in orko.validate_plan(text))
+        assert "task 1 has no title" in messages
+
     def test_task_without_files_subsection_is_reported(self):
         text = PLAN_OK.replace("**Files:**\n- Create: `src/demo.py`\n", "")
         messages = " ".join(f.message for f in orko.validate_plan(text))
@@ -1444,8 +1451,8 @@ class TestPreflight:
         code = orko.main(["preflight", "--slug", "demo-topic", "--workspace", str(workspace)])
         captured = capsys.readouterr()
         assert code == 0, captured.out
-        assert f"orko: {orko.rel(workspace, path)} is not committed; no floor recorded" \
-            in captured.err
+        assert (f"orko: {orko.rel(workspace, path)} is not committed; no floor recorded, "
+                "unguarded until it is committed") in captured.err
         assert orko.rel(workspace, path) not in orko.hashes(Path(payload["ledger"]))
 
     def test_a_tracked_record_missing_from_the_tree_is_named_not_raised(self, workspace, capsys):
@@ -1462,6 +1469,20 @@ class TestPreflight:
         orko.rehash_gate_records(workspace, orko._describe_run(workspace, "demo-topic"))
         assert (f"orko: {orko.rel(workspace, path)} is tracked but missing from the tree; "
                 "no floor recorded") in capsys.readouterr().err
+
+    def test_a_staged_uncommitted_record_gets_no_hash_floor(self, workspace, capsys):
+        # `rehash_gate_records` is called directly: `preflight` stops at
+        # `docs-dirty` on a staged record. The index is not the commit, so a
+        # `git add`ed record has no committed bytes and gets no floor.
+        _, payload = init_run(workspace, capsys)
+        _, spec = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        path = Path(spec["path"])
+        subprocess.run(["git", "-C", str(workspace / "docs"), "add",
+                        str(path.relative_to(workspace / "docs"))], check=True)
+        capsys.readouterr()
+        orko.rehash_gate_records(workspace, orko._describe_run(workspace, "demo-topic"))
+        assert f"orko: {orko.rel(workspace, path)} is not committed" in capsys.readouterr().err
+        assert orko.rel(workspace, path) not in orko.hashes(Path(payload["ledger"]))
 
     def test_a_second_clean_preflight_adds_no_hash_line(self, workspace, capsys):
         # `hashes()` is last-wins, so only a line count sees a floor rewritten
@@ -1991,6 +2012,15 @@ class TestCommit:
         assert "orko: skipping somedir (not a file; list files in **Files:**)" in err
         assert "missing, absolute, or outside" not in err
 
+    def test_an_empty_message_without_a_task_is_a_usage_error(self, workspace, capsys):
+        # The guard is on the subject, not on `--task`: a whitespace `--message`
+        # on a plain commit is the same missing subject.
+        init_run(workspace, capsys)
+        capsys.readouterr()
+        assert orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "   ",
+                          "--workspace", str(workspace)]) == 2
+        assert "orko: --message needs a subject" in capsys.readouterr().err
+
     def test_nothing_to_stage_exits_2(self, workspace, capsys):
         init_run(workspace, capsys)
         assert orko.main(["commit", "code", "--slug", "demo-topic", "--message", "x",
@@ -2196,6 +2226,32 @@ class TestCommitTask:
         capsys.readouterr()
         assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
                           "--message", "fix F1", "--workspace", str(workspace)]) == 2
+        assert "orko: nothing changed in code" in capsys.readouterr().err
+        assert git_out(workspace / "code", "rev-parse", "HEAD").strip() == head
+
+    def test_a_listed_leftover_left_unstageable_is_never_already_landed(self, workspace, capsys):
+        # The one shape where the tree test's allowlist clause decides: a task
+        # lists `uv.lock`, the delivery lands, and a second attempt leaves a
+        # symlink to a directory where the lockfile was. `git status` names the
+        # path, nothing can stage it, and without the clause the leftover filter
+        # would hide it and report attempt 1's sha as this attempt's.
+        self._run(workspace, capsys)
+        tasks = workspace / ".orko/demo-topic/tasks.md"
+        tasks.write_text(tasks.read_text().replace(
+            "- Create: `orko/scripts/orko.py` (from",
+            "- Create: `uv.lock`\n- Create: `orko/scripts/orko.py` (from", 1))
+        self._dispatch_base(workspace)
+        self._write(workspace, "orko/scripts/orko.py")
+        self._write(workspace, "uv.lock", "lock\n")
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        head = git_out(workspace / "code", "rev-parse", "HEAD").strip()
+        lock = workspace / "code/uv.lock"
+        lock.unlink()
+        lock.symlink_to("orko")
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 2
         assert "orko: nothing changed in code" in capsys.readouterr().err
         assert git_out(workspace / "code", "rev-parse", "HEAD").strip() == head
 

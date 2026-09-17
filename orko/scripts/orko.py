@@ -235,11 +235,15 @@ def validate_plan(text: str) -> list[Finding]:
     # of a block: the scanned text for the structural rules, and the raw text
     # for the acceptance line, whose command lives in backticks.
     raw_lines = text.split("\n")
-    for position, (line, _) in enumerate(heads):
+    for position, (line, head) in enumerate(heads):
         end = heads[position + 1][0] if position + 1 < len(heads) else len(raw_lines)
         line_no = line + 1
         block = "\n".join(lines[line:end])
         raw_block = "\n".join(raw_lines[line:end])
+        # The title is the delivery commit's subject under `commit --task`, so
+        # a task with none is refused here, where the fix is an edit to the plan.
+        if not head.group("title").strip():
+            findings.append(Finding(line_no, f"task {head.group('n')} has no title"))
         if "**Files:**" not in block:
             findings.append(Finding(line_no, "task block has no '**Files:**' subsection"))
         if not re.search(r"^\s*-\s*\[ \]\s*\*\*Step", block, re.MULTILINE):
@@ -1299,16 +1303,18 @@ def _dirty(repo: Path) -> bool:
                      "--untracked-files=no").stdout.strip())
 
 
-def index_tracks(ws: Path, path: str) -> bool:
-    """Whether the repository named by `path`'s first segment tracks it.
+def head_tracks(ws: Path, path: str) -> bool:
+    """Whether HEAD of the repository named by `path`'s first segment holds it.
 
-    A record path is `<repo>/<rest>`; anything else, including a bare filename,
-    belongs to no repository this run checks and is never tracked.
+    HEAD rather than the index: a `git add`ed record is tracked and still has
+    no committed bytes, and the floor's whole claim is "committed". A record
+    path is `<repo>/<rest>`; anything else, including a bare filename, belongs
+    to no repository this run checks and is never committed.
     """
     repo, _, rest = path.partition("/")
     if not rest:
         return False
-    return rest in _git(ws / repo, "ls-files", "-z", "--", rest).stdout.split("\0")
+    return _git(ws / repo, "cat-file", "-e", f"HEAD:{rest}").returncode == 0
 
 
 def rehash_gate_records(ws: Path, run: dict) -> None:
@@ -1318,9 +1324,9 @@ def rehash_gate_records(ws: Path, run: dict) -> None:
     reviews, and which of the three a human touched is not knowable here, so
     every record the ledger names is re-hashed.
 
-    Only a tracked record, and only from `sha256_file` — the same bytes
+    Only a record HEAD holds, and only from `sha256_file` — the same bytes
     `overwrite_guard` and `commit` hash. The caller runs this after the dirty
-    checks passed, so a tracked record's disk copy is its committed copy, which
+    checks passed, so a committed record's disk copy is its committed copy, which
     is what makes the two byte sources one; a floor read from the blob instead
     would differ from the disk under any end-of-line or filter attribute and the
     guard would trip on every record nobody had edited. An untracked record has
@@ -1333,9 +1339,11 @@ def rehash_gate_records(ws: Path, run: dict) -> None:
     floor = hashes(ledger)
     for entry in records(ledger):
         target = ws / entry["path"]
-        if not index_tracks(ws, entry["path"]):
-            print(f"orko: {entry['path']} is not committed; no floor recorded",
-                  file=sys.stderr)
+        if not head_tracks(ws, entry["path"]):
+            # With no floor the guard has nothing to compare, so a later hand
+            # edit to this record is never reported: the line says so.
+            print(f"orko: {entry['path']} is not committed; no floor recorded, "
+                  "unguarded until it is committed", file=sys.stderr)
             continue
         # A tracked record absent from the tree is a `docs-dirty` finding, so
         # `preflight` stops before this; the guard is what keeps a direct call,
@@ -2145,12 +2153,14 @@ def cmd_commit(args: argparse.Namespace) -> int:
 
         Exit 2 is a stop everywhere in the skill, so a re-run of step 5 after a
         compaction must report the commit it finds instead of ending the run.
-        Three questions, because a weaker test called somebody else's commit
-        this task's delivery: the working tree must hold no change at all beyond
-        the acceptance command's leftovers, whatever file it would be in, and a
-        commit whose subject leads with this task's number must exist since the
-        dispatch base. The subject is the only mark the loop leaves that says
-        which task a commit belongs to.
+        Four gates, then a search, because a weaker test called somebody else's
+        commit this task's delivery: this is a `--task` call; no `--message` was
+        passed; the ledger holds a dispatch base for the task; and the working
+        tree holds no change at all beyond the acceptance command's leftovers,
+        whatever file it would be in, a path the task lists counting as a change
+        even when it is a leftover name. Then a commit whose subject leads with
+        this task's number must exist since the base. The subject is the only
+        mark the loop leaves that says which task a commit belongs to.
         """
         if task is None:
             return None
