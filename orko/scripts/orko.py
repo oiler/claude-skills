@@ -1307,14 +1307,15 @@ def head_tracks(ws: Path, path: str) -> bool:
     """Whether HEAD of the repository named by `path`'s first segment holds it.
 
     HEAD rather than the index: a `git add`ed record is tracked and still has
-    no committed bytes, and the floor's whole claim is "committed". A record
-    path is `<repo>/<rest>`; anything else, including a bare filename, belongs
-    to no repository this run checks and is never committed.
+    no committed bytes, and the floor's whole claim is "committed". A blob,
+    not any object: `cat-file -e` is as happy with a tree, and a record is a
+    file. A record path is `<repo>/<rest>`; anything else, including a bare
+    filename, belongs to no repository this run checks and is never committed.
     """
     repo, _, rest = path.partition("/")
     if not rest:
         return False
-    return _git(ws / repo, "cat-file", "-e", f"HEAD:{rest}").returncode == 0
+    return _git(ws / repo, "cat-file", "-t", f"HEAD:{rest}").stdout.strip() == "blob"
 
 
 def rehash_gate_records(ws: Path, run: dict) -> None:
@@ -1329,9 +1330,10 @@ def rehash_gate_records(ws: Path, run: dict) -> None:
     checks passed, so a committed record's disk copy is its committed copy, which
     is what makes the two byte sources one; a floor read from the blob instead
     would differ from the disk under any end-of-line or filter attribute and the
-    guard would trip on every record nobody had edited. An untracked record has
-    no committed copy at all, so it gets no floor: the guard's own message calls
-    a floor "its last committed hash", and this is what keeps that true.
+    guard would trip on every record nobody had edited. A record no commit
+    holds, untracked or only staged, has no committed copy at all, so it gets
+    no floor: the guard's own message calls a floor "its last committed hash",
+    and this is what keeps that true.
     """
     ledger = Path(run["ledger"])
     # Only a floor that actually moved is written: a run that resumes at step 5
@@ -1345,11 +1347,11 @@ def rehash_gate_records(ws: Path, run: dict) -> None:
             print(f"orko: {entry['path']} is not committed; no floor recorded, "
                   "unguarded until it is committed", file=sys.stderr)
             continue
-        # A tracked record absent from the tree is a `docs-dirty` finding, so
+        # A committed record absent from the tree is a `docs-dirty` finding, so
         # `preflight` stops before this; the guard is what keeps a direct call,
         # or a future caller, from a traceback instead of a line.
         if not target.is_file():
-            print(f"orko: {entry['path']} is tracked but missing from the tree; "
+            print(f"orko: {entry['path']} is committed but missing from the tree; "
                   "no floor recorded", file=sys.stderr)
             continue
         sha = sha256_file(target)
@@ -2160,12 +2162,14 @@ def cmd_commit(args: argparse.Namespace) -> int:
         whatever file it would be in, a path the task lists counting as a change
         even when it is a leftover name. Then a commit whose subject leads with
         this task's number must exist since the base. The subject is the only
-        mark the loop leaves that says which task a commit belongs to.
+        mark the loop leaves that says which task a commit belongs to. The
+        caller adds the condition `codex.md` counts fifth, that nothing was
+        staged, before it reads the answer.
         """
         if task is None:
             return None
-        # `--message` is only ever passed to name a new commit, and a step-6 fix
-        # always passes one. Reading a landed commit as that fix would drop the
+        # `--message` is only ever passed to name a new commit, and the loop's
+        # step-7 fix always passes one. Reading a landed commit as that fix would drop the
         # finding it was meant to close.
         if args.message is not None:
             return None

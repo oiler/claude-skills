@@ -1455,8 +1455,8 @@ class TestPreflight:
                 "unguarded until it is committed") in captured.err
         assert orko.rel(workspace, path) not in orko.hashes(Path(payload["ledger"]))
 
-    def test_a_tracked_record_missing_from_the_tree_is_named_not_raised(self, workspace, capsys):
-        # `rehash_gate_records` is called directly: a deleted tracked record is a
+    def test_a_committed_record_missing_from_the_tree_is_named_not_raised(self, workspace, capsys):
+        # `rehash_gate_records` is called directly: a deleted committed record is a
         # `docs-dirty` finding, so `preflight` never reaches the re-hash with one.
         # The guard is what stands between that state and a traceback.
         init_run(workspace, capsys)
@@ -1467,7 +1467,7 @@ class TestPreflight:
         path.unlink()
         capsys.readouterr()
         orko.rehash_gate_records(workspace, orko._describe_run(workspace, "demo-topic"))
-        assert (f"orko: {orko.rel(workspace, path)} is tracked but missing from the tree; "
+        assert (f"orko: {orko.rel(workspace, path)} is committed but missing from the tree; "
                 "no floor recorded") in capsys.readouterr().err
 
     def test_a_staged_uncommitted_record_gets_no_hash_floor(self, workspace, capsys):
@@ -1483,6 +1483,17 @@ class TestPreflight:
         orko.rehash_gate_records(workspace, orko._describe_run(workspace, "demo-topic"))
         assert f"orko: {orko.rel(workspace, path)} is not committed" in capsys.readouterr().err
         assert orko.rel(workspace, path) not in orko.hashes(Path(payload["ledger"]))
+
+    def test_a_directory_head_holds_is_not_a_committed_record(self, workspace, capsys):
+        # `cat-file -e` answers yes for a tree too. A record is a file, so only
+        # a blob at HEAD counts; a directory there would otherwise reach the
+        # missing-from-the-tree line and name the wrong cause.
+        init_run(workspace, capsys)
+        rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m",
+                   "--path", "STATUS.md", "--workspace", str(workspace)])
+        assert orko.head_tracks(workspace, "docs/versions/0.1/README.md")
+        assert not orko.head_tracks(workspace, "docs/versions/0.1")
 
     def test_a_second_clean_preflight_adds_no_hash_line(self, workspace, capsys):
         # `hashes()` is last-wins, so only a line count sees a floor rewritten
@@ -2166,8 +2177,8 @@ class TestCommitTask:
                    "--slug", "demo-topic", "--workspace", str(workspace)])
 
     def test_uncommitted_work_outside_the_task_is_never_already_landed(self, workspace, capsys):
-        # The step-6 route: a review fix lands in a file the task never listed.
-        # Reporting the earlier commit would call an uncommitted delivery done.
+        # A fix lands in a file the task never listed and `--task` is re-run.
+        # Reporting the earlier commit would call an uncommitted change done.
         self._run(workspace, capsys)
         self._dispatch_base(workspace)
         self._write(workspace, "orko/scripts/orko.py")
@@ -2213,7 +2224,7 @@ class TestCommitTask:
         assert task_sha != git_out(workspace / "code", "rev-parse", "HEAD").strip()
 
     def test_a_message_never_reports_an_earlier_commit_as_the_fix(self, workspace, capsys):
-        # The step-6 route: every fix commit passes `--message`, and a re-dispatch
+        # The loop's step-7 route: every fix commit passes `--message`, and a re-dispatch
         # that wrote nothing leaves a leftover-only tree. Reporting attempt 1's
         # sha there would drop the accepted finding without a word.
         self._run(workspace, capsys)
@@ -2275,7 +2286,7 @@ class TestCommitTask:
         assert "orko: --message needs a subject" in capsys.readouterr().err
 
     def test_the_newest_task_commit_in_range_is_the_one_reported(self, workspace, capsys):
-        # Two `Task 1:` commits is what step 6 creates: the delivery and its fix.
+        # Two `Task 1:` commits is what the loop's step 7 creates: the delivery and its fix.
         # The fix is the one that carries the task now.
         self._run(workspace, capsys)
         self._dispatch_base(workspace)
