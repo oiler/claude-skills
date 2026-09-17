@@ -34,7 +34,7 @@ git -C code rev-parse HEAD
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5.<n> dispatched --slug <slug> --commit <sha>
 ```
 
-The sha is the base the delivery check diffs against. Two commands, never one substituted command.
+The sha is the base the delivery check diffs against. Two commands, never one substituted command. The base is recorded once per task and never re-recorded: a re-dispatch at step 7 keeps it, so `<base>..HEAD` holds the delivery and every fix commit together.
 
 **2. Build and dispatch the prompt.**
 
@@ -94,9 +94,9 @@ Only after `check delivery` exits `0`. The script stages the task's `**Files:**`
 
 Running it twice is safe. The script reports the commit it already made, rather than making a second one, when all five of these hold: you passed no `--message`; the ledger carries a `ledger 5.<n> dispatched` line to read a base from; it found nothing to commit; the working tree holds no change at all beyond the acceptance command's leftovers, counting anything the task lists as a change whatever file it is in; and some commit since that base carries a `Task <n>:` subject. Then it prints the sha of the newest such commit — the fix rather than the delivery when the loop made both, and never HEAD, which anything may have moved since — with `"already": true`, and exits `0`, so a compaction between this step and step 6 costs nothing.
 
-`--message` is the first condition because passing one says you want a commit made now. A step-6 fix always passes one, so a re-dispatch that wrote nothing is refused here rather than answered with the commit it was supposed to fix.
+`--message` is the first condition because passing one says you want a commit made now. A step-7 fix always passes one, so a re-dispatch that wrote nothing is refused here rather than answered with the commit it was supposed to fix: exit `2` with `orko: nothing changed in code`, which on that route means the re-dispatch wrote nothing. Count it as a failed fix attempt, never as a stop.
 
-If any of the five fails it exits `2`, with `orko: nothing changed in code`, or with `orko: nothing to stage in code` when the task named no stageable path at all. Either is a stop to report, and neither names which condition failed: run `check delivery` again to find out, since it reports a missing dispatch line by name. The tree condition is the one that matters most: an uncommitted fix still sitting in the tree, in a file the task never listed, is never read as a delivery that landed.
+If any of the five fails it exits `2`, with `orko: nothing changed in code`, or with `orko: nothing to stage in code` when the task named no stageable path at all. Either is a stop to report, except `nothing changed in code` under a step-7 `--message`, which is the failed fix attempt above; neither names which condition failed: run `check delivery` again to find out, since it reports a missing dispatch line by name. The tree condition is the one that matters most: an uncommitted fix still sitting in the tree, in a file the task never listed, is never read as a delivery that landed.
 
 The subject is yours to write but not to shape. `--message` is the tail of `Task <n>:`, a `Task <n>:` you write yourself is not repeated, and a `--message` with no text in it is a usage error rather than a silent fallback to the task's title.
 
@@ -109,7 +109,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task-review <slug> --task <n> 
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task-review <slug> --task <n> --lens code-quality
 ```
 
-The reviewers read `<base>..HEAD`, which exists because step 5 committed. Both are report-only, and their findings land in `findings/5.<n>/<lens>.md`. Run `check delivery` again on their files if either one edited the tree; a reviewer that wrote code is a failed seat, not a delivery.
+The reviewers read `<base>..HEAD` from the base step 1 recorded, which exists because step 5 committed; after a step-7 fix it holds the delivery commit and every fix commit, because the base never moves. Both are report-only, and their findings land in `findings/5.<n>/<lens>.md`. Run `check delivery` again on their files if either one edited the tree; a reviewer that wrote code is a failed seat, not a delivery.
 
 **7. Decide and re-dispatch.** The loop allows one retry per task, for a step-4 delivery failure or a step-6 finding alike:
 
@@ -117,7 +117,7 @@ The reviewers read `<base>..HEAD`, which exists because step 5 committed. Both a
 uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task <slug> --task <n> --attempt resume --failure "<what failed>"
 ```
 
-Name the failure concretely: the finding, and for `diff-outside-allowlist` the paths. Dispatch the stdout verbatim as in step 2 and wait as in step 3. A failed delivery leaves the tree exactly as Codex left it, which is what `--resume` continues from: do not clean it up, do not commit it, and do not write the fix yourself. A second delivery failure is an escalation. A re-dispatch after step 6, on a task already committed, starts again at step 1 rather than step 2: record a new `ledger 5.<n> dispatched --commit <sha>` at the current HEAD first, so `<base>..HEAD` covers the re-dispatch alone and neither step 4 nor step 5 can read the commit already in range as this attempt's work. Then it lands a second commit: pass `--message "<what the fix was>"`, which becomes the tail of the same `Task <n>:` subject.
+Name the failure concretely: the finding, and for `diff-outside-allowlist` the paths. Dispatch the stdout verbatim as in step 2 and wait as in step 3. A failed delivery leaves the tree exactly as Codex left it, which is what `--resume` continues from: do not clean it up, do not commit it, and do not write the fix yourself. A second delivery failure is an escalation. A re-dispatch after step 6, on a task already committed, keeps the base step 1 recorded: never record a second `dispatched` line for the task. Wait as in step 3, run `check delivery --task <n>` as in step 4, then land the fix with `commit code --slug <slug> --task <n> --message "<what the fix addresses>"`, which becomes the tail of the same `Task <n>:` subject. `check delivery` passes on that route even when the re-dispatch wrote nothing, because the delivery commit is still in `<base>..HEAD`, so the commit is the gate that tells: `--message` disables the `already` branch, and exit `2` with `orko: nothing changed in code` means the re-dispatch wrote nothing. Count it as a failed fix attempt, never as a stop.
 
 `record disposition` is not used for review findings here. Task-review findings have no review record: `REVIEW-NNN` for the code is minted once at step 6 of the build, over the whole branch diff. Decide each finding in your own message, and either fix it now by re-dispatching as above, or carry it to step 6's review, where the code review seats see it in the branch diff anyway.
 
@@ -155,7 +155,7 @@ Two delivery failures on one task stop the run. Do not try a third dispatch, and
 
 1. Route the blocker per the rule in `references/record.md`: `record decision` for a product-scope question, `record adr` for a choice with long-lived architectural consequence, `record delivery-decision` for everything else, which is where an execution-environment blocker belongs. The ADR route is closed when the intake boundaries exclude `code/docs/adr/`, because writing there is itself outside the boundaries.
 2. Write the escalation into `<run_dir>/escalations.md` yourself, naming the task, both `check delivery` finding sets, and the record ID. A delivery-decision row has no ID of its own, so for that route name `PLAN-NNN` and quote the row's first cell. Carry each attempt's job id and wall time there too: the escalation path writes no step summary, and this file is the only artifact it leaves.
-3. `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "<subject>"`. A record that is not committed has no hash in the ledger, and the next write to it trips the overwrite guard.
+3. `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "<subject>"`. A record that is not committed has no hash in the ledger, so the overwrite guard cannot see the next write to it: it is unguarded until it is committed.
 4. `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5.<n> escalated --slug <slug>`, alone and with no `complete` line. build.md's rule that `escalated` follows a `complete` line covers whole steps; a `5.<n> complete` would advance `next_task` past a task that never delivered.
 5. Stop and report. Leave the code repository's working tree exactly as Codex left it and say so in the report: it is the evidence. Name `git -C code status --short` as the command that shows it, because a delivery made of new files is untracked and `preflight` ignores untracked files, so no finding points at it. `escalations` exits `1` while that file is non-empty, and `preflight` reports `blocked-escalation` until oiler empties it.
 
@@ -163,7 +163,7 @@ Two delivery failures on one task stop the run. Do not try a third dispatch, and
 
 The whole loop for a single task must finish inside one Claude session, because the plugin's `SessionEnd` hook deletes the session's jobs, which takes the job id and the resume target with it. Compaction inside a session is fine: the ledger, not your context, is what `status` reads to resume.
 
-Do not start a task you cannot finish. If a session is ending, close the current task through step 8 first, or leave it undispatched. A dispatched task with no `5.<n> complete` line resumes cleanly at the top of the loop, and the re-dispatch is fresh.
+Do not start a task you cannot finish. If a session is ending, close the current task through step 8 first, or leave it undispatched. A dispatched task with no `5.<n> complete` line resumes at step 4 under the base step 1 recorded, never at step 1: `check delivery` reads the working tree and `<base>..HEAD` alike, so a delivery Codex left uncommitted and one already committed both pass it, and step 5 then commits the first or reports the second with `already: true`. `diff-empty` there means nothing was delivered, so dispatch fresh at step 2, still under the same base.
 
 ## Preflight
 
