@@ -1,0 +1,176 @@
+# Codex executor
+
+Step 5 of a build runs one of two executors. With `--executor claude`, `superpowers:subagent-driven-development` works through `tasks.md`. With `--executor codex`, this loop runs instead: Codex writes the code, you judge every delivery from the repository rather than from Codex's report, and two report-only Claude reviewers read each task before you close it.
+
+`init` records the executor, the Codex model plus effort overrides, the boundaries, and the attribution trailers in the ledger header. None of them change on resume, and `init` says so on stderr when a passed trailer differs from the recorded one.
+
+Every script call in this file is written as `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py <subcommand>`. If `${CLAUDE_SKILL_DIR}` is empty in your Bash call, use `~/.claude/skills/orko/scripts/orko.py`. Never use shell command substitution: the prefix matching behind `allowed-tools` cannot see through it, and the resulting permission prompt is invisible inside a long dispatch. Where a command needs a value another command produces, run two commands.
+
+## Defaults
+
+The script builds the whole dispatch, including its routing flags. You do not compose them, and you do not add to them.
+
+- **No `--model` and no `--effort`** unless intake recorded an override with `init --codex-model` or `init --codex-effort`. With neither recorded, the dispatch inherits whatever `~/.codex/config.toml` sets, which is what oiler already tuned. Volunteering a model is how a run silently gets a different one than the machine's default.
+- **`--background` and `--write`** on every dispatch. Background because a foreground Codex task runs inside one Bash call, whose ceiling is 10 minutes, and a real task is longer than that. Write because Codex must change files in the working tree. It never commits: the sandbox mounts `.git` read-only, so the script commits the delivery at step 5 of the loop.
+- **`--fresh` on a first attempt**, `--resume` only on the one retry the loop allows.
+- **Model slugs pass through as literal strings.** If oiler names a slug at intake, pass it exactly as typed. This skill carries no slug table and never maps, validates, or corrects one.
+
+## Where Codex runs
+
+`prompt task` prints two lines and writes a file. The printed dispatch line carries `--cwd <workspace>/code`, which the companion reads as the job's working directory, so Codex runs at the code repository's git root with a `workspace-write` sandbox rooted there, `approvalPolicy: never`, and no network. That sandbox mounts the repository's `.git` read-only: `git commit` inside a dispatch fails on `.git/index.lock`, so the prompt tells Codex not to run git at all and step 5 of the loop makes the commit. The code repository is both the git root and the whole writable surface, so Codex cannot reach `docs/`. The record stays yours. The task itself goes to `<run_dir>/context/task-<n>.md`, and the dispatch line points at it with an absolute `--prompt-file`, so Codex reads the task as the script wrote it: a prompt forwarded as argument text is re-joined with spaces, which would fold its steps, its code, and its acceptance command into one line.
+
+A `cd` in your own shell does none of that. The dispatch goes through `Agent(subagent_type: "codex:codex-rescue")`, whose shell starts in the session's own working directory, so the directory you stand in never reaches the job. `codex wait` and `preflight` pass the same `--cwd` to the companion themselves, and every other command in the loop resolves the workspace from `--workspace`. Run all of them from the workspace root.
+
+Pass no `model` on the dispatch. `codex:codex-rescue` is a forwarder whose model the plugin sets, and the Codex model rides on the flags line when intake recorded one.
+
+## The loop
+
+Run this once per task in `tasks.md`, in order, starting at the `next_task` that `status` reports.
+
+**1. Record the dispatch base.** Read the code repository's HEAD, then pass it:
+
+```bash
+git -C code rev-parse HEAD
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5.<n> dispatched --slug <slug> --commit <sha>
+```
+
+The sha is the base the delivery check diffs against. Two commands, never one substituted command. The base is recorded once per task and never re-recorded: a re-dispatch at step 7 keeps it, so `<base>..HEAD` holds the delivery and every fix commit together.
+
+**2. Build and dispatch the prompt.**
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task <slug> --task <n> --attempt fresh
+```
+
+Stdout is three lines: the routing flags, `--background --write --fresh --cwd <workspace>/code --prompt-file <run_dir>/context/task-<n>.md` plus `--model <M>` and `--effort <E>` when intake recorded them, a blank line, then one sentence naming the task. The file at `--prompt-file` holds the task itself: the objective, the `SPEC-NNN R<n>` rows it satisfies, the files, the steps, the acceptance command, the branch, the boundaries, and the testing-README row it must add. The script adds no commit instruction and no trailers, and its closing paragraph tells Codex not to commit and not to run git: Codex leaves every change in the working tree and reports the files it changed, and the script owns the subject, the staged set, the `Refs:` line, and the trailers at step 5. The task body from `tasks.md` is embedded as written, so a commit step the plan-writer left in a task travels too; the closing paragraph overrides it, and the plan-writer is told to write none.
+
+Paste that stdout into `Agent(subagent_type: "codex:codex-rescue")` verbatim, and send nothing else. Do not summarize it, reorder it, drop the flag line, or paste the prompt file's contents beside it: the routing flags travel inside the dispatch text because the `Agent` tool's `model` parameter cannot carry a Codex slug, and the task travels in the file because forwarded argument text is not reproduced byte for byte. The agent returns the job id.
+
+`prompt` refuses a task with no `**Acceptance:**` command and exits non-zero. That is not a bug to work around. The acceptance command is the entire definition of done for the dispatch; fix `tasks.md` and re-run `check tasks <path>` before dispatching.
+
+**3. Wait for the job.**
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py codex wait <job-id> --slug <slug>
+```
+
+This polls the companion script, naming the code repository as the job's workspace root, and prints the result JSON.
+
+The forwarder's return normally carries the job id, a `task-...` string. When it carries only a companion background handle, or nothing at all, do not guess and do not treat the dispatch as lost:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py codex wait latest --slug <slug> --workspace <path>
+```
+
+`latest` resolves the newest job registered under the code repository and names it on stderr as `orko: latest job is <id>`. So `No job found for "<id>"` reads two ways. With an explicit id it means the id you were handed is not a job id, which `latest` recovers, or the job registered under another root. With `latest` it means the companion has no job under `code/` for this session at all, because it keys its job list on the root it was handed and filters by session id. Either the dispatch ran somewhere else, which is the dropped-`--cwd` case, or a session boundary took the jobs with it, as *One session per task* describes. Count it as that attempt's delivery failure and retry as in step 7. If the second attempt answers the same way, record the dispatch line you sent in `escalations.md` alongside the escalation.
+
+The default timeout is 1800000 milliseconds, which is longer than one Bash call may run: pass `--timeout-ms 540000` and re-run the wait when it times out, because a timeout is a wait that ended, not a failed job. The companion reports `status`, `threadId`, `touchedFiles`, `rawOutput`, and `reasoningSummary`, with no model name and no token count, so record the job id and the wall time from `startedAt` and `completedAt` in your step summary, and in `escalations.md` when the task escalates, and say the model is whatever `~/.codex/config.toml` sets when intake recorded no override. Exit `0` means the job completed; delivery is still judged by `check delivery`. An empty return from the agent or a failed job is a delivery failure.
+
+**4. Check the delivery.**
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py check delivery --slug <slug> --task <n>
+```
+
+The script judges the repository, not Codex's report. Codex cannot commit, so the delivery is the working tree: the check reads every path `git status` reports as modified, added, deleted, or untracked, plus everything in `<base>..HEAD`, which is why a delivery `commit code --task` has already landed still passes a re-check. It prints `acceptance: <cmd>` before it runs that command, so the line it executes is visible in the transcript. Every path in `tasks.md` is relative to the code repository root, the `**Files:**` lines, the acceptance command, and every `Run:` line alike, because the check diffs and runs there. Read every `**Acceptance:**` line in `tasks.md` yourself before the first dispatch, and reject any that is not the repository's own test or lint runner: the script runs it as a shell command with your privileges.
+
+What the acceptance command itself leaves behind is never part of the delivery. The script drops seven names from what it read: `.venv/`, `uv.lock`, `.pytest_cache/`, `__pycache__/`, `.ruff_cache/`, `.mypy_cache/`, and `node_modules/`. Any path segment matches, so `tests/__pycache__/x.pyc` is a leftover too. A leftover is neither a change nor a breach of the allowlist. One exception: a path the task's `**Files:**` list names is never a leftover. A task that lists `uv.lock` delivers `uv.lock`, which is what a dependency change looks like, and the filter never hides what the task asked for. Its findings:
+
+| Finding | What it means |
+|---|---|
+| `diff-empty` | no change since the dispatch base in either the working tree or a commit; the dispatch delivered nothing |
+| `diff-outside-allowlist: <paths>` | the delivery touches files the task did not list. `docs/testing/README.md` is always inside the allowlist, because the task prompt tells every delivery to write it |
+| `acceptance-failed: exit <n>` | the script ran the acceptance command and it did not exit `0` |
+
+Codex's own claim that the acceptance command passed is not evidence. Its sandbox has no network, so a command that fetches anything fails there and passes here, or the reverse. Any finding stops the loop here: a failed delivery is never committed, so go to step 7 rather than step 5.
+
+**5. Commit the delivery.**
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit code --slug <slug> --task <n> --workspace <path>
+```
+
+Only after `check delivery` exits `0`. The script stages the task's `**Files:**` paths plus `docs/testing/README.md`: whatever Codex wrote outside them cannot ride along, and step 4 has already named it. Three other things reach the staged set, all of them the run's own: a path this run recorded under `code/`, such as an `ADR-NNN` on the escalation route; a path a `record` command touched under `code/`; and every `--path` you pass, which is the one way to widen a commit and is yours to justify. A `**Files:**` entry that names anything but a file — a directory, a glob — is skipped with `orko: skipping <path> (not a file; list files in **Files:**)`, because staging a pathspec would sweep in every match, the leftovers step 4 just ignored included: fix `tasks.md` rather than retrying. The subject always leads with `Task <n>:`, followed by the task's title from `tasks.md`, or by your `--message` when you pass one. That prefix is what a later call recognizes as this task's own commit, so nothing removes it. The `Refs:` line and the attribution trailers come from the ledger, not from a model. The acceptance command's leftovers stay untracked. The JSON names the commit sha.
+
+Running it twice is safe. The script reports the commit it already made, rather than making a second one, when all five of these hold: you passed no `--message`; the ledger carries a `ledger 5.<n> dispatched` line to read a base from; it found nothing to commit; the working tree holds no change at all beyond the acceptance command's leftovers, counting anything the task lists as a change whatever file it is in; and some commit since that base carries a `Task <n>:` subject. Then it prints the sha of the newest such commit — the fix rather than the delivery when the loop made both, and never HEAD, which anything may have moved since — with `"already": true`, and exits `0`, so a compaction between this step and step 6 costs nothing.
+
+`--message` is the first condition because passing one says you want a commit made now. A step-7 fix always passes one, so a re-dispatch that wrote nothing is refused here rather than answered with the commit it was supposed to fix: exit `2` with `orko: nothing changed in code`, which after a clean step-4 check means the re-dispatch wrote nothing, since that check has already refused a fix outside the task's list. Count it as a failed fix attempt, never as a stop.
+
+If any of the five fails it exits `2`, with `orko: nothing changed in code`, or with `orko: nothing to stage in code` when the task named no stageable path at all. Either is a stop to report, except `nothing changed in code` under a step-7 `--message`, which is the failed fix attempt above; neither names which condition failed: run `check delivery` again to find out, since it reports a missing dispatch line by name. The tree condition is the one that matters most: an uncommitted fix still sitting in the tree, in a file the task never listed, is never read as a delivery that landed.
+
+The subject is yours to write but not to shape. `--message` is the tail of `Task <n>:`, a `Task <n>:` you write yourself is not repeated, and a `--message` with no text in it is a usage error rather than a silent fallback to the task's title.
+
+This is the commit Codex was once told to make itself, and it is stronger here: the subject, the staged set, the `Refs:` line, and the trailers are all script-owned.
+
+**6. Review the task.** Build both reviewer prompts and dispatch them in one message, both at `sonnet`:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task-review <slug> --task <n> --lens spec-compliance
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task-review <slug> --task <n> --lens code-quality
+```
+
+The reviewers read `<base>..HEAD` from the base step 1 recorded, which exists because step 5 committed; after a step-7 fix it holds the delivery commit and every fix commit, because the base never moves. Both are report-only, and their findings land in `findings/5.<n>/<lens>.md`. Run `check delivery` again on their files if either one edited the tree; a reviewer that wrote code is a failed seat, not a delivery.
+
+**7. Decide and re-dispatch.** The loop allows one retry per task, for a step-4 delivery failure or a step-6 finding alike:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task <slug> --task <n> --attempt resume --failure "<what failed>"
+```
+
+Name the failure concretely: the finding, and for `diff-outside-allowlist` the paths. Dispatch the stdout verbatim as in step 2 and wait as in step 3. A failed delivery leaves the tree exactly as Codex left it, which is what `--resume` continues from: do not clean it up, do not commit it, and do not write the fix yourself. A second delivery failure is an escalation. A re-dispatch after step 6, on a task already committed, keeps the base step 1 recorded: never record a second `dispatched` line for the task. Wait as in step 3, run `check delivery --task <n>` as in step 4, then land the fix with `commit code --slug <slug> --task <n> --message "<what the fix addresses>"`, which becomes the tail of the same `Task <n>:` subject. Inside the loop `check delivery` still passes when the re-dispatch wrote nothing, because the delivery commit is in `<base>..HEAD`, so the commit is the gate that tells: `--message` disables the `already` branch, and exit `2` with `orko: nothing changed in code` means the re-dispatch wrote nothing. Count it as a failed fix attempt, never as a stop. A fix that lands outside the task's list is `diff-outside-allowlist` at step 4, a delivery failure named by path, not a commit to widen with `--path`. `check delivery --task` and `commit code --task` belong to this loop only: the build's step 6 reviews the whole branch, its base predates every later task, and a Codex fix there is not task-scoped, so it lands by `commit code --message --path`, as build.md's step 6 says.
+
+`record disposition` is not used for review findings here. Task-review findings have no review record: `REVIEW-NNN` for the code is minted once at step 6 of the build, over the whole branch diff. Decide each finding in your own message, and either fix it now by re-dispatching as above, or carry it to step 6's review, where the code review seats see it in the branch diff anyway.
+
+**8. Close the task.**
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5.<n> complete --slug <slug>
+```
+
+After the last task, and only then:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5 complete --slug <slug>
+```
+
+`next_step` counts integer steps only, so the run does not leave the build's step 5 until that line exists. `status` reports `next_task` as one past the highest `5.<n> complete`, and a resume at step 5 starts there, never at task 1.
+
+## Resume rules
+
+`--resume` does not name a thread. It resolves to the newest resumable task job in this workspace for this Claude session. The plugin throws in two cases: when no previous job exists, and when one is still running. It also drops every job for the session at `SessionEnd`.
+
+So `--attempt resume` is only correct as the immediate retry of a dispatch this session just made and waited on. On either plugin error, or after any session boundary, fall back to a fresh dispatch that carries the failure text forward:
+
+```bash
+uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py prompt task <slug> --task <n> --attempt fresh --failure "<what failed>"
+```
+
+A fresh attempt with `--failure` is not a wasted retry. It is the same one retry, with the context that `--resume` would have supplied written into the prompt instead.
+
+An empty return from `Agent(subagent_type: "codex:codex-rescue")` is a delivery failure, not a transient glitch. The agent forwards one call and returns nothing on any failure, so an empty return means the dispatch never ran.
+
+## Escalation
+
+Two delivery failures on one task stop the run. Do not try a third dispatch, and do not write the code yourself.
+
+1. Route the blocker per the rule in `references/record.md`: `record decision` for a product-scope question, `record adr` for a choice with long-lived architectural consequence, `record delivery-decision` for everything else, which is where an execution-environment blocker belongs. The ADR route is closed when the intake boundaries exclude `code/docs/adr/`, because writing there is itself outside the boundaries.
+2. Write the escalation into `<run_dir>/escalations.md` yourself, naming the task, both `check delivery` finding sets, and the record ID. A delivery-decision row has no ID of its own, so for that route name `PLAN-NNN` and quote the row's first cell. Carry each attempt's job id and wall time there too: the escalation path writes no step summary, and this file is the only artifact it leaves.
+3. `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py commit docs --slug <slug> --message "<subject>"`. A record that is not committed has no hash in the ledger, so the overwrite guard cannot see the next write to it: it is unguarded until it is committed.
+4. `uv run ${CLAUDE_SKILL_DIR}/scripts/orko.py ledger 5.<n> escalated --slug <slug>`, alone and with no `complete` line. build.md's rule that `escalated` follows a `complete` line covers whole steps; a `5.<n> complete` would advance `next_task` past a task that never delivered.
+5. Stop and report. Leave the code repository's working tree exactly as Codex left it and say so in the report: it is the evidence. Name `git -C code status --short` as the command that shows it, because a delivery made of new files is untracked and `preflight` ignores untracked files, so no finding points at it. `escalations` exits `1` while that file is non-empty, and `preflight` reports `blocked-escalation` until oiler empties it.
+
+## One session per task
+
+The whole loop for a single task must finish inside one Claude session, because the plugin's `SessionEnd` hook deletes the session's jobs, which takes the job id and the resume target with it. Compaction inside a session is fine: the ledger, not your context, is what `status` reads to resume.
+
+Do not start a task you cannot finish. If a session is ending, close the current task through step 8 first, or leave it undispatched. A dispatched task with no `5.<n> complete` line resumes at step 4 under the base step 1 recorded, never at step 1: `check delivery` reads the working tree and `<base>..HEAD` alike, so a delivery Codex left uncommitted and one already committed both pass it, and step 5 then commits the first or reports the second with `already: true`. `diff-empty` there means nothing was delivered, so dispatch fresh at step 2, still under the same base.
+
+## Preflight
+
+With executor `codex`, `preflight` adds one check:
+
+```
+codex-unavailable: run /codex:setup (<detail>)
+```
+
+The script runs the companion's `setup --json`, which reports node, Codex CLI, and auth state with no model turn, and requires `ready: true`. That is the whole of what it can see. It cannot see the dispatch sandbox, which is `workspace-write` with the repository's `.git` mounted read-only, and that is why Codex never commits and step 5 of the loop does. A clean `preflight` prints `preflight: ok (<n> checks)`, so a passing probe is visible rather than silent. Run `/codex:setup`, then re-run `preflight`. Do not dispatch a task while this finding stands: a dispatch into an unauthenticated CLI returns empty, which you would read as a delivery failure and retry.

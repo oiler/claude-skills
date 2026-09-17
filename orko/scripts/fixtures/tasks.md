@@ -33,6 +33,8 @@
 - Create: `orko/scripts/test_orko.py` (from `autonom/scripts/test_autonom.py`)
 - Modify: `orko/scripts/orko.py` functions `compute_paths`, `_run_dir_root`, `ensure_gitignored`, `_header`, `_parse_header`, and every `"autonom:"` message prefix
 
+**Acceptance:** `uv run pytest -q`
+
 **Interfaces:**
 - Produces: `compute_paths(root, slug, date) -> dict` with keys `slug`, `date`, `root`, `run_dir`, `ledger`, `escalations`, `spec`, `plan`, `brief`, `synthesis`, `findings_dir`, `context_dir`, `unposted_dir`. `spec` is `<run_dir>/spec.md`, `plan` is `<run_dir>/plan.md`.
 - Produces: `_run_dir_root(root) -> root / ".orko"`.
@@ -163,6 +165,8 @@ git commit -m "refactor(orko): move autonom.py to orko/scripts/orko.py and rebas
 **Files:**
 - Modify: `orko/scripts/orko.py` (`STEPS`, `_header`, `_parse_header`, `cmd_init`, `cmd_ledger`, `_next_step`, `_describe_run`, `build_parser`)
 - Modify: `orko/scripts/test_orko.py` (`TestInit`, `TestLedgerAndStatus`, new `TestModes`)
+
+**Acceptance:** `uv run pytest -q`
 
 **Interfaces:**
 - Consumes: `compute_paths`, `_run_dir_root` from Task 1.
@@ -466,6 +470,8 @@ git commit -m "feat(orko): init takes a mode and a Linear team; ledger steps are
 - Modify: `orko/scripts/orko.py` (new `LINEAR_LINE_RE`, `_linear_ids`, `cmd_linear`; `_describe_run`, `build_parser`)
 - Modify: `orko/scripts/test_orko.py` (new `TestLinearIds`)
 
+**Acceptance:** `uv run pytest -q`
+
 **Interfaces:**
 - Produces: ledger lines `linear <key> <id>` where key is one of `project`, `spec_doc`, `plan_doc`, `brief_doc`, `synthesis_doc`, `blocked_label`; `_linear_ids(ledger) -> dict[str, str]` (last write wins); `status` output gains `"linear": {...}`; CLI `linear set <key> <id> --slug S` and `linear get --slug S` (prints JSON).
 
@@ -616,6 +622,8 @@ git commit -m "feat(orko): record Linear project and document IDs in the ledger"
 **Files:**
 - Modify: `orko/scripts/orko.py` (new `_emit_posts`, `cmd_post_project`, `cmd_post_document`, `cmd_post_close`, `build_parser`)
 - Modify: `orko/scripts/test_orko.py` (new `TestPostProject`, `TestPostDocument`, `TestPostClose`, and the `MCP_PARAMS` fixture table)
+
+**Acceptance:** `uv run pytest -q`
 
 **Interfaces:**
 - Consumes: `_linear_ids`, `_parse_header`, `compute_paths`.
@@ -973,6 +981,8 @@ git commit -m "feat(orko): post project, document, and close payloads for Linear
 - Modify: `orko/scripts/orko.py` (new `OUTCOMES`, `cmd_post_finding`, `cmd_post_escalation`, `build_parser`)
 - Modify: `orko/scripts/test_orko.py` (new `TestPostFinding`, `TestPostEscalation`)
 
+**Acceptance:** `uv run pytest -q`
+
 **Interfaces:**
 - Consumes: `_load_run`, `_emit_posts`, `_linear_ids`.
 - Produces: `OUTCOMES: dict[str, str]` mapping `handled -> Done`, `deferred -> Backlog`, `rejected -> Canceled`, `blocked -> Todo`; CLI `post finding --slug S --seat NAME --outcome O --title T` with the body on stdin; `post escalation` same arguments, forces `blocked`, and appends the body to `escalations.md` itself.
@@ -1206,6 +1216,8 @@ Mutation check: each outcome row in OUTCOMES turns exactly one test red
 - Modify: `orko/references/seats.md` (replace the two inline templates with pointers)
 - Modify: `orko/scripts/orko.py` (`cmd_prompt`, `_lenses`, `build_parser`)
 - Modify: `orko/scripts/test_orko.py` (rewrite `TestPrompt`)
+
+**Acceptance:** `uv run pytest -q`
 
 **Interfaces:**
 - Produces: CLI `prompt <kind> <slug> [--lens NAME] [--seat NAME --question TEXT --context-file PATH]`. Kinds `spec-review`, `plan-review` require `--lens`; `plan-write` takes no extra; `seat` and `verifier` require `--seat`, `--question`, `--context-file`. Tokens: `{{ARTIFACT_PATH}}`, `{{SPEC_PATH}}`, `{{PLAN_PATH}}`, `{{RUN_DIR}}`, `{{ROOT}}`, `{{SLUG}}`, `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{FINDINGS_PATH}}`, `{{VERDICT_PATH}}`, `{{SEAT}}`, `{{QUESTION}}`, `{{CONTEXT}}`. Any leftover `{{...}}` exits `2`.
@@ -1647,6 +1659,8 @@ git commit -m "feat(orko): script-emitted prompts for review lenses, plan-writer
 - Modify: `orko/scripts/orko.py` (new `cmd_preflight`, `_current_branch`, `build_parser`)
 - Modify: `orko/scripts/test_orko.py` (new `TestPreflight`)
 
+**Acceptance:** `uv run pytest -q`
+
 **Interfaces:**
 - Produces: CLI `preflight [--slug S] [--root R] [--mode M]`. Exit `0` clean, `1` with one finding per line on stdout, `2` when not in a git repo. Findings by name: `uv-missing`, `on-default-branch`, `run-dir-not-ignored`, `project-id-missing`, `blocked-escalation`.
 
@@ -1838,6 +1852,8 @@ git commit -m "feat(orko): preflight checks repo, branch, uv, gitignore, project
 - Create: `orko/scripts/fixtures/plan.md` (copy of this plan)
 - Modify: `orko/scripts/test_orko.py` (new `TestFixtures`)
 
+**Acceptance:** `uv run pytest -q`
+
 **Interfaces:**
 - Consumes: `validate_spec`, `validate_plan`.
 
@@ -1892,6 +1908,8 @@ git commit -m "test(orko): pin the validators to the v2 spec and plan as real fi
 **Files:**
 - Create: `orko/references/build.md`
 - Create: `orko/references/linear.md`
+
+**Acceptance:** `uv run pytest -q`
 
 **Interfaces:**
 - Consumes: every CLI surface from Tasks 2 through 7, named exactly as implemented.
@@ -1978,6 +1996,8 @@ git commit -m "docs(orko): build lifecycle and Linear contract references"
 **Files:**
 - Modify: `orko/SKILL.md`
 - Modify: `orko/references/upgrades.md`
+
+**Acceptance:** `uv run pytest -q`
 
 **Interfaces:**
 - Consumes: `references/build.md`, `references/linear.md`, `references/seats.md` and the CLI.
@@ -2081,6 +2101,8 @@ git commit -m "feat(orko): v1.0.0 SKILL.md with analysis and build engagements o
 - Modify: `docs/changelogs/autonom.md`
 - Delete: `autonom/.pytest_cache/`, `autonom/scripts/` leftovers if any remain untracked
 - Modify (workshop repo): `/Users/jrf1039/files/projects/001-claude-skills-creator/docs/workshop-state.md`
+
+**Acceptance:** `uv run pytest -q`
 
 **Interfaces:**
 - None consumed; this task is documentation and cleanup.

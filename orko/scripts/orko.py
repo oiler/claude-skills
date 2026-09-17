@@ -4,7 +4,7 @@
 # dependencies = []
 # ///
 """Owns every deterministic surface of an orko run: artifact paths, the run
-ledger, artifact validation, every dispatch prompt, and every Linear payload.
+ledger, artifact validation, and every dispatch prompt.
 
 The model authors prose. This script owns structure. In particular the `prompt`
 subcommand exists so the orchestrator dispatches reviewer text it cannot edit —
@@ -12,22 +12,33 @@ priming a reviewer with the authoring session's context turns a fresh critique
 into an echo of the author.
 
 Usage:
-    uv run orko.py init {analysis|build} <topic> --team KEY [--root DIR] [--date YYYY-MM-DD]
-    uv run orko.py ledger <step> <status> --slug SLUG [--commit SHA] [--root DIR]
-    uv run orko.py status [<slug>] [--root DIR]
-    uv run orko.py validate {spec|plan} <path>
-    uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--root DIR]
-    uv run orko.py prompt plan-write <slug> [--root DIR]
-    uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--root DIR]
-    uv run orko.py prompt verifier <slug> --seat NAME [--question TEXT] --context-file PATH [--root DIR]
-    uv run orko.py escalations <slug> [--root DIR]
-    uv run orko.py preflight [--slug SLUG | --mode {analysis|build}] [--root DIR]
-    uv run orko.py linear set <key> <id> --slug SLUG | linear get --slug SLUG
-    uv run orko.py post project --slug SLUG --goal TEXT --boundaries TEXT [--branch NAME]
-    uv run orko.py post document {spec|plan|brief|synthesis} --slug SLUG
-    uv run orko.py post finding --slug SLUG --seat NAME --outcome {handled|deferred|rejected|blocked} --title TEXT   (body on stdin)
-    uv run orko.py post escalation --slug SLUG --seat NAME --title TEXT   (body on stdin)
-    uv run orko.py post close --slug SLUG --summary TEXT [--pr URL]
+    uv run orko.py init {analysis|build} <topic> --workspace DIR --owner NAME
+        --boundaries TEXT --trailer LINE [--trailer LINE] [--version V]
+        [--executor claude|codex] [--codex-model M] [--codex-effort E]
+        [--date YYYY-MM-DD]
+    uv run orko.py ledger <step> <status> --slug SLUG [--commit SHA] [--workspace DIR]
+    uv run orko.py status [<slug>] [--workspace DIR]
+    uv run orko.py check tasks <path>
+    uv run orko.py record spec --slug SLUG --title TEXT [--workspace DIR]
+    uv run orko.py record plan --slug SLUG --title TEXT --implements SPEC-NNN
+        [--workspace DIR]
+    uv run orko.py record {decision|adr|research} --slug SLUG --title TEXT [--workspace DIR]
+    uv run orko.py record disposition --slug SLUG --review REVIEW-NNN --finding FN
+        --disposition {accepted|rejected|resolved|noted} [--workspace DIR]
+    uv run orko.py record status --slug SLUG --id ID --status {draft|in_review} [--workspace DIR]
+    uv run orko.py record amendment --slug SLUG --id SPEC-NNN --text TEXT [--workspace DIR]
+    uv run orko.py record delivery-decision --slug SLUG --decision TEXT --rationale TEXT
+        [--workspace DIR]
+    uv run orko.py record risk --slug SLUG --text TEXT [--workspace DIR]
+    uv run orko.py record close --slug SLUG --summary TEXT
+        [--changelog "<Added|Changed|Fixed|Removed|Security>: text"]
+        [--date YYYY-MM-DD] [--workspace DIR]
+    uv run orko.py prompt {spec-review|plan-review} <slug> --lens NAME [--workspace DIR]
+    uv run orko.py prompt plan-write <slug> [--workspace DIR]
+    uv run orko.py prompt seat <slug> --seat NAME --question TEXT --context-file PATH [--workspace DIR]
+    uv run orko.py prompt verifier <slug> --seat NAME [--question TEXT] --context-file PATH [--workspace DIR]
+    uv run orko.py escalations <slug> [--workspace DIR]
+    uv run orko.py preflight --slug SLUG [--workspace DIR]
 
 Exit codes: 0 success / all checks pass; 1 validation failures; 2 usage or IO error.
 """
@@ -47,6 +58,12 @@ from typing import NamedTuple
 
 SLUG_MAX = 60
 
+HEADER_TITLE = "# orko run"
+HEADER_KEYS = ("mode", "topic", "slug", "date", "workspace", "version", "owner",
+               "executor", "codex_model", "codex_effort", "boundaries", "trailers")
+EXECUTORS = ("claude", "codex")
+FRONTMATTER_FIELD_RE = r'^[ \t]*{key}:[ \t]*"?(?P<value>[^"\n]*)"?[ \t]*$'
+
 # Steps per engagement type. Only `complete` advances a run; the names are what
 # `status` prints so a resumed conductor knows where it is without the table.
 MODES: dict[str, dict[int, str]] = {
@@ -59,28 +76,15 @@ MODES: dict[str, dict[int, str]] = {
         4: "plan review", 5: "execute", 6: "code review", 7: "close",
     },
 }
-TEAM_RE = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
 
 PLACEHOLDER_RE = re.compile(
     r"\b(?:TBD|TODO|FIXME|XXX)\b|<placeholder>|\[fill in\]", re.IGNORECASE
 )
-OPEN_QUESTION_RE = re.compile(r"\*\*Open question|\?\?\?|\[\?\]", re.IGNORECASE)
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 # The ledger header is one line. A topic carrying a newline or any other control
 # character writes a header no later command can parse, and the run is then
 # unrecoverable without hand-editing the ledger.
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
-HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
-
-# Heading-keyword requirements. Matching is by whole word against the heading
-# text, so "Latest news" does not satisfy "testing" but "Testing" does. The list
-# mirrors what superpowers:brainstorming actually emits.
-SPEC_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("a problem or goal section", ("problem", "goal")),
-    ("an architecture or design section", ("architecture", "design")),
-    ("an error handling section", ("error",)),
-    ("a testing section", ("test",)),
-)
 
 
 class Finding(NamedTuple):
@@ -88,11 +92,12 @@ class Finding(NamedTuple):
     message: str
 
 
-def strip_code(text: str) -> str:
-    """Blank fenced blocks and inline code spans, preserving line count.
+def strip_fences(text: str) -> str:
+    """Blank fenced blocks, preserving line count and every inline code span.
 
-    Every validator scan runs against this, structural checks included: a
-    document that *documents* a marker in backticks does not *contain* one.
+    What `acceptance_command` reads: the command it must return lives in
+    backticks, so that rule cannot afford `strip_code`, but it still must not
+    see an acceptance line a document only *shows* inside a fence.
     """
     out: list[str] = []
     fence: str | None = None
@@ -107,66 +112,18 @@ def strip_code(text: str) -> str:
                 fence = None
             out.append("")
             continue
-        out.append(INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line))
+        out.append(line)
     return "\n".join(out)
 
 
-def _headings(lines: list[str]) -> list[tuple[int, int, str]]:
-    """(line_number, level, text) for every ATX heading, 1-indexed."""
-    found = []
-    for index, line in enumerate(lines, start=1):
-        match = HEADING_RE.match(line)
-        if match:
-            found.append((index, len(match.group(1)), match.group(2)))
-    return found
+def strip_code(text: str) -> str:
+    """Blank fenced blocks and inline code spans, preserving line count.
 
-
-def _section_is_empty(lines: list[str], headings: list[tuple[int, int, str]],
-                      position: int) -> bool:
-    start, level, _ = headings[position]
-    end = len(lines)
-    for line_no, other_level, _ in headings[position + 1:]:
-        if other_level <= level:
-            end = line_no - 1
-            break
-    body = [line for line in lines[start:end] if line.strip()]
-    return not body
-
-
-def validate_spec(text: str) -> list[Finding]:
-    scanned = strip_code(text)
-    lines = scanned.split("\n")
-    findings: list[Finding] = []
-
-    for index, line in enumerate(lines, start=1):
-        for match in PLACEHOLDER_RE.finditer(line):
-            findings.append(
-                Finding(index, f"placeholder marker {match.group(0)!r}")
-            )
-        if OPEN_QUESTION_RE.search(line):
-            findings.append(Finding(index, "unresolved open question marker"))
-
-    headings = _headings(lines)
-    if not any(level == 1 for _, level, _ in headings):
-        findings.append(Finding(1, "missing a title (no level-1 heading)"))
-
-    for label, keywords in SPEC_SECTIONS:
-        matches = [
-            position for position, (_, level, heading) in enumerate(headings)
-            if level >= 2 and any(
-                re.search(rf"\b{re.escape(kw)}", heading, re.IGNORECASE)
-                for kw in keywords
-            )
-        ]
-        if not matches:
-            findings.append(Finding(1, f"missing {label}"))
-            continue
-        for position in matches:
-            if _section_is_empty(lines, headings, position):
-                line_no, _, heading = headings[position]
-                findings.append(Finding(line_no, f"section {heading!r} is empty"))
-
-    return sorted(findings)
+    Every validator scan runs against this, structural checks included: a
+    document that *documents* a marker in backticks does not *contain* one.
+    """
+    return "\n".join(INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line)
+                     for line in strip_fences(text).split("\n"))
 
 
 PLAN_RED_FLAGS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -183,7 +140,70 @@ PLAN_RED_FLAGS: tuple[tuple[re.Pattern[str], str], ...] = (
      "'Write tests for the above' without the actual test code"),
 )
 
-TASK_HEADING_RE = re.compile(r"^###\s+Task\s+\d+\s*:", re.MULTILINE)
+TASK_HEAD_RE = re.compile(r"^###\s+Task\s+(?P<n>\d+)\s*:\s*(?P<title>.*)$")
+# `[ \t]*`, never `\s*`: `\s` spans newlines, so an empty `**Acceptance:**` line
+# would harvest the next line as the command and hand `**Interfaces:**` to a
+# `--write` Codex dispatch as something to run.
+ACCEPTANCE_LINE_RE = re.compile(r"^\*\*Acceptance:\*\*[ \t]*(?P<rest>[^\n]*)$",
+                                re.MULTILINE)
+ACCEPTANCE_QUOTED_RE = re.compile(r"^`(?P<cmd>[^`\n]+)`")
+FILES_RE = re.compile(r"^-\s+(?:Create|Modify|Test|Delete):\s*`(?P<path>[^`]+)`", re.MULTILINE)
+
+
+def acceptance_command(block: str) -> str | None:
+    """The one command on a task block's `**Acceptance:**` line, or None.
+
+    One reader for `check tasks` and for the dispatch, so a line that passes
+    the gate is always dispatchable. Three shapes: a backticked command with
+    optional prose after the closing backtick, a bare command with no
+    backticks, and an empty line. Callers blank the fences first.
+    """
+    match = ACCEPTANCE_LINE_RE.search(block)
+    if match is None:
+        return None
+    rest = match.group("rest").strip()
+    quoted = ACCEPTANCE_QUOTED_RE.match(rest)
+    if quoted:
+        return quoted.group("cmd").strip() or None
+    # A bare line holding a backtick is not a command. `run `make test` and
+    # see` reaches `run_acceptance`'s `shell=True` with the span live as a
+    # command substitution, and an empty pair runs nothing and exits 0.
+    if "`" in rest:
+        return None
+    return rest or None
+
+
+def task_heads(text: str) -> list[tuple[int, re.Match[str]]]:
+    """Every live `### Task N:` heading as (0-based line index, match).
+
+    The gate and the dispatch both enumerate blocks from here, over
+    fence-blanked lines, so a task a plan only *shows* inside a fence is
+    invisible to both. A block the gate never saw must not be dispatchable.
+    """
+    return [(index, match)
+            for index, line in enumerate(strip_fences(text).split("\n"))
+            if (match := TASK_HEAD_RE.match(line))]
+
+
+def parse_tasks(text: str) -> list[dict]:
+    """One dict per `### Task N:` block of a `superpowers:writing-plans` file.
+
+    The body is sliced from the raw text, fences and all: the acceptance
+    command and the file paths live in backticks, and the Codex dispatch needs
+    them as written.
+    """
+    raw_lines = text.split("\n")
+    heads = task_heads(text)
+    tasks = []
+    for index, (line, head) in enumerate(heads):
+        end = heads[index + 1][0] if index + 1 < len(heads) else len(raw_lines)
+        block = "\n".join(raw_lines[line:end]).rstrip() + "\n"
+        tasks.append(dict(
+            n=int(head.group("n")), title=head.group("title").strip(), body=block,
+            files=[match.group("path").split(":")[0] for match in FILES_RE.finditer(block)],
+            acceptance=acceptance_command(strip_fences(block)),
+        ))
+    return tasks
 
 
 def validate_plan(text: str) -> list[Finding]:
@@ -207,39 +227,133 @@ def validate_plan(text: str) -> list[Finding]:
     if not re.search(r"^##\s+Global Constraints\s*$", scanned, re.MULTILINE):
         findings.append(Finding(1, "missing the '## Global Constraints' section"))
 
-    task_starts = [
-        (scanned[:match.start()].count("\n") + 1, match.start())
-        for match in TASK_HEADING_RE.finditer(scanned)
-    ]
-    if not task_starts:
+    heads = task_heads(text)
+    if not heads:
         findings.append(Finding(1, "no '### Task N:' task block found"))
 
-    for position, (line_no, offset) in enumerate(task_starts):
-        end = task_starts[position + 1][1] if position + 1 < len(task_starts) else len(scanned)
-        block = scanned[offset:end]
+    # Every scan preserves the line count, so one line span slices both views
+    # of a block: the scanned text for the structural rules, and the raw text
+    # for the acceptance line, whose command lives in backticks.
+    raw_lines = text.split("\n")
+    for position, (line, head) in enumerate(heads):
+        end = heads[position + 1][0] if position + 1 < len(heads) else len(raw_lines)
+        line_no = line + 1
+        block = "\n".join(lines[line:end])
+        raw_block = "\n".join(raw_lines[line:end])
+        # The title is the delivery commit's subject under `commit --task`, so
+        # a task with none is refused here, where the fix is an edit to the plan.
+        if not head.group("title").strip():
+            findings.append(Finding(line_no, f"task {head.group('n')} has no title"))
         if "**Files:**" not in block:
             findings.append(Finding(line_no, "task block has no '**Files:**' subsection"))
         if not re.search(r"^\s*-\s*\[ \]\s*\*\*Step", block, re.MULTILINE):
             findings.append(Finding(line_no, "task block has no '- [ ] **Step' checkbox"))
+        # The Codex loop dispatches one command per task and judges delivery on
+        # its exit code. A task without one has no definition of done.
+        if acceptance_command(strip_fences(raw_block)) is None:
+            findings.append(Finding(line_no, "task block has no '**Acceptance:**' line"))
 
     return sorted(findings)
 
 
-def cmd_validate(args: argparse.Namespace) -> int:
+def cmd_check_tasks(args: argparse.Namespace) -> int:
     target = Path(args.path)
     try:
         text = target.read_text(encoding="utf-8")
     except OSError as error:
         print(f"orko: cannot read {target}: {error}", file=sys.stderr)
         return 2
-
-    findings = {"spec": validate_spec, "plan": validate_plan}[args.kind](text)
+    findings = validate_plan(text)
     if not findings:
-        print(f"OK: {target} passes the {args.kind} validator")
+        print(f"OK: {target} passes the tasks validator")
         return 0
     for finding in findings:
         print(f"{target}:{finding.line}: {finding.message}")
     return 1
+
+
+SPEC_ID_RE = re.compile(r"^[A-Z]+-[0-9]{3}$")
+
+
+def plans_implementing(ws: Path, spec_id: str) -> list[Path]:
+    """Every `docs/versions/*/plans/PLAN-*.md` whose `implements:` names the ID."""
+    hits = []
+    for plan in sorted((ws / "docs" / "versions").glob("*/plans/PLAN-*.md")):
+        try:
+            text = plan.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if not text.startswith("---"):
+            continue
+        block = text.split("---", 2)[1].split("\n")
+        for index, line in enumerate(block):
+            if not line.startswith("implements:"):
+                continue
+            span = [line]
+            for later in block[index + 1:]:
+                if FM_KEY_RE.match(later):
+                    break
+                span.append(later)
+            if re.search(rf"\b{re.escape(spec_id)}\b", "\n".join(span)):
+                hits.append(plan)
+            break
+    return hits
+
+
+DELIVERY_DECISIONS_HEADING = "## Delivery decisions"
+
+
+def signed_delivery_rows(plan: Path) -> list[str]:
+    """Body rows of the plan's Delivery decisions table carrying a signature.
+
+    That column is `Approved by`, and only a human writes into it. A cell
+    opening with `[` is the scaffold template's own placeholder, not a
+    signature; spec-check already fails a plan that leaves one in place.
+    """
+    lines = plan.read_text(encoding="utf-8").split("\n")
+    if DELIVERY_DECISIONS_HEADING not in lines:
+        return []
+    start = lines.index(DELIVERY_DECISIONS_HEADING)
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
+               len(lines))
+    rows = [lines[i] for i in range(start + 1, end) if lines[i].lstrip().startswith("|")]
+    signed = []
+    for row in rows[2:]:  # skip the header and the separator
+        cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
+        if len(cells) >= 3 and cells[2] and not cells[2].startswith("["):
+            signed.append(row)
+    return signed
+
+
+def cmd_check_spec(args: argparse.Namespace) -> int:
+    """Run the scaffold's own spec-check.sh and pass its verdict through."""
+    if not SPEC_ID_RE.fullmatch(args.id):
+        print(f"orko: {args.id!r} is not an ID like SPEC-001", file=sys.stderr)
+        return 2
+    ws = resolve_workspace(args)
+    if ws is None:
+        return 2
+    docs, script = ws / "docs", ws / "code/scripts/spec-check.sh"
+    if not docs.is_dir() or not script.is_file():
+        print("orko: workspace lacks docs/ or code/scripts/spec-check.sh", file=sys.stderr)
+        return 2
+    result = subprocess.run([str(script), args.id, "--docs", str(docs)],
+                            capture_output=True, text=True, check=False)
+    sys.stdout.write(result.stdout)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    if args.require_plan and result.returncode == 0:
+        if "no PLAN" in result.stdout:
+            print(f"plan-missing: spec-check found no plan implementing {args.id}")
+            return 1
+        # `draft` only. The gate sets `in_review` before a human signs, so
+        # firing there would stop step 5 on the very signature it asked for.
+        for plan in plans_implementing(ws, args.id):
+            if read_frontmatter_field(plan, "status") == "draft" and signed_delivery_rows(plan):
+                print(f"plan-approval-signed: {plan} has an Approved by value on "
+                      "a draft plan")
+                return 1
+    return result.returncode
 
 
 def slugify(topic: str) -> str:
@@ -251,8 +365,8 @@ def slugify(topic: str) -> str:
     )
     slug = "-".join(re.findall(r"[a-z0-9]+", ascii_only.lower()))
     if len(slug) > SLUG_MAX:
-        # The slug is the Linear Project name and the branch name, so a cut
-        # landing mid-word reads as a typo forever. Drop the partial word —
+        # The slug is the branch name the run works on, so a cut landing
+        # mid-word reads as a typo forever. Drop the partial word —
         # unless the first word alone overruns, where a hard cut is all there is.
         cut = slug[:SLUG_MAX]
         if slug[SLUG_MAX] != "-" and "-" in cut:
@@ -264,92 +378,224 @@ def slugify(topic: str) -> str:
     return slug
 
 
-def find_repo_root(start: Path) -> Path | None:
-    """Git toplevel of `start`, or None when `start` is not inside a repo."""
+def is_git_repo(path: Path) -> bool:
     result = subprocess.run(
-        ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
         capture_output=True, text=True, check=False,
     )
-    if result.returncode != 0:
+    return result.returncode == 0 and Path(result.stdout.strip()) == path.resolve()
+
+
+# Each condition is one finding, so a test can remove exactly one and see
+# exactly one test go red (mutation rule in the spec's Testing section).
+def validate_workspace(ws: Path) -> list[str]:
+    findings: list[str] = []
+    if not is_git_repo(ws / "docs"):
+        findings.append("docs-not-a-repo")
+    if not is_git_repo(ws / "code"):
+        findings.append("code-not-a-repo")
+    if not (ws / "docs" / "versions").is_dir():
+        findings.append("versions-missing")
+    if not (ws / "code" / "scripts" / "spec-check.sh").is_file():
+        findings.append("spec-check-missing")
+    return findings
+
+
+def find_workspace(start: Path) -> Path | None:
+    """Nearest ancestor holding docs/, code/, and .orko/. The workspace root
+    is not a repository, so git cannot find it; the run directory can."""
+    for candidate in (start.resolve(), *start.resolve().parents):
+        if all((candidate / name).is_dir() for name in ("docs", "code", ".orko")):
+            return candidate
+    return None
+
+
+def resolve_workspace(args: argparse.Namespace) -> Path | None:
+    if getattr(args, "workspace", None):
+        return Path(args.workspace).resolve()
+    found = find_workspace(Path.cwd())
+    if found is None:
+        print(f"orko: no workspace found above {Path.cwd()}; pass --workspace",
+              file=sys.stderr)
+    return found
+
+
+def read_frontmatter_field(path: Path, key: str) -> str | None:
+    """First `key: value` line inside the leading --- block, quotes stripped."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
         return None
-    return Path(result.stdout.strip())
+    if not text.startswith("---"):
+        return None
+    block = text.split("---", 2)[1]
+    match = re.search(FRONTMATTER_FIELD_RE.format(key=re.escape(key)), block, re.MULTILINE)
+    return match.group("value").strip() if match else None
 
 
-def compute_paths(root: Path, slug: str, date: str) -> dict[str, str]:
-    """Every path a run touches, derived from root and slug alone.
+def read_active_version(ws: Path) -> str | None:
+    return read_frontmatter_field(ws / "docs" / "STATUS.md", "active_version")
 
-    The run directory is scratch and Linear is the record, so artifacts need
-    no date in their filename; stability for the validators and seats is all
-    that matters.
+
+def dossier_dir(ws: Path, version: str) -> Path:
+    return ws / "docs" / "versions" / version
+
+
+def dossier_status(ws: Path, version: str) -> str | None:
+    return read_frontmatter_field(dossier_dir(ws, version) / "README.md", "status")
+
+
+class RecordType(NamedTuple):
+    prefix: str | None
+    repo: str          # "docs" or "code"
+    subdir: str        # relative to the repo; "versions/<v>/specs" uses the run's version
+    template: str      # relative to docs/, or "adr-readme", or "orko-research"
+    index: str | None  # relative to the repo; None when the type has no index
+
+
+RECORD_TYPES: dict[str, RecordType] = {
+    "spec": RecordType("SPEC", "docs", "versions/<v>/specs", "templates/spec.md", "versions/<v>/README.md"),
+    "plan": RecordType("PLAN", "docs", "versions/<v>/plans", "templates/plan.md", "versions/<v>/README.md"),
+    "review": RecordType("REVIEW", "docs", "versions/<v>/reviews", "templates/review.md", "versions/<v>/README.md"),
+    "decision": RecordType("DEC", "docs", "decisions", "templates/decision.md", "decisions/README.md"),
+    "adr": RecordType("ADR", "code", "docs/adr", "adr-readme", None),
+    "research": RecordType(None, "docs", "research", "orko-research", None),
+}
+ID_RE = re.compile(r"^(?P<prefix>[A-Z]+)-(?P<n>\d{3})$")
+FM_KEY_RE = re.compile(r"^(?P<key>[A-Za-z_]+):(?P<rest>.*)$")
+
+
+def _split_frontmatter(text: str) -> tuple[list[str], str]:
+    if not text.startswith("---\n"):
+        raise ValueError("template has no frontmatter")
+    head, _, body = text[4:].partition("\n---\n")
+    return head.split("\n"), body
+
+
+def _render_value(key: str, value, quoted: bool) -> list[str]:
+    if value is None:
+        return [f"{key}: null"]
+    if isinstance(value, list):
+        return [f"{key}:"] + [f"  - {item}" for item in value]
+    return [f'{key}: "{value}"' if quoted else f"{key}: {value}"]
+
+
+def set_frontmatter(text: str, updates: dict) -> str:
+    """Rewrite top-level keys inside the leading --- block, body untouched."""
+    lines, body = _split_frontmatter(text)
+    out: list[str] = []
+    seen: set[str] = set()
+    index = 0
+    while index < len(lines):
+        match = FM_KEY_RE.match(lines[index])
+        if not match:
+            out.append(lines[index])
+            index += 1
+            continue
+        key = match.group("key")
+        block_end = index + 1
+        while block_end < len(lines) and lines[block_end].startswith((" ", "\t", "-")):
+            block_end += 1
+        if key in updates:
+            quoted = match.group("rest").strip().startswith('"')
+            out.extend(_render_value(key, updates[key], quoted))
+            seen.add(key)
+        else:
+            out.extend(lines[index:block_end])
+        index = block_end
+    for key, value in updates.items():
+        if key not in seen:
+            out.extend(_render_value(key, value, False))
+    return "---\n" + "\n".join(out) + "\n---\n" + body
+
+
+def _type_dir(ws: Path, type_: str, version: str) -> Path:
+    rt = RECORD_TYPES[type_]
+    return ws / rt.repo / rt.subdir.replace("<v>", version)
+
+
+def next_id(ws: Path, type_: str) -> str:
+    """One past the highest existing ID of this type, across every dossier."""
+    rt = RECORD_TYPES[type_]
+    assert rt.prefix, f"{type_} has no ID"
+    pattern = rt.subdir.replace("<v>", "*")
+    highest = 0
+    for path in (ws / rt.repo).glob(f"{pattern}/{rt.prefix}-*.md"):
+        match = re.match(rf"{rt.prefix}-(\d{{3}})", path.name)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"{rt.prefix}-{highest + 1:03d}"
+
+
+def compute_paths(ws: Path, slug: str, date: str) -> dict[str, str]:
+    """Every path a run touches, derived from the workspace and slug alone.
+
+    The run directory is scratch and the scaffold docs repository is the
+    record, so artifacts need no date in their filename; stability for the
+    validators and seats is all that matters.
     """
-    run_dir = root / ".orko" / slug
+    run_dir = ws / ".orko" / slug
     return {
-        "slug": slug,
-        "date": date,
-        "root": str(root),
+        "slug": slug, "date": date, "workspace": str(ws),
+        "docs": str(ws / "docs"), "code": str(ws / "code"),
         "run_dir": str(run_dir),
         "ledger": str(run_dir / "progress.md"),
         "escalations": str(run_dir / "escalations.md"),
-        "spec": str(run_dir / "spec.md"),
-        "plan": str(run_dir / "plan.md"),
+        "tasks": str(run_dir / "tasks.md"),
         "brief": str(run_dir / "brief.md"),
         "synthesis": str(run_dir / "synthesis.md"),
         "findings_dir": str(run_dir / "findings"),
         "context_dir": str(run_dir / "context"),
-        "unposted_dir": str(run_dir / "unposted"),
     }
 
 
-def ensure_gitignored(root: Path) -> None:
-    """Append `.orko/` to the target's .gitignore once. The run directory is
-    scratch; a trail that commits by accident is the failure this prevents."""
-    gitignore = root / ".gitignore"
-    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
-    if any(line.strip() == ".orko/" for line in existing.splitlines()):
-        return
-    prefix = "" if not existing or existing.endswith("\n") else "\n"
-    with gitignore.open("a", encoding="utf-8") as handle:
-        handle.write(f"{prefix}.orko/\n")
+def _header_line(fields: dict) -> str:
+    return "header: " + json.dumps({key: fields.get(key) for key in HEADER_KEYS})
 
 
-def _header(mode: str, team: str, topic: str, slug: str, date: str) -> str:
-    return (f"# orko run — mode: {mode} — team: {team} — topic: {topic} "
-            f"— slug: {slug} — date: {date}")
+def _parse_header(ledger: Path) -> dict | None:
+    """The run's header fields, or None when the ledger cannot supply them.
 
-
-HEADER_LINE_RE = re.compile(
-    r"# orko run — mode: (?P<mode>analysis|build) — team: (?P<team>[A-Z0-9]+) "
-    r"— topic: (?P<topic>.*) — slug: (?P<slug>[a-z0-9-]+) "
-    r"— date: (?P<date>\d{4}-\d{2}-\d{2})$"
-)
-
-
-def _parse_header(ledger: Path) -> dict[str, str] | None:
-    """Read mode/team/topic/slug/date out of a ledger's first line, or None if
-    unreadable. Empty is unreadable, not a crash: callers turn None into exit 2."""
+    Empty, truncated, short-of-a-key, and carrying a mode no MODES table knows
+    are all unreadable rather than a crash: callers turn None into exit 2. The
+    mode check is load-bearing — every caller indexes MODES with it.
+    """
     if not ledger.exists():
         return None
     lines = ledger.read_text(encoding="utf-8").splitlines()
-    if not lines:
+    if len(lines) < 2 or lines[0] != HEADER_TITLE or not lines[1].startswith("header: "):
         return None
-    match = HEADER_LINE_RE.match(lines[0])
-    return match.groupdict() if match else None
+    try:
+        fields = json.loads(lines[1].removeprefix("header: "))
+    except json.JSONDecodeError:
+        return None
+    if fields.get("mode") not in MODES:
+        return None
+    return fields if set(HEADER_KEYS) <= set(fields) else None
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    root = Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+    ws = Path(args.workspace).resolve()
+    findings = validate_workspace(ws)
+    if findings:
+        for finding in findings:
+            print(f"workspace-invalid: {finding}", file=sys.stderr)
         return 2
-    # fullmatch, not match: `$` also matches before a trailing newline, and a
-    # newline in the team key writes a two-line header nothing can parse back.
-    if not TEAM_RE.fullmatch(args.team):
-        print(f"orko: team key {args.team!r} must be the Linear team key, "
-              "uppercase letters and digits (for example JRF)", file=sys.stderr)
+    # The topic names the run; the two overrides ride on the dispatch line the
+    # conductor pastes, where a newline would split the flags from the sentence.
+    for name, value in (("topic", args.topic), ("--codex-model", args.codex_model),
+                        ("--codex-effort", args.codex_effort)):
+        if value and CONTROL_RE.search(value):
+            print(f"orko: {name} contains a control character", file=sys.stderr)
+            return 2
+    version = args.version or read_active_version(ws)
+    if not version:
+        print("orko: docs/STATUS.md has no active_version; pass --version", file=sys.stderr)
         return 2
-    if CONTROL_RE.search(args.topic):
-        print("orko: topic contains a newline or control character; the ledger "
-              "header is a single line and could not be read back", file=sys.stderr)
+    status = dossier_status(ws, version)
+    if status not in ("active", "proposed"):
+        print(f"orko: dossier {version} status is {status!r}; needs active or proposed",
+              file=sys.stderr)
         return 2
     date = args.date or _dt.date.today().isoformat()
     try:
@@ -357,40 +603,45 @@ def cmd_init(args: argparse.Namespace) -> int:
     except ValueError as error:
         print(f"orko: {error}", file=sys.stderr)
         return 2
-    paths = compute_paths(root, slug, date)
+    paths = compute_paths(ws, slug, date)
     ledger = Path(paths["ledger"])
-    ensure_gitignored(root)
-
     resumed = False
     if ledger.exists():
         existing = _parse_header(ledger)
         if existing is None:
             print(f"orko: unreadable ledger header in {ledger}", file=sys.stderr)
             return 2
-        if existing["topic"] != args.topic:
-            print(f"orko: topic {args.topic!r} collides with the existing run "
-                  f"{existing['topic']!r} (both slugify to {slug!r}). Choose a "
-                  "distinct topic or resume the existing run.", file=sys.stderr)
-            return 2
-        if existing["mode"] != args.mode:
-            print(f"orko: run {slug!r} is a {existing['mode']} engagement; "
-                  f"cannot resume it as {args.mode}. A run's mode is fixed at init.",
+        if existing["topic"] != args.topic or existing["mode"] != args.mode:
+            print(f"orko: run {slug!r} exists as a {existing['mode']} run for "
+                  f"{existing['topic']!r}; resume it with the same mode and topic",
                   file=sys.stderr)
             return 2
         resumed = True
-        paths = compute_paths(root, slug, existing["date"])
+        header = existing
+        # The header's trailers travel verbatim into every Codex commit. A
+        # resume that is handed different ones keeps the recorded pair, and
+        # says so rather than letting a stale session URL ship silently.
+        if args.trailer and list(args.trailer) != existing["trailers"]:
+            print("orko: trailers differ from the ledger's; the recorded pair stands",
+                  file=sys.stderr)
+        paths = compute_paths(ws, slug, existing["date"])
     else:
+        header = dict(mode=args.mode, topic=args.topic, slug=slug, date=date,
+                      workspace=str(ws), version=version, owner=args.owner,
+                      executor=args.executor, codex_model=args.codex_model,
+                      codex_effort=args.codex_effort, boundaries=args.boundaries,
+                      trailers=list(args.trailer))
         ledger.parent.mkdir(parents=True, exist_ok=True)
-        for key in ("findings_dir", "context_dir", "unposted_dir"):
+        for key in ("findings_dir", "context_dir"):
             Path(paths[key]).mkdir(parents=True, exist_ok=True)
-        ledger.write_text(
-            _header(args.mode, args.team, args.topic, slug, date) + "\n",
-            encoding="utf-8",
-        )
-
-    header = _parse_header(ledger)
-    payload = dict(paths, mode=header["mode"], team=header["team"],
-                   topic=args.topic, resumed=resumed,
+        ledger.write_text(f"{HEADER_TITLE}\n{_header_line(header)}\n", encoding="utf-8")
+    # Intake is a visible commitment: a build announces itself in STATUS.md the
+    # moment it starts, so a reader of the docs repo sees work in flight rather
+    # than a surprise pull request at close.
+    if not resumed and args.mode == "build":
+        _status_progress_line(ws, args.topic, f"- {args.topic}: in progress")
+        append_ledger(ledger, "touched docs/STATUS.md")
+    payload = dict(paths, **header, resumed=resumed,
                    next_step=_next_step(ledger, header["mode"]))
     print(json.dumps(payload, indent=2))
     return 0
@@ -400,43 +651,76 @@ def cmd_init(args: argparse.Namespace) -> int:
 # would write a ledger line LEDGER_LINE_RE cannot parse, silently losing the step.
 COMMIT_RE = re.compile(r"[0-9a-f]{7,40}(\.\.[0-9a-f]{7,40})?")
 
+# A ledger step is either a whole step of the mode's table or a `5.n` sub-step
+# — one execute task under a codex executor. Sub-steps never advance the run.
+STEP_RE = re.compile(r"^\d+(\.\d+)?$")
 LEDGER_LINE_RE = re.compile(
-    r"^step (?P<step>\d+) (?P<status>dispatched|complete|failed|escalated)"
+    r"^step (?P<step>\d+(?:\.\d+)?) (?P<status>dispatched|complete|failed|escalated)"
     r"(?: commit=(?P<commit>\S+))?$"
 )
-
-LINEAR_KEYS = ("project", "spec_doc", "plan_doc", "brief_doc",
-               "synthesis_doc", "blocked_label")
-LINEAR_LINE_RE = re.compile(
-    r"^linear (?P<key>" + "|".join(LINEAR_KEYS) + r") (?P<id>\S+)$"
+RECORD_LINE_RE = re.compile(
+    r"^record (?P<type>[a-z]+) (?P<role>[a-z-]+) (?P<id>[A-Z]+-\d{3}|-) (?P<path>\S+)$"
 )
+HASH_LINE_RE = re.compile(r"^hash (?P<path>\S+) (?P<sha>[0-9a-f]{64})$")
+# Files a `record` command edited besides the record itself — index READMEs,
+# STATUS.md, changelogs — so `commit` knows what else to stage.
+TOUCHED_LINE_RE = re.compile(r"^touched (?P<path>\S+)$")
 
 
-def _linear_ids(ledger: Path) -> dict[str, str]:
-    """Recorded Linear IDs, last write wins. Lives in the ledger so a resumed
-    session can re-fetch the Project and documents without the transcript."""
-    ids: dict[str, str] = {}
+def append_ledger(ledger: Path, line: str) -> None:
+    with ledger.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+
+
+def _ledger_lines(ledger: Path) -> list[str]:
+    """Every ledger line after the two header lines, stripped."""
     if not ledger.exists():
-        return ids
-    for line in ledger.read_text(encoding="utf-8").splitlines()[1:]:
-        match = LINEAR_LINE_RE.match(line.strip())
-        if match:
-            ids[match.group("key")] = match.group("id")
-    return ids
+        return []
+    return [line.strip() for line in ledger.read_text(encoding="utf-8").splitlines()[2:]]
 
 
 def _ledger_entries(ledger: Path) -> list[dict[str, str | None]]:
     """Parsed step records in order, header excluded. Unparseable lines are
     skipped: the ledger is append-only, so a malformed line is damage to
     inspect, never a reason to refuse to report the rest of the run."""
-    if not ledger.exists():
-        return []
     entries: list[dict[str, str | None]] = []
-    for line in ledger.read_text(encoding="utf-8").splitlines()[1:]:
-        match = LEDGER_LINE_RE.match(line.strip())
+    for line in _ledger_lines(ledger):
+        match = LEDGER_LINE_RE.match(line)
         if match:
             entries.append(match.groupdict())
     return entries
+
+
+def records(ledger: Path) -> list[dict[str, str]]:
+    """Minted records in ledger order: spec, plan, findings, decisions."""
+    return [match.groupdict() for line in _ledger_lines(ledger)
+            if (match := RECORD_LINE_RE.match(line))]
+
+
+def record_for(ledger: Path, type_: str, role: str) -> dict[str, str] | None:
+    for entry in records(ledger):
+        if entry["type"] == type_ and entry["role"] == role:
+            return entry
+    return None
+
+
+def hashes(ledger: Path) -> dict[str, str]:
+    """Path to its last recorded sha — a re-hash of the same path supersedes."""
+    out: dict[str, str] = {}
+    for line in _ledger_lines(ledger):
+        match = HASH_LINE_RE.match(line)
+        if match:
+            out[match.group("path")] = match.group("sha")
+    return out
+
+
+def touched(ledger: Path) -> list[str]:
+    seen: list[str] = []
+    for line in _ledger_lines(ledger):
+        match = TOUCHED_LINE_RE.match(line)
+        if match and match.group("path") not in seen:
+            seen.append(match.group("path"))
+    return seen
 
 
 def _next_step(ledger: Path, mode: str) -> int | None:
@@ -449,14 +733,21 @@ def _next_step(ledger: Path, mode: str) -> int | None:
     done = {
         int(entry["step"])
         for entry in _ledger_entries(ledger)
-        if entry["status"] == "complete"
+        if entry["status"] == "complete" and "." not in entry["step"]
     }
     remaining = [step for step in sorted(MODES[mode]) if step not in done]
     return remaining[0] if remaining else None
 
 
+def next_task(ledger: Path) -> int:
+    """1 + the highest `5.n` recorded complete: the next execute task to dispatch."""
+    done = [int(entry["step"].split(".")[1]) for entry in _ledger_entries(ledger)
+            if entry["status"] == "complete" and entry["step"].startswith("5.")]
+    return max(done, default=0) + 1
+
+
 def _dispatched_base(entries: list[dict[str, str | None]],
-                     step: int | None) -> str | None:
+                     step: int | str | None) -> str | None:
     """Base SHA of the most recent `dispatched` line for `step`.
 
     This is what makes the resume rule actionable: after a compaction between a
@@ -466,55 +757,67 @@ def _dispatched_base(entries: list[dict[str, str | None]],
     if step is None:
         return None
     for entry in reversed(entries):
-        if int(entry["step"]) == step and entry["status"] == "dispatched":
+        if entry["step"] == str(step) and entry["status"] == "dispatched":
             return entry["commit"]
     return None
 
 
-def _run_dir_root(root: Path) -> Path:
-    return root / ".orko"
+def _run_dir_root(ws: Path) -> Path:
+    return ws / ".orko"
 
 
-def _describe_run(root: Path, slug: str) -> dict | None:
+def _describe_run(ws: Path, slug: str) -> dict | None:
     """Run summary for `slug`, or None when its ledger header is unreadable."""
-    ledger = _run_dir_root(root) / slug / "progress.md"
+    ledger = _run_dir_root(ws) / slug / "progress.md"
     header = _parse_header(ledger)
     if header is None:
         return None
     entries = _ledger_entries(ledger)
     next_step = _next_step(ledger, header["mode"])
     steps = MODES[header["mode"]]
+    task = next_task(ledger)
+    # The Codex loop only ever writes `5.<n>` lines, so a resume of step 5 asks
+    # about the open sub-step before falling back to the whole step.
+    base = _dispatched_base(entries, next_step)
+    if next_step == 5 and header["executor"] == "codex":
+        base = _dispatched_base(entries, f"5.{task}") or base
     return dict(
-        compute_paths(root, slug, header["date"]),
-        mode=header["mode"],
-        team=header["team"],
-        topic=header["topic"],
+        compute_paths(ws, slug, header["date"]),
+        **header,
         next_step=next_step,
         # `is not None`: build starts at step 0, and a falsy test would report
         # the intake step as already done.
         next_step_name=steps.get(next_step) if next_step is not None else None,
         last_status=entries[-1]["status"] if entries else None,
-        dispatched_base=_dispatched_base(entries, next_step),
-        linear=_linear_ids(ledger),
+        dispatched_base=base,
+        next_task=task,
+        records=[dict(entry, sha=hashes(ledger).get(entry["path"]))
+                 for entry in records(ledger)],
     )
 
 
-def _resolved_root(args: argparse.Namespace) -> Path | None:
-    """Shared root resolution. None means: not a repo, report exit 2."""
-    return Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
-
-
 def cmd_ledger(args: argparse.Namespace) -> int:
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+    ws = resolve_workspace(args)
+    if ws is None:
         return 2
-    ledger = _run_dir_root(root) / args.slug / "progress.md"
+    ledger = _run_dir_root(ws) / args.slug / "progress.md"
     header = _parse_header(ledger)
     if header is None:
         print(f"orko: no run named {args.slug!r}; run init first", file=sys.stderr)
         return 2
-    if args.step not in MODES[header["mode"]]:
+    if not STEP_RE.fullmatch(args.step):
+        print(f"orko: step {args.step!r} must be a number or a sub-step like 5.1",
+              file=sys.stderr)
+        return 2
+    if "." in args.step:
+        # Sub-steps exist only for the execute step of a codex-executed build:
+        # that is the one place orko dispatches a numbered series of tasks.
+        if (header["mode"] != "build" or header["executor"] != "codex"
+                or args.step.split(".")[0] != "5"):
+            print(f"orko: sub-step {args.step} is only valid for step 5 of a "
+                  "build run with --executor codex", file=sys.stderr)
+            return 2
+    elif int(args.step) not in MODES[header["mode"]]:
         valid = ", ".join(str(step) for step in sorted(MODES[header["mode"]]))
         print(f"orko: step {args.step} is not a step of a {header['mode']} run "
               f"(valid: {valid})", file=sys.stderr)
@@ -525,22 +828,20 @@ def cmd_ledger(args: argparse.Namespace) -> int:
     line = f"step {args.step} {args.status}"
     if args.commit:
         line += f" commit={args.commit}"
-    with ledger.open("a", encoding="utf-8") as handle:
-        handle.write(line + "\n")
+    append_ledger(ledger, line)
     return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+    ws = resolve_workspace(args)
+    if ws is None:
         return 2
 
     if args.slug:
-        if not (_run_dir_root(root) / args.slug / "progress.md").exists():
+        if not (_run_dir_root(ws) / args.slug / "progress.md").exists():
             print(f"orko: no run named {args.slug!r}", file=sys.stderr)
             return 2
-        run = _describe_run(root, args.slug)
+        run = _describe_run(ws, args.slug)
         if run is None:
             print(f"orko: unreadable ledger header for run {args.slug!r}",
                   file=sys.stderr)
@@ -548,11 +849,11 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(json.dumps(run, indent=2))
         return 0
 
-    base = _run_dir_root(root)
+    base = _run_dir_root(ws)
     slugs = sorted(
         child.name for child in base.iterdir() if (child / "progress.md").exists()
     ) if base.exists() else []
-    runs = [_describe_run(root, slug) for slug in slugs]
+    runs = [_describe_run(ws, slug) for slug in slugs]
     print(json.dumps([run for run in runs if run is not None], indent=2))
     return 0
 
@@ -568,9 +869,14 @@ PROMPT_SOURCES = {
     "plan-write": "plan-writer.md",
     "seat": "seat-prompt.md",
     "verifier": "verifier-prompt.md",
+    "task-review": "task-reviewer.md",
+    # `task` is assembled by `render_task_prompt`, not spliced from a charter:
+    # its routing line and its trailers are executor state, not prose.
+    "task": None,
 }
 REVIEW_KINDS = ("spec-review", "plan-review")
 SEAT_KINDS = ("seat", "verifier")
+TASK_KINDS = ("task", "task-review")
 LENS_ROW_RE = re.compile(r"^\|\s*([a-z][a-z0-9-]*)\s*\|\s*(.+?)\s*\|\s*$")
 
 
@@ -602,11 +908,117 @@ def _strip_lenses(text: str) -> str:
     return head.rstrip() + "\n"
 
 
+def _record_path_or(run: dict, type_: str, role: str, fallback: str) -> str:
+    entry = record_for(Path(run["ledger"]), type_, role)
+    return str(Path(run["workspace"]) / entry["path"]) if entry else fallback
+
+
+def _task_or_exit(run: dict, n: int) -> dict | None:
+    try:
+        tasks = parse_tasks(Path(run["tasks"]).read_text(encoding="utf-8"))
+    except OSError:
+        print(f"orko: no tasks.md at {run['tasks']}", file=sys.stderr)
+        return None
+    for task in tasks:
+        if task["n"] == n:
+            # The acceptance command is the whole definition of done for a Codex
+            # dispatch. Rendering `None` into one would ask it to run nothing and
+            # call that a pass.
+            if task["acceptance"] is None:
+                print(f"orko: Task {n} has no **Acceptance:** command", file=sys.stderr)
+                return None
+            return task
+    print(f"orko: tasks.md has no Task {n}", file=sys.stderr)
+    return None
+
+
+def task_prompt_path(run: dict, task: dict) -> Path:
+    """Where the dispatch's own prompt file lives. Scratch, never committed."""
+    return Path(run["context_dir"]) / f"task-{task['n']}.md"
+
+
+def render_dispatch_line(run: dict, task: dict, attempt: str, prompt_path: Path) -> str:
+    """What the conductor pastes into the dispatch: flags, a blank, a sentence.
+
+    The routing flags lead the text rather than riding on the dispatching tool's
+    parameters, because the `Agent` tool's `model` cannot carry a Codex slug.
+    The task itself travels in `--prompt-file`: the companion re-splits forwarded
+    text in only one of its two argv shapes, and that shape joins the prompt's
+    lines with spaces, which would fold the trailers it must reproduce verbatim
+    into one line. A file is read as written, and an absolute path resolves the
+    same whichever directory the companion resolves it against.
+    """
+    flags = ["--background", "--write", "--fresh" if attempt == "fresh" else "--resume",
+             "--cwd", str(run["code"]), "--prompt-file", str(prompt_path)]
+    if run["codex_model"]:
+        flags += ["--model", run["codex_model"]]
+    if run["codex_effort"]:
+        flags += ["--effort", run["codex_effort"]]
+    return (" ".join(flags) + "\n\n"
+            f"Implement Task {task['n']} of the orko build for {run['topic']}; "
+            "the task is in the prompt file.\n")
+
+
+def render_task_prompt(run: dict, task: dict, failure: str | None) -> str:
+    """The task the dispatch writes to its prompt file."""
+    spec_id = (record_for(Path(run["ledger"]), "spec", "spec") or {}).get("id", "SPEC-?")
+    plan_id = (record_for(Path(run["ledger"]), "plan", "plan") or {}).get("id", "PLAN-?")
+    lines = [
+        f"Implement Task {task['n']} of the orko build for {run['topic']}.",
+        f"Refs: {spec_id}, {plan_id}. The conductor's commit cites both.",
+        f"Boundaries: {run['boundaries']}. docs/testing/README.md in the code "
+        "repository is always inside them; the traceability row below goes there.",
+        f"Working directory: {run['code']} (the code repository). Do not touch {run['docs']}.",
+        f"Branch: orko/{run['slug']} (already checked out).",
+        "",
+        task["body"],
+        f"Acceptance: run `{task['acceptance']}` and make it exit 0.",
+        "For every requirement row this task satisfies, add or update a row in "
+        "docs/testing/README.md (in the code repository) mapping `SPEC-NNN R<n>` "
+        "to the test that proves it.",
+    ]
+    if failure:
+        lines += ["", f"The previous attempt failed: {failure}. Fix that first."]
+    # No commit step and no trailers: the dispatch sandbox mounts `.git`
+    # read-only, so a delivery that tried to commit could only fail, and the
+    # script owns the subject, the staged set, the Refs line, and the trailers.
+    lines += ["", "Do not commit and do not run git: the sandbox mounts .git read-only, "
+              "and the conductor commits your delivery. Leave every change in the working "
+              "tree and report the files you changed. Create no files outside the task's "
+              "Files list and docs/testing/README.md; the caches, virtual environment, and "
+              "lockfile the acceptance command creates are ignored.",
+              "", "Leave nothing else behind. Report the files you changed."]
+    return "\n".join(lines) + "\n"
+
+
 def cmd_prompt(args: argparse.Namespace) -> int:
     loaded = _load_run(args)
     if loaded is None:
         return 2
     _, run = loaded
+    if args.kind in TASK_KINDS:
+        if args.task is None:
+            print(f"orko: {args.kind} needs --task N", file=sys.stderr)
+            return 2
+        task = _task_or_exit(run, args.task)
+        if task is None:
+            return 2
+    if args.kind == "task":
+        # The script owns the write, so no model transcribes the prompt: the
+        # conductor forwards the dispatch line and Codex reads the file.
+        prompt_path = task_prompt_path(run, task)
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(
+            render_task_prompt(run, task, args.failure), encoding="utf-8")
+        sys.stdout.write(render_dispatch_line(run, task, args.attempt, prompt_path))
+        return 0
+    # Every other kind files its findings under the step that asked for them, and
+    # a complete run has no such step. A `findings/None/` directory is a defect,
+    # not a resting place.
+    if run["next_step"] is None and args.kind != "task-review":
+        print(f"orko: run {run['slug']} is complete; nothing left to prompt",
+              file=sys.stderr)
+        return 2
     source = references_dir() / PROMPT_SOURCES[args.kind]
     try:
         text = source.read_text(encoding="utf-8")
@@ -614,12 +1026,21 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         print(f"orko: cannot read {source}: {error}", file=sys.stderr)
         return 2
 
-    findings_dir = Path(run["findings_dir"])
+    # Findings are filed under the step that asked for them: a task's two
+    # reviewers and a plan reviewer of the same lens name would otherwise
+    # overwrite each other in one flat directory.
+    findings_dir = Path(run["findings_dir"]) / (
+        f"5.{args.task}" if args.kind == "task-review" else str(run["next_step"]))
+    findings_dir.mkdir(parents=True, exist_ok=True)
     subs = {
-        "{{SPEC_PATH}}": run["spec"],
-        "{{PLAN_PATH}}": run["plan"],
+        "{{SPEC_PATH}}": _record_path_or(run, "spec", "spec", "(no spec minted yet)"),
+        "{{PLAN_PATH}}": _record_path_or(run, "plan", "plan", "(no plan minted yet)"),
+        "{{TASKS_PATH}}": run["tasks"],
+        "{{BOUNDARIES}}": run["boundaries"],
         "{{RUN_DIR}}": run["run_dir"],
-        "{{ROOT}}": run["root"],
+        "{{WORKSPACE}}": run["workspace"],
+        "{{DOCS}}": run["docs"],
+        "{{CODE}}": run["code"],
         "{{SLUG}}": run["slug"],
     }
 
@@ -632,7 +1053,32 @@ def cmd_prompt(args: argparse.Namespace) -> int:
             print(f"orko: unknown lens {args.lens!r}; valid: {', '.join(lenses)}",
                   file=sys.stderr)
             return 2
-        subs["{{ARTIFACT_PATH}}"] = run["spec" if args.kind == "spec-review" else "plan"]
+        subs["{{ARTIFACT_PATH}}"] = subs[
+            "{{SPEC_PATH}}" if args.kind == "spec-review" else "{{PLAN_PATH}}"]
+        subs["{{LENS_NAME}}"] = args.lens
+        subs["{{LENS_QUESTION}}"] = lenses[args.lens]
+        subs["{{FINDINGS_PATH}}"] = str(findings_dir / f"{args.lens}.md")
+        text = _strip_lenses(text)
+    elif args.kind == "task-review":
+        if not args.lens:
+            print(f"orko: {args.kind} needs --lens", file=sys.stderr)
+            return 2
+        lenses = _lenses(text)
+        if args.lens not in lenses:
+            print(f"orko: unknown lens {args.lens!r}; valid: {', '.join(lenses)}",
+                  file=sys.stderr)
+            return 2
+        entries = _ledger_entries(Path(run["ledger"]))
+        base = _dispatched_base(entries, f"5.{args.task}")
+        # No base means no recorded dispatch for this task. Guessing one would
+        # hand the reviewer somebody else's diff, so refuse instead.
+        if base is None:
+            print(f"orko: no ledger 5.{args.task} dispatched --commit line",
+                  file=sys.stderr)
+            return 2
+        subs["{{TASK_N}}"] = str(task["n"])
+        subs["{{TASK_BODY}}"] = task["body"].rstrip()
+        subs["{{DIFF_BASE}}"] = base
         subs["{{LENS_NAME}}"] = args.lens
         subs["{{LENS_QUESTION}}"] = lenses[args.lens]
         subs["{{FINDINGS_PATH}}"] = str(findings_dir / f"{args.lens}.md")
@@ -670,7 +1116,7 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         subs["{{VERDICT_PATH}}"] = str(findings_dir / f"{args.seat}.verdict.md")
 
     # Scanned on the raw template, before splicing: a context file or question
-    # that happens to quote `{{ROOT}}` is operator text to pass through, not a
+    # that happens to quote `{{WORKSPACE}}` is operator text to pass through, not a
     # template defect, and a post-substitution scan would blame the charter for
     # it. `_strip_lenses` has already run for review kinds, so what is scanned
     # is exactly what gets emitted.
@@ -700,11 +1146,10 @@ def cmd_escalations(args: argparse.Namespace) -> int:
     halt a run, and an orchestrator with no `ls`/`test` permission has no other
     way to tell an absent file from an empty one.
     """
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+    ws = resolve_workspace(args)
+    if ws is None:
         return 2
-    run_dir = _run_dir_root(root) / args.slug
+    run_dir = _run_dir_root(ws) / args.slug
     if not (run_dir / "progress.md").exists():
         print(f"orko: no run named {args.slug!r}", file=sys.stderr)
         return 2
@@ -737,275 +1182,1159 @@ def _current_branch(root: Path) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def _is_git_repo(root: Path) -> bool:
-    return find_repo_root(root) is not None
+def codex_companion_path() -> Path | None:
+    hits = sorted((Path.home() / ".claude/plugins/cache/openai-codex/codex").glob(
+        "*/scripts/codex-companion.mjs"))
+    return hits[-1] if hits else None
+
+
+def codex_setup_ready(code: Path) -> tuple[bool, str]:
+    """Ask the openai-codex companion whether the CLI is usable right now.
+
+    `code` is the repository the dispatch will name, and the probe asks about
+    that workspace root rather than whichever directory the conductor is in.
+    """
+    companion = codex_companion_path()
+    if companion is None:
+        return False, "openai-codex plugin not installed"
+    try:
+        result = subprocess.run(
+            ["node", str(companion), "setup", "--json", "--cwd", str(code)],
+            capture_output=True, text=True, check=False,
+        )
+    except FileNotFoundError:
+        # The companion is a Node script, and a machine with the plugin but no
+        # node is a preflight finding, never a traceback out of `preflight`.
+        return False, "node is not on PATH"
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False, result.stderr.strip() or "setup --json returned no JSON"
+    return payload.get("ready") is True, json.dumps(payload.get("codex", {}))
+
+
+def run_companion(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    """One call to the openai-codex companion. Isolated so tests can stand in
+    for a plugin this machine may not have installed.
+
+    Every call carries `--cwd`: the companion keys its job store, the sandbox's
+    writable root, and every `status`/`result` lookup off the git root of that
+    path, so a call made from anywhere else cannot see the job.
+    """
+    companion = codex_companion_path()
+    if companion is None:
+        raise FileNotFoundError("openai-codex plugin not installed")
+    return subprocess.run(["node", str(companion), *args, "--cwd", str(cwd)],
+                          capture_output=True, text=True, check=False)
+
+
+def latest_job_id(code: Path) -> str | None:
+    """The newest job the companion has registered under the code repository.
+
+    `status --all --json` splits the jobs across `running`, `latestFinished`,
+    and `recent`, and a dispatch this loop just sent can be in any of them, so
+    the newest `startedAt` across all three is the one to wait on.
+    """
+    result = run_companion(["status", "--all", "--json"], code)
+    try:
+        snapshot = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    jobs = [*(snapshot.get("running") or []), *(snapshot.get("recent") or [])]
+    finished = snapshot.get("latestFinished")
+    if isinstance(finished, dict):
+        jobs.append(finished)
+    jobs = [job for job in jobs if isinstance(job, dict) and job.get("id")]
+    if not jobs:
+        return None
+    return max(jobs, key=lambda job: job.get("startedAt") or job.get("createdAt") or "")["id"]
+
+
+def cmd_codex_wait(args: argparse.Namespace) -> int:
+    """Block until a background Codex job settles, then print its result.
+
+    The job id is `latest` when the forwarder returned a companion handle or
+    nothing at all instead of the `task-...` id: the job itself registered
+    correctly, and the code repository is the only root it can be under.
+    """
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    code = Path(loaded[1]["code"])
+    job_id = args.job_id
+    try:
+        if job_id == "latest":
+            job_id = latest_job_id(code)
+            if job_id is None:
+                print(f"orko: no Codex job registered under {code}", file=sys.stderr)
+                return 1
+            print(f"orko: latest job is {job_id}", file=sys.stderr)
+        status = run_companion(["status", job_id, "--wait",
+                                "--timeout-ms", str(args.timeout_ms), "--json"], code)
+        result = run_companion(["result", job_id, "--json"], code)
+    except FileNotFoundError as error:
+        print(f"orko: {error}", file=sys.stderr)
+        return 2
+    try:
+        payload = json.loads(result.stdout or status.stdout)
+    except json.JSONDecodeError:
+        print(f"orko: companion returned no JSON: {result.stderr.strip()}",
+              file=sys.stderr)
+        return 1
+    print(json.dumps(payload, indent=2))
+    # `result --json` answers with an envelope, `{"job": ..., "storedJob": ...}`;
+    # the job's own status is inside it, and a top-level read calls every
+    # successful job a failure.
+    job = payload.get("job") if isinstance(payload.get("job"), dict) else payload
+    return 0 if job.get("status") == "completed" else 1
+
+
+def _dirty(repo: Path) -> bool:
+    """Modified or staged tracked files. Untracked files never count.
+
+    A reviewer seat, and `check delivery`'s own acceptance command, leave
+    `.venv/`, `uv.lock`, and caches behind in a repository that need not ignore
+    them, so untracked files cannot be a finding: they are the checker's own
+    droppings. `preflight` is the only caller. A Codex delivery sitting
+    uncommitted is `check delivery`'s business, read from the working tree;
+    here, before a dispatch, a modified tracked file is unfinished work.
+    """
+    return bool(_git(repo, "status", "--porcelain",
+                     "--untracked-files=no").stdout.strip())
+
+
+def head_tracks(ws: Path, path: str) -> bool:
+    """Whether HEAD of the repository named by `path`'s first segment holds it.
+
+    HEAD rather than the index: a `git add`ed record is tracked and still has
+    no committed bytes, and the floor's whole claim is "committed". A blob,
+    not any object: `cat-file -e` is as happy with a tree, and a record is a
+    file. A record path is `<repo>/<rest>`; anything else, including a bare
+    filename, belongs to no repository this run checks and is never committed.
+    """
+    repo, _, rest = path.partition("/")
+    if not rest:
+        return False
+    return _git(ws / repo, "cat-file", "-t", f"HEAD:{rest}").stdout.strip() == "blob"
+
+
+def rehash_gate_records(ws: Path, run: dict) -> None:
+    """Move the guard's floor to what the gate's human left behind.
+
+    The gate asks for `status: accepted` on the spec and `approved_by` on both
+    reviews, and which of the three a human touched is not knowable here, so
+    every record the ledger names is re-hashed.
+
+    Only a record HEAD holds, and only from `sha256_file` — the same bytes
+    `overwrite_guard` and `commit` hash. The caller runs this after the dirty
+    checks passed, so a committed record's disk copy is its committed copy, which
+    is what makes the two byte sources one; a floor read from the blob instead
+    would differ from the disk under any end-of-line or filter attribute and the
+    guard would trip on every record nobody had edited. A record no commit
+    holds, untracked or only staged, has no committed copy at all, so it gets
+    no floor: the guard's own message calls a floor "its last committed hash",
+    and this is what keeps that true.
+    """
+    ledger = Path(run["ledger"])
+    # Only a floor that actually moved is written: a run that resumes at step 5
+    # repeatedly would otherwise append the same lines every time.
+    floor = hashes(ledger)
+    for entry in records(ledger):
+        target = ws / entry["path"]
+        if not head_tracks(ws, entry["path"]):
+            # With no floor the guard has nothing to compare, so a later hand
+            # edit to this record is never reported: the line says so.
+            print(f"orko: {entry['path']} is not committed; no floor recorded, "
+                  "unguarded until it is committed", file=sys.stderr)
+            continue
+        # A committed record absent from the tree is a `docs-dirty` finding, so
+        # `preflight` stops before this; the guard is what keeps a direct call,
+        # or a future caller, from a traceback instead of a line.
+        if not target.is_file():
+            print(f"orko: {entry['path']} is committed but missing from the tree; "
+                  "no floor recorded", file=sys.stderr)
+            continue
+        sha = sha256_file(target)
+        if floor.get(entry["path"]) != sha:
+            append_ledger(ledger, f"hash {entry['path']} {sha}")
 
 
 def cmd_preflight(args: argparse.Namespace) -> int:
     """Check in code what the prose used to ask the conductor to check.
 
     Prose that asks the conductor to check something is a check nothing runs;
-    each condition here was once such a sentence.
+    each condition here was once such a sentence. Each condition is one
+    finding, so a test can remove exactly one and see exactly one test go red.
     """
-    root = Path(args.root).resolve() if args.root else find_repo_root(Path.cwd())
-    if root is None or not _is_git_repo(root):
-        print(f"orko: not inside a git repository: {root or Path.cwd()}",
-              file=sys.stderr)
+    loaded = _load_run(args)
+    if loaded is None:
         return 2
-
-    mode = args.mode
-    run = None
-    if args.slug:
-        run = _describe_run(root, args.slug)
-        if run is None:
-            print(f"orko: no run named {args.slug!r}", file=sys.stderr)
-            return 2
-        mode = run["mode"]
-    if mode is None:
-        print("orko: preflight needs --mode or --slug", file=sys.stderr)
-        return 2
+    ws, run = loaded
 
     findings: list[str] = []
+    checks = 0
     if shutil.which("uv") is None:
         findings.append("uv-missing: `uv` is not on PATH; every script call needs it")
-    branch = _current_branch(root)
-    if mode == "build" and branch in DEFAULT_BRANCHES:
-        findings.append(f"on-default-branch: HEAD is {branch}; a build runs on "
-                        "orko/<slug>, never on a default branch")
-    gitignore = root / ".gitignore"
-    ignored = gitignore.exists() and any(
-        line.strip() == ".orko/" for line in gitignore.read_text(encoding="utf-8").splitlines()
-    )
-    if not ignored:
-        findings.append("run-dir-not-ignored: .gitignore lacks `.orko/`; init adds it")
-    if run is not None:
-        past_intake = run["mode"] == "build" and run["next_step"] != 0
-        past_open = run["mode"] == "analysis" and run["next_step"] != 1
-        if (past_intake or past_open) and not run["linear"].get("project"):
-            findings.append("project-id-missing: the run is past its first step and "
-                            "no Linear project id is recorded; post project and "
-                            "`linear set project`")
-        gate = Path(run["escalations"])
-        if gate.exists() and gate.read_text(encoding="utf-8").strip():
-            findings.append("blocked-escalation: escalations.md is non-empty; only "
-                            "oiler may empty it, and the run stays stopped until then")
+    checks += 1
+    for name in validate_workspace(ws):
+        findings.append(f"workspace-invalid: {name}")
+    checks += 1
+    for repo in ("docs", "code"):
+        if _dirty(ws / repo):
+            findings.append(f"{repo}-dirty: uncommitted changes in {repo}/")
+        checks += 1
+    # A second loop, not a second clause in the first: the findings print in
+    # the order they are appended, and the interface fixes that order.
+    for repo in ("docs", "code"):
+        branch = _current_branch(ws / repo)
+        if run["mode"] == "build" and branch in DEFAULT_BRANCHES:
+            findings.append(f"{repo}-on-default-branch: {repo}/ is on {branch}; a "
+                            "build runs on orko/<slug>, never on a default branch")
+        checks += 1
+    if dossier_status(ws, run["version"]) not in ("active", "proposed"):
+        findings.append(f"dossier-inactive: versions/{run['version']} is not active")
+    checks += 1
+    if run["mode"] == "build" and run["next_step"] == 5:
+        checks += 1
+        spec = record_for(Path(run["ledger"]), "spec", "spec")
+        path = ws / spec["path"] if spec else None
+        if path is None or read_frontmatter_field(path, "status") != "accepted":
+            findings.append("spec-not-accepted: a human sets status: accepted "
+                            "before execution begins")
+    if run["executor"] == "codex":
+        ready, detail = codex_setup_ready(Path(run["code"]))
+        if not ready:
+            findings.append(f"codex-unavailable: run /codex:setup ({detail})")
+        checks += 1
+    gate = Path(run["escalations"])
+    if gate.exists() and gate.read_text(encoding="utf-8").strip():
+        findings.append("blocked-escalation: escalations.md is non-empty; only "
+                        "oiler may empty it, and the run stays stopped until then")
+    checks += 1
 
     for finding in findings:
         print(finding)
-    return 1 if findings else 0
-
-
-def cmd_linear(args: argparse.Namespace) -> int:
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
-        return 2
-    ledger = _run_dir_root(root) / args.slug / "progress.md"
-    if _parse_header(ledger) is None:
-        print(f"orko: no run named {args.slug!r}", file=sys.stderr)
-        return 2
-    if args.action == "set":
-        if CONTROL_RE.search(args.id) or args.id.split() != [args.id]:
-            print("orko: a Linear ID cannot contain whitespace", file=sys.stderr)
-            return 2
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(f"linear {args.key} {args.id}\n")
-        return 0
-    print(json.dumps(_linear_ids(ledger), indent=2))
-    return 0
-
-
-DOC_KINDS = {"spec": "Spec", "plan": "Plan", "brief": "Brief", "synthesis": "Synthesis"}
-
-
-def _emit_posts(posts: list[dict]) -> int:
-    """The one place payloads leave the script. Every `post` subcommand ends
-    here so the shape the conductor relays is identical across entities."""
-    print(json.dumps({"posts": posts}, indent=2))
+    if findings:
+        return 1
+    # After the findings, never beside them: a run that stops here has blessed
+    # nothing, and the edit it stopped on keeps tripping the guard.
+    if run["mode"] == "build" and run["next_step"] == 5:
+        rehash_gate_records(ws, run)
+    # A silent exit 0 cannot be told from a preflight that never ran, and the
+    # Codex readiness probe is the one check whose silence costs a wasted dispatch.
+    print(f"preflight: ok ({checks} checks)")
     return 0
 
 
 def _load_run(args: argparse.Namespace) -> tuple[Path, dict] | None:
-    root = _resolved_root(args)
-    if root is None:
-        print(f"orko: not inside a git repository: {Path.cwd()}", file=sys.stderr)
+    ws = resolve_workspace(args)
+    if ws is None:
         return None
-    run = _describe_run(root, args.slug)
+    run = _describe_run(ws, args.slug)
     if run is None:
         print(f"orko: no run named {args.slug!r}", file=sys.stderr)
         return None
-    return root, run
+    return ws, run
 
 
-def _project_description(run: dict, goal: str, boundaries: str,
-                         branch: str | None) -> str:
-    lines = [
-        f"**Goal:** {goal}",
-        "",
-        f"- Mode: {run['mode']}",
-        f"- Slug: `{run['slug']}`",
-        f"- Repository: `{run['root']}`",
-        f"- Branch: `{branch}`" if branch else "- Branch: none (analysis, read-only)",
-        f"- Run directory: `{run['run_dir']}`",
-        f"- Boundaries: {boundaries}",
-        "",
-        "Record kept by orko. Issues in this project are decisions kicked up to "
-        "the conductor, one per decision, attributed by seat in the first line "
-        "of each description. Documents hold the working artifacts.",
-    ]
-    return "\n".join(lines) + "\n"
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def cmd_post_project(args: argparse.Namespace) -> int:
-    loaded = _load_run(args)
-    if loaded is None:
-        return 2
-    _, run = loaded
-    if run["mode"] == "build" and not args.branch:
-        print("orko: a build project needs --branch (the orko/<slug> branch the "
-              "run works on)", file=sys.stderr)
-        return 2
-    # Checked here rather than by argparse so a missing field is reported the
-    # same way as a missing --branch: exit 2 with an `orko:` line, not a
-    # usage dump. The branch check runs first because it is mode-specific.
-    if not args.boundaries:
-        print("orko: post project needs --boundaries (what the run may and may "
-              "not touch)", file=sys.stderr)
-        return 2
-    description = _project_description(run, args.goal, args.boundaries, args.branch)
-    existing = run["linear"].get("project")
-    if existing:
-        post_args = {"id": existing, "description": description}
-        then = None
+def rel(ws: Path, path: Path) -> str:
+    return str(path.resolve().relative_to(ws.resolve()))
+
+
+def record_path(ws: Path, type_: str, version: str, id_: str | None,
+                slug: str, role: str, date: str = "") -> Path:
+    """`<type dir>/<ID>-<slug>[-<role>].md`, or `<date>-<slug>[-<role>].md` for
+    a type that mints no ID — a research note needs the date to sort."""
+    parts = (date if not id_ else None, id_, slug, role if role != type_ else None)
+    stem = "-".join(part for part in parts if part)
+    return _type_dir(ws, type_, version) / f"{stem}.md"
+
+
+def overwrite_guard(ledger: Path, ws: Path, path: Path) -> str | None:
+    """A finding when the file changed since its hash was recorded — the record
+    carries hand edits the run never saw, so a rewrite would destroy them."""
+    recorded = hashes(ledger).get(rel(ws, path))
+    if recorded is None:
+        return None
+    if not path.exists():
+        return None
+    if sha256_file(path) == recorded:
+        return None
+    return f"edited-since-commit: {rel(ws, path)} differs from its last committed hash"
+
+
+def update_index(index_path: Path, row: list[str], id_cell: str) -> None:
+    """Replace or append a row in the first table under the index heading.
+
+    The table is the run of consecutive `|` lines: the version README has a
+    Release index table right after the Artifact index, and a scan that does
+    not stop at the first blank line overwrites the release row.
+    """
+    lines = index_path.read_text(encoding="utf-8").split("\n")
+    heading = "## Artifact index" if "versions" in index_path.parts else None
+    start = 0
+    if heading:
+        start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
+        if start is None:
+            raise ValueError(f"{index_path} has no '{heading}' heading")
+    first = next((i for i in range(start, len(lines)) if lines[i].startswith("|")), None)
+    if first is None:
+        raise ValueError(f"{index_path} has no table under {heading or 'the top'}")
+    table = []
+    for i in range(first, len(lines)):
+        if not lines[i].startswith("|"):
+            break
+        table.append(i)
+    rendered = "| " + " | ".join(row) + " |"
+    body = table[2:]  # skip header and separator
+    for i in body:
+        cell = lines[i].split("|")[1].strip()
+        if cell.startswith("[") or cell == id_cell:
+            lines[i] = rendered
+            break
     else:
-        post_args = {"name": run["slug"], "addTeams": [run["team"]],
-                     "summary": args.goal[:255], "description": description}
-        then = f"linear set project <returned id> --slug {run['slug']}"
-    return _emit_posts([{"tool": "mcp__linear__save_project",
-                         "args": post_args, "then": then}])
+        lines.insert(body[-1] + 1 if body else table[-1] + 1, rendered)
+    index_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def cmd_post_document(args: argparse.Namespace) -> int:
-    loaded = _load_run(args)
-    if loaded is None:
-        return 2
-    _, run = loaded
-    project = run["linear"].get("project")
-    if not project:
-        print("orko: no Linear project recorded for this run; post project first "
-              "and record its id with `linear set project`", file=sys.stderr)
-        return 2
-    source = Path(run[args.kind])
+def _load_template(ws: Path, type_: str) -> str:
+    """The scaffold's own template for a record type. The ADR template lives in
+    a fenced block inside the ADR README; research has no scaffold template, so
+    the skill ships one."""
+    rt = RECORD_TYPES[type_]
+    if rt.template == "adr-readme":
+        text = (ws / "code/docs/adr/README.md").read_text(encoding="utf-8")
+        return text.split("```markdown\n", 1)[1].split("```", 1)[0]
+    if rt.template == "orko-research":
+        return (references_dir() / "templates/research.md").read_text(encoding="utf-8")
+    return (ws / "docs" / rt.template).read_text(encoding="utf-8")
+
+
+def _mint(ws: Path, run: dict, type_: str, role: str, title: str,
+          updates: dict, index_row: list[str] | None) -> tuple[int, dict]:
+    """Write one record from its template, index it, and log it to the ledger.
+
+    Resumable by construction: a role already in the ledger is returned as-is
+    rather than minted twice, so a rerun of an interrupted run is a no-op.
+    """
+    ledger = Path(run["ledger"])
+    existing = record_for(ledger, type_, role)
+    if existing:
+        return 0, dict(id=existing["id"], type=type_, role=role,
+                       path=str(ws / existing["path"]), resumed=True)
+    rt = RECORD_TYPES[type_]
+    id_ = next_id(ws, type_) if rt.prefix else None
+    path = record_path(ws, type_, run["version"], id_, run["slug"], role, run["date"])
+    guard = overwrite_guard(ledger, ws, path)
+    if guard:
+        print(f"orko: {guard}", file=sys.stderr)
+        return 2, {}
     try:
-        content = source.read_text(encoding="utf-8")
-    except OSError as error:
-        print(f"orko: cannot read {source}: {error}", file=sys.stderr)
+        text = _load_template(ws, type_)
+        fields = dict(updates)
+        if id_:
+            fields["id"] = id_
+            text = text.replace(f"{rt.prefix}-NNN — [", f"{id_} — [", 1)
+        text = set_frontmatter(text, fields)
+        if id_:
+            text = re.sub(rf"^# {id_} — \[.*\]$", lambda m: f"# {id_} — {title}",
+                          text, count=1, flags=re.MULTILINE)
+        else:
+            text = re.sub(r"^# \[Title\]$", lambda m: f"# {title}",
+                          text, count=1, flags=re.MULTILINE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        append_ledger(ledger, f"record {type_} {role} {id_ or '-'} {rel(ws, path)}")
+        if rt.index and index_row:
+            row = [id_ if cell == "ID" else cell for cell in index_row]
+            index_path = ws / rt.repo / rt.index.replace("<v>", run["version"])
+            update_index(index_path, row, id_ or "")
+            append_ledger(ledger, f"touched {rel(ws, index_path)}")
+    except ValueError as error:
+        print(f"orko: {error}", file=sys.stderr)
+        return 2, {}
+    return 0, dict(id=id_, type=type_, role=role, path=str(path), resumed=False)
+
+
+FINDING_HEAD_RE = re.compile(r"^#### F(?P<n>\d+) — (?P<title>.+)$", re.MULTILINE)
+FIELD_RE = re.compile(r"^- (?P<key>Severity|Evidence|Requirement|Impact|Recommendation): (?P<val>.+)$", re.MULTILINE)
+VERDICT_RE = re.compile(r"^- F(?P<n>\d+) -> (?P<rest>.+)$", re.MULTILINE)
+
+
+def parse_findings(text: str) -> tuple[dict, list[dict]]:
+    """Seat-level header plus one dict per `#### F<n>` block."""
+    seat = {"seat": "", "verdict": "", "gaps": ""}
+    m = re.search(r"^### FINDINGS — Seat: (?P<seat>.+)$", text, re.MULTILINE)
+    if m:
+        seat["seat"] = m.group("seat").strip()
+    for key, label in (("verdict", "Verdict"), ("gaps", "Confidence & gaps")):
+        m = re.search(rf"^- {re.escape(label)}: (?P<v>.+)$", text, re.MULTILINE)
+        if m:
+            seat[key] = m.group("v").strip()
+    heads = list(FINDING_HEAD_RE.finditer(text))
+    findings = []
+    for i, head in enumerate(heads):
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        block = text[head.end():end]
+        fields = {m.group("key").lower(): m.group("val").strip() for m in FIELD_RE.finditer(block)}
+        findings.append(dict(title=head.group("title").strip(), **fields))
+    return seat, findings
+
+
+def parse_verdicts(text: str) -> dict[str, str]:
+    return {f"F{m.group('n')}": m.group("rest").strip() for m in VERDICT_RE.finditer(text)}
+
+
+def render_review(
+    seats: list[tuple[dict, list[dict], dict[str, str]]],
+) -> tuple[str, str, str, dict[str, list[str]]]:
+    """seats: (seat_meta, findings, verdicts) in dispatch order.
+
+    The fourth value maps each seat to the `F<n>` labels its findings became, so
+    the conductor can disposition against the right numbers: `--seat` order
+    silently renumbers every finding, and a mis-ordered mint sends 24
+    dispositions to the wrong blocks.
+    """
+    summary, risks, blocks = [], [], []
+    seat_ranges: dict[str, list[str]] = {}
+    n = 0
+    for meta, findings, verdicts in seats:
+        summary.append(f"- {meta['seat']}: {meta['verdict']}")
+        if meta["gaps"]:
+            risks.append(f"- {meta['seat']}: {meta['gaps']}")
+        labels: list[str] = []
+        for local, f in enumerate(findings, start=1):
+            n += 1
+            labels.append(f"F{n}")
+            evidence = f.get("evidence", "")
+            if f"F{local}" in verdicts:
+                evidence += " | Verified: " + verdicts[f"F{local}"]
+            blocks.append("\n".join([
+                f"### F{n} — {f['title']}",
+                "",
+                f"- Seat: {meta['seat']}",
+                f"- Severity: `{f.get('severity', 'note')}`",
+                f"- Evidence: {evidence}",
+                f"- Requirement: {f.get('requirement', '')}",
+                f"- Impact: {f.get('impact', '')}",
+                f"- Recommendation: {f.get('recommendation', '')}",
+                "- Disposition: `open`",
+            ]))
+        seat_ranges[meta["seat"]] = labels
+    return ("\n".join(summary), "\n\n".join(blocks),
+            "\n".join(risks) or "None recorded.", seat_ranges)
+
+
+def _fill_section(text: str, heading: str, body: str) -> str:
+    """Replace the comment placeholder under `## heading` with body."""
+    pattern = re.compile(rf"(^## {re.escape(heading)}\n\n)<!--.*?-->\n", re.MULTILINE | re.DOTALL)
+    return pattern.sub(lambda m: m.group(1) + body + "\n", text, count=1)
+
+
+def cmd_record_review(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
         return 2
-    key = f"{args.kind}_doc"
-    existing = run["linear"].get(key)
-    if existing:
-        post_args = {"id": existing, "content": content}
-        then = None
+    ws, run = loaded
+    src = Path(args.from_findings)
+    seats = []
+    names = list(args.seat) or sorted(p.stem for p in src.glob("*.md") if not p.name.endswith(".verdict.md"))
+    for path in (src / f"{name}.md" for name in names):
+        if not path.exists():
+            print(f"orko: no findings file {path}", file=sys.stderr)
+            return 2
+        meta, findings = parse_findings(path.read_text(encoding="utf-8"))
+        vpath = path.with_name(path.stem + ".verdict.md")
+        verdicts = parse_verdicts(vpath.read_text(encoding="utf-8")) if vpath.exists() else {}
+        seats.append((meta, findings, verdicts))
+    if not seats:
+        print(f"orko: no findings files under {src}", file=sys.stderr)
+        return 2
+    names = ", ".join(meta["seat"] for meta, _, _ in seats)
+    summary, blocks, risks, seat_ranges = render_review(seats)
+    code, out = _mint(ws, run, "review", args.role, args.title,
+                      {"title": args.title, "status": "draft", "product_version": run["version"],
+                       "reviews": list(args.reviews), "revision": args.revision,
+                       "reviewer": f"orko ({names})", "reviewed_at": run["date"],
+                       "approved_by": None, "approved_at": None},
+                      ["ID", "Review", args.title, "draft", run["owner"]])
+    if code != 0:
+        return code
+    if not out["resumed"]:
+        path = Path(out["path"])
+        text = path.read_text(encoding="utf-8")
+        text = _fill_section(text, "Summary", summary)
+        text = re.sub(r"### F1 — \[Finding\].*?(?=\n## )", lambda m: blocks + "\n", text, count=1, flags=re.DOTALL)
+        text = _fill_section(text, "Unresolved risks and questions", risks)
+        path.write_text(text, encoding="utf-8")
+    print(json.dumps(dict(out, seats=seat_ranges), indent=2))
+    return 0
+
+
+def cmd_record_spec(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    code, out = _mint(ws, run, "spec", "spec", args.title,
+                      {"title": args.title, "status": "draft",
+                       "product_version": run["version"], "owner": run["owner"],
+                       "approved_at": None, "supersedes": None},
+                      ["ID", "Specification", args.title, "draft", run["owner"]])
+    if code == 0:
+        print(json.dumps(out, indent=2))
+    return code
+
+
+def cmd_record_plan(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    code, out = _mint(ws, run, "plan", "plan", args.title,
+                      {"title": args.title, "status": "draft",
+                       "product_version": run["version"],
+                       "implements": [args.implements], "owner": run["owner"]},
+                      ["ID", "Delivery plan", args.title, "draft", run["owner"]])
+    if code == 0:
+        print(json.dumps(out, indent=2))
+    return code
+
+
+def find_record(ws: Path, id_: str) -> Path | None:
+    """The file an ID names, across the docs and code trees."""
+    prefix = id_.split("-")[0]
+    for rt in RECORD_TYPES.values():
+        if rt.prefix != prefix:
+            continue
+        pattern = rt.subdir.replace("<v>", "*")
+        hits = sorted((ws / rt.repo).glob(f"{pattern}/{id_}-*.md"))
+        if hits:
+            return hits[0]
+    return None
+
+
+def _guarded_edit(ws: Path, run: dict, path: Path, transform) -> int:
+    """Rewrite a record in place, refusing when it carries edits the run never saw."""
+    ledger = Path(run["ledger"])
+    guard = overwrite_guard(ledger, ws, path)
+    if guard:
+        print(f"orko: {guard}", file=sys.stderr)
+        return 2
+    text = path.read_text(encoding="utf-8")
+    new = transform(text)
+    if new is None:
+        return 2
+    path.write_text(new, encoding="utf-8")
+    return 0
+
+
+def cmd_record_disposition(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    path = find_record(ws, args.review)
+    if path is None:
+        print(f"orko: no record {args.review}", file=sys.stderr)
+        return 2
+
+    def transform(text: str) -> str | None:
+        # `(?!^### )` keeps the match inside this finding's own block: a plain
+        # `.*?` runs past an already-dispositioned F1 and rewrites F2 instead.
+        pattern = re.compile(
+            rf"(^### {re.escape(args.finding)} — (?:(?!^### ).)*?- Disposition: `)open(`)",
+            re.MULTILINE | re.DOTALL)
+        new, n = pattern.subn(
+            lambda m: m.group(1) + args.disposition + m.group(2), text, count=1)
+        if n == 0:
+            print(f"orko: {args.review} has no open finding {args.finding}", file=sys.stderr)
+            return None
+        return new
+    return _guarded_edit(ws, run, path, transform)
+
+
+def cmd_record_status(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    path = find_record(ws, args.id)
+    if path is None:
+        print(f"orko: no record {args.id}", file=sys.stderr)
+        return 2
+    return _guarded_edit(ws, run, path, lambda t: set_frontmatter(t, {"status": args.status}))
+
+
+def cmd_record_amendment(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    path = find_record(ws, args.id)
+    if path is None or "## Amendments" not in path.read_text(encoding="utf-8"):
+        print(f"orko: {args.id} has no Amendments section", file=sys.stderr)
+        return 2
+    line = f"- {_dt.date.today().isoformat()}: {args.text}"
+    return _guarded_edit(ws, run, path, lambda text: _append_after_heading_text(
+        text, "## Amendments", line, table=False, blank_before=True))
+
+
+def cmd_record_decision(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    code, out = _mint(ws, run, "decision", "decision", args.title,
+                      {"title": args.title, "status": "proposed", "owner": run["owner"],
+                       "decided_at": None, "supersedes": None, "superseded_by": None},
+                      ["ID", args.title, "proposed", run["date"], "—"])
+    if code == 0:
+        print(json.dumps(out, indent=2))
+    return code
+
+
+def cmd_record_adr(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    code, out = _mint(ws, run, "adr", "adr", args.title,
+                      {"title": args.title, "status": "proposed", "decided_at": None,
+                       "supersedes": None, "superseded_by": None}, None)
+    if code == 0:
+        print(json.dumps(out, indent=2))
+    return code
+
+
+def cmd_record_research(args: argparse.Namespace) -> int:
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    code, out = _mint(ws, run, "research", "research", args.title,
+                      {"title": args.title, "collected_at": run["date"]}, None)
+    if code == 0:
+        print(json.dumps(out, indent=2))
+    return code
+
+
+def _append_after_heading_text(text: str, heading: str, line: str, table: bool,
+                               blank_before: bool = False) -> str:
+    """Append `line` at the end of the section under `heading`: after the last
+    `|` row when `table`, else after the last non-blank line of the section.
+
+    The section ends at the next `## ` heading, so an append never spills into
+    whatever follows.
+    """
+    lines = text.split("\n")
+    start = lines.index(heading)
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    section = range(start + 1, end)
+    if table:
+        anchor = max(i for i in section if lines[i].startswith("|"))
     else:
-        post_args = {"title": DOC_KINDS[args.kind], "project": project,
-                     "content": content}
-        then = f"linear set {key} <returned id> --slug {run['slug']}"
-    # The conductor retypes `content` into the MCP call, so the payload carries
-    # the hash of what the script read: `get_document` after the save is the
-    # only check on a relay nothing else can verify.
-    return _emit_posts([{"tool": "mcp__linear__save_document",
-                         "args": post_args, "then": then,
-                         "content_sha256": hashlib.sha256(
-                             content.encode()).hexdigest()}])
+        anchor = max((i for i in section if lines[i].strip()), default=start)
+    lines.insert(anchor + 1, line)
+    if blank_before:
+        lines.insert(anchor + 1, "")
+    return "\n".join(lines)
 
 
-def cmd_post_close(args: argparse.Namespace) -> int:
+def _append_after_heading(path: Path, heading: str, line: str, table: bool) -> None:
+    path.write_text(
+        _append_after_heading_text(path.read_text(encoding="utf-8"), heading, line, table),
+        encoding="utf-8")
+
+
+def cmd_record_delivery_decision(args: argparse.Namespace) -> int:
     loaded = _load_run(args)
     if loaded is None:
         return 2
-    _, run = loaded
-    project = run["linear"].get("project")
-    if not project:
-        print("orko: no Linear project recorded for this run", file=sys.stderr)
+    ws, run = loaded
+    ledger = Path(run["ledger"])
+    plan = record_for(ledger, "plan", "plan")
+    if plan is None:
+        print("orko: no plan minted for this run", file=sys.stderr)
         return 2
-    # `patch`, never `description`: save_project replaces the description
-    # wholesale, and the description is the reconstruction block a lost run
-    # directory is rebuilt from. Close adds a line; it does not overwrite.
-    post_args: dict = {
-        "id": project,
-        "state": "Completed",
-        "patch": [{"op": "append", "text": f"\n\n**Closed.** {args.summary}\n"}],
-    }
-    if args.pr:
-        post_args["links"] = [{"url": args.pr, "title": "Pull request"}]
-    return _emit_posts([{"tool": "mcp__linear__save_project",
-                         "args": post_args, "then": None}])
+    path = ws / plan["path"]
+    guard = overwrite_guard(ledger, ws, path)
+    if guard:
+        print(f"orko: {guard}", file=sys.stderr)
+        return 2
+    heading = "## Delivery decisions"
+    try:
+        _append_after_heading(path, heading,
+                              f"| {args.decision} | {args.rationale} |  |", table=True)
+    except ValueError:
+        # The plan-writer is told to delete unused template rows, so a plan that
+        # lost the whole section is a plausible input, not a bug in the script.
+        print(f"orko: {path} has no '{heading}' section", file=sys.stderr)
+        return 2
+    append_ledger(ledger, f"touched {rel(ws, path)}")
+    return 0
 
 
-# Decision outcomes and the JRF team state each maps to. The team has no
-# "Blocked" state, so an out-of-boundaries finding is a Todo carrying the
-# `blocked` label, and the run stops on it (see cmd_post_escalation). The label
-# payload carries no team, so `blocked` is created once per workspace and
-# save_issue resolves it by name.
-OUTCOMES: dict[str, str] = {
-    "handled": "Done",
-    "deferred": "Backlog",
-    "rejected": "Canceled",
-    "blocked": "Todo",
-}
-BLOCKED_LABEL = {"name": "blocked", "color": "#eb5757"}
-
-
-def _finding_posts(run: dict, seat: str, outcome: str, title: str,
-                   body: str) -> list[dict]:
-    posts: list[dict] = []
-    labels: list[str] = []
-    if outcome == "blocked":
-        labels = [BLOCKED_LABEL["name"]]
-        if not run["linear"].get("blocked_label"):
-            posts.append({
-                "tool": "mcp__linear__save_issue_label",
-                "args": dict(BLOCKED_LABEL),
-                "then": f"linear set blocked_label <returned id> --slug {run['slug']}",
-            })
-    issue_args: dict = {
-        "team": run["team"],
-        "project": run["linear"]["project"],
-        "title": title,
-        "state": OUTCOMES[outcome],
-        "description": f"Seat: {seat}\n\n{body.rstrip()}\n",
-    }
-    if labels:
-        issue_args["labels"] = labels
-    posts.append({"tool": "mcp__linear__save_issue", "args": issue_args,
-                  "then": None})
-    return posts
-
-
-def _read_body() -> str | None:
-    body = sys.stdin.read()
-    return body if body.strip() else None
-
-
-def cmd_post_finding(args: argparse.Namespace) -> int:
+def cmd_record_risk(args: argparse.Namespace) -> int:
     loaded = _load_run(args)
     if loaded is None:
         return 2
-    _, run = loaded
-    if not run["linear"].get("project"):
-        print("orko: no Linear project recorded for this run", file=sys.stderr)
+    ws, run = loaded
+    readme = dossier_dir(ws, run["version"]) / "README.md"
+    heading = "## Risks, blockers, and open decisions"
+    try:
+        _append_after_heading(readme, heading, f"- {args.text}", table=False)
+    except ValueError:
+        print(f"orko: {readme} has no '{heading}' section", file=sys.stderr)
         return 2
-    body = _read_body()
-    if body is None:
-        print("orko: the finding body (stdin) is empty; pipe the finding's "
-              "evidence and the conductor's reasoning", file=sys.stderr)
+    append_ledger(Path(run["ledger"]), f"touched {rel(ws, readme)}")
+    return 0
+
+
+CHANGELOG_SECTIONS = ("Added", "Changed", "Fixed", "Removed", "Security")
+
+
+def _insert_under(text: str, heading: str, line: str, within: str | None = None) -> str:
+    """Record `line` under `heading`, creating the heading when absent.
+
+    Idempotent, because `close` is rerunnable: a line already standing in the
+    section is left alone rather than filed twice. Entries append after the
+    section's last bullet, so `--changelog` order survives into the file and
+    consecutive bullets stay a tight list with one blank line before whatever
+    heading follows.
+
+    `within` scopes the whole operation to one `## ` section: a changelog entry
+    belongs under Unreleased, and an unscoped insert would land it in whatever
+    released section happens to carry the same `### Added` heading first.
+    """
+    if within:
+        head, sep, rest = text.partition(within + "\n")
+        section, sep2, after = rest.partition("\n## ")
+        section = _insert_under(section, heading, line)
+        return head + sep + section + (sep2 + after if sep2 else "")
+    lines = text.split("\n")
+    if heading not in lines:
+        # An empty section carries no newline of its own, so `rstrip` plus a
+        # blank line would open the heading with two blank lines above it.
+        body = text.rstrip("\n")
+        lines = ((body + "\n\n" if body else "\n") + f"{heading}\n\n").split("\n")
+    start = lines.index(heading)
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("#")),
+               len(lines))
+    block, body = line.split("\n"), lines[start + 1:end]
+    if any(body[i:i + len(block)] == block for i in range(len(body) - len(block) + 1)):
+        return "\n".join(lines)
+    bullets = [i for i in range(start + 1, end) if lines[i].startswith("- ")]
+    if bullets:
+        at = bullets[-1] + 1
+    else:
+        at = start + 1
+        if at >= len(lines) or lines[at].strip():
+            lines.insert(at, "")
+        at += 1
+    lines.insert(at, line)
+    if at + 1 >= len(lines) or lines[at + 1].strip():
+        lines.insert(at + 1, "")
+    return "\n".join(lines)
+
+
+def _status_progress_line(ws: Path, topic: str, new_line: str) -> None:
+    """Set this run's one bullet under `## In progress`, replacing any earlier one."""
+    status = ws / "docs/STATUS.md"
+    lines = status.read_text(encoding="utf-8").split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith(f"- {topic}"):
+            lines[i] = new_line
+            break
+    else:
+        anchor = lines.index("## In progress")
+        # the template has a blank line then an HTML comment under the heading;
+        # insert after the comment so the bullet is not glued to it
+        insert_at = anchor + 1
+        while insert_at < len(lines) and (not lines[insert_at].strip() or lines[insert_at].startswith("<!--")):
+            insert_at += 1
+        # insert_at is now the section's first real line, or the next heading.
+        # The bullet joins an existing list directly and stands off anything
+        # else with a blank, so the next heading is never glued to it.
+        lines.insert(insert_at, new_line)
+        if insert_at + 1 >= len(lines) or not lines[insert_at + 1].startswith("- "):
+            lines.insert(insert_at + 1, "")
+    status.write_text("\n".join(lines), encoding="utf-8")
+
+
+def cmd_record_close(args: argparse.Namespace) -> int:
+    """Hand the run to a human: STATUS, both changelogs, the index, two PR bodies.
+
+    Nothing here moves work to Recently completed. Acceptance is oiler's call,
+    and a run that marked its own work done would be grading its own homework.
+    """
+    loaded = _load_run(args)
+    if loaded is None:
         return 2
-    outcome = "blocked" if args.entity == "escalation" else args.outcome
-    if args.entity == "escalation":
-        gate = Path(run["escalations"])
-        with gate.open("a", encoding="utf-8") as handle:
-            handle.write(f"## {args.title}\n\nSeat: {args.seat}\n\n{body.rstrip()}\n\n")
-    return _emit_posts(_finding_posts(run, args.seat, outcome, args.title, body))
+    ws, run = loaded
+    entries = []
+    for item in args.changelog:
+        section, _, text = item.partition(":")
+        if section.strip() not in CHANGELOG_SECTIONS or not text.strip():
+            print(f"orko: --changelog must be '<{'|'.join(CHANGELOG_SECTIONS)}>: text'",
+                  file=sys.stderr)
+            return 2
+        entries.append((section.strip(), text.strip()))
+    ledger = Path(run["ledger"])
+    # The PR bodies trace everything the run minted. STATUS and the changelogs
+    # cite the work itself: a reader asking what shipped is not served by a
+    # review or decision ID on a changelog line.
+    ids = sorted(entry["id"] for entry in records(ledger) if entry["id"] != "-")
+    id_text = ", ".join(sorted(entry["id"] for entry in records(ledger)
+                               if entry["type"] in ("spec", "plan")))
+
+    status = ws / "docs/STATUS.md"
+    # The close date, not the run's init date: a build that opens on Monday and
+    # closes on Friday is as of Friday.
+    as_of = args.date or _dt.date.today().isoformat()
+    status.write_text(set_frontmatter(status.read_text(encoding="utf-8"),
+                                      {"as_of": as_of}), encoding="utf-8")
+    _status_progress_line(ws, run["topic"], f"- {run['topic']} ({id_text}): awaiting acceptance")
+    append_ledger(ledger, "touched docs/STATUS.md")
+
+    # Refresh the artifact index from each record's own frontmatter: the row was
+    # written when the record was minted, and `record status` has moved on since.
+    readme = dossier_dir(ws, run["version"]) / "README.md"
+    kinds = {"spec": "Specification", "plan": "Delivery plan", "review": "Review"}
+    for entry in records(ledger):
+        if entry["type"] in kinds:
+            path = ws / entry["path"]
+            update_index(readme, [entry["id"], kinds[entry["type"]],
+                                  read_frontmatter_field(path, "title") or entry["id"],
+                                  read_frontmatter_field(path, "status") or "draft",
+                                  run["owner"]], entry["id"])
+    append_ledger(ledger, f"touched {rel(ws, readme)}")
+
+    for changelog in (ws / "code/CHANGELOG.md", dossier_dir(ws, run["version"]) / "CHANGELOG.md"):
+        text = changelog.read_text(encoding="utf-8")
+        for section, item in entries:
+            text = _insert_under(text, f"### {section}", f"- {item} ({id_text})",
+                                 within="## Unreleased")
+        changelog.write_text(text, encoding="utf-8")
+        append_ledger(ledger, f"touched {rel(ws, changelog)}")
+
+    out = {}
+    for repo in ("docs", "code"):
+        template = ws / repo / ".github/PULL_REQUEST_TEMPLATE.md"
+        body = template.read_text(encoding="utf-8") if template.exists() else "## Purpose\n\n## Artifacts\n"
+        body = _insert_under(body, "## Purpose", args.summary)
+        heading = next((line for line in body.split("\n") if line.startswith("## ")
+                        and ("Artifacts" in line or "Traceability" in line)), None)
+        if heading:
+            body = _insert_under(body, heading, "\n".join(f"- {i}" for i in ids))
+        path = Path(run["run_dir"]) / f"pr-{repo}.md"
+        path.write_text(body, encoding="utf-8")
+        out[f"pr_{repo}"] = str(path)
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=False)
+
+
+def stageable(repo: Path, path: str) -> bool:
+    """Whether `git add` can stage `path` as one file: a regular file on disk,
+    or a file the index tracks that the delivery deleted.
+
+    Nothing that names more than one file qualifies. `git add -A -- <pathspec>`
+    stages every match, so a directory or a glob would sweep in the caches
+    `check delivery` just ignored and report a pathspec as the staged path, and
+    `sha256_file` has no answer for a directory. Hence the exact match against
+    `ls-files` output rather than a test for a non-empty one: a pathspec never
+    appears there verbatim, only the files it matched. A `**Files:**` entry is
+    model-authored, so all of this is reachable.
+    """
+    target = repo / path
+    if target.is_file():
+        return True
+    if target.exists():
+        return False
+    return path in _git(repo, "ls-files", "-z", "--", path).stdout.split("\0")
+
+
+def cmd_commit(args: argparse.Namespace) -> int:
+    """Stage this run's own paths in one repo, commit them with the run's IDs
+    and trailers, then re-hash what landed so the overwrite guard has a floor.
+
+    `--task N` is the Codex delivery's commit: its sandbox mounts `.git`
+    read-only, so the script stages the task's own paths and owns the subject,
+    the Refs line, and the trailers.
+    """
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    repo = ws / args.repo
+    ledger = Path(run["ledger"])
+    task = None
+    if args.task is not None:
+        if args.repo != "code":
+            print("orko: --task commits a Codex delivery, which lands in code/ only",
+                  file=sys.stderr)
+            return 2
+        task = _task_or_exit(run, args.task)
+        if task is None:
+            return 2
+    if args.message is None and task is None:
+        print("orko: commit needs --message, or --task N to take the task's own subject",
+              file=sys.stderr)
+        return 2
+    if task is not None:
+        # A conductor writing what reads as a commit subject passes the prefix
+        # too. One is enough, and `Task <n>:` has to lead for a later call to
+        # recognize this task's own commit.
+        prefix = f"Task {args.task}:"
+        tail = (args.message if args.message is not None else task["title"]).strip()
+        while tail.startswith(prefix):
+            tail = tail[len(prefix):].strip()
+        subject = f"{prefix} {tail}" if tail else ""
+    else:
+        subject = args.message.strip()
+    if not subject:
+        print("orko: --message needs a subject", file=sys.stderr)
+        return 2
+    staged: list[str] = []
+    allowed: set[str] = set()
+    if task is not None:
+        # The delivery's allowlist, not the whole dirty tree: nothing Codex left
+        # outside the task's Files list and the testing README can be staged.
+        allowed = set(task["files"]) | set(DELIVERY_ALWAYS_ALLOWED)
+        staged += list(task["files"]) + list(DELIVERY_ALWAYS_ALLOWED)
+    for entry in records(ledger):
+        if entry["path"].startswith(args.repo + "/"):
+            staged.append(entry["path"].removeprefix(args.repo + "/"))
+    for path in touched(ledger):
+        if path.startswith(args.repo + "/"):
+            staged.append(path.removeprefix(args.repo + "/"))
+    def keeps(path: str) -> bool:
+        # Deleted-but-tracked counts: a delivery that removed a file it listed
+        # has to stage the removal.
+        return (not Path(path).is_absolute() and ".." not in Path(path).parts
+                and stageable(repo, path))
+
+    def names_more_than_a_file(path: str) -> bool:
+        """A path that exists without being a regular file, or that matches
+        tracked files without being one: a directory or a glob in `**Files:**`.
+
+        Distinct from a path that is simply missing, which the delivery may
+        legitimately not have written and which `check delivery` already judged.
+        """
+        if stageable(repo, path):
+            return False
+        if (repo / path).exists():
+            return True
+        return bool(_git(repo, "ls-files", "-z", "--", path).stdout.strip())
+
+    # It names itself, because the fix for it is an edit to `tasks.md` rather
+    # than a retry.
+    for path in dict.fromkeys(staged + list(args.path)):
+        if names_more_than_a_file(path):
+            print(f"orko: skipping {path} (not a file; list files in **Files:**)",
+                  file=sys.stderr)
+    # A typo'd `--path` that silently vanished meant the file never committed and
+    # nothing said so, so every dropped one is named on stderr.
+    for path in args.path:
+        if not keeps(path) and not names_more_than_a_file(path):
+            print(f"orko: skipping {path} (missing, absolute, or outside {args.repo}/)",
+                  file=sys.stderr)
+    staged = list(dict.fromkeys(p for p in staged + list(args.path) if keeps(p)))
+
+    def already_landed() -> str | None:
+        """The sha of this task's own commit, when there is nothing left to
+        commit for it. None otherwise.
+
+        Exit 2 is a stop everywhere in the skill, so a re-run of step 5 after a
+        compaction must report the commit it finds instead of ending the run.
+        Four gates, then a search, because a weaker test called somebody else's
+        commit this task's delivery: this is a `--task` call; no `--message` was
+        passed; the ledger holds a dispatch base for the task; and the working
+        tree holds no change at all beyond the acceptance command's leftovers,
+        whatever file it would be in, a path the task lists counting as a change
+        even when it is a leftover name. Then a commit whose subject leads with
+        this task's number must exist since the base. The subject is the only
+        mark the loop leaves that says which task a commit belongs to. The
+        caller adds the condition `codex.md` counts fifth, that nothing was
+        staged, before it reads the answer.
+        """
+        if task is None:
+            return None
+        # `--message` is only ever passed to name a new commit, and the loop's
+        # step-7 fix always passes one. Reading a landed commit as that fix would drop the
+        # finding it was meant to close.
+        if args.message is not None:
+            return None
+        base = _dispatched_base(_ledger_entries(ledger), f"5.{args.task}")
+        if base is None:
+            return None
+        # The same allowlist `check delivery` reads: a path the task lists is a
+        # delivery, never a dropping, whichever file it is in.
+        if any(path in allowed or not is_tool_leftover(path)
+               for path in worktree_paths(repo)):
+            return None
+        # Newest first, as `git log` reports: when the loop made a delivery and
+        # then a fix for one task, the fix is the commit that carries it now.
+        for line in _git(repo, "log", f"{base}..HEAD",
+                         "--format=%H %s").stdout.splitlines():
+            sha, _, subject = line.partition(" ")
+            if subject.startswith(f"Task {args.task}:"):
+                return sha
+        return None
+
+    def report_landed(sha: str) -> int:
+        print(json.dumps({"repo": args.repo, "commit": sha, "staged": [],
+                          "task": args.task, "already": True}, indent=2))
+        return 0
+
+    landed = already_landed()
+    if not staged and landed is not None:
+        return report_landed(landed)
+    if not staged:
+        # Naming the escape hatch here, because exit 2 is a stop everywhere
+        # else: `record` logs no path under `code/src`, so the step-6 commit of
+        # an implementer's work has nothing recorded to stage.
+        print(f"orko: nothing to stage in {args.repo}; pass --path <repo-relative "
+              "file> for files the run wrote outside the record", file=sys.stderr)
+        return 2
+    result = _git(repo, "add", "-A", "--", *staged)
+    if result.returncode != 0:
+        print(f"orko: git add failed: {result.stderr.strip()}", file=sys.stderr)
+        return 2
+    if _git(repo, "diff", "--cached", "--quiet", "--", *staged).returncode == 0:
+        if landed is not None:
+            return report_landed(landed)
+        print(f"orko: nothing changed in {args.repo}", file=sys.stderr)
+        return 2
+    ids = sorted({e["id"] for e in records(ledger) if e["id"] != "-"})
+    message = subject + "\n\n" + (f"Refs: {', '.join(ids)}\n" if ids else "")
+    message += "\n" + "\n".join(run["trailers"]) + "\n"
+    # `-- *staged` scopes the commit to orko's own paths: anything the user had
+    # already staged in this repo stays staged rather than riding along under
+    # orko's message and Refs line with no hash line to prove it.
+    result = subprocess.run(["git", "-C", str(repo), "commit", "-q", "-F", "-", "--", *staged],
+                            input=message, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        print(f"orko: git commit failed: {result.stderr.strip()}", file=sys.stderr)
+        return 2
+    for p in staged:
+        if (repo / p).is_file():
+            append_ledger(ledger, f"hash {args.repo}/{p} {sha256_file(repo / p)}")
+    payload = {"repo": args.repo, "commit": _git(repo, "rev-parse", "HEAD").stdout.strip(),
+               "staged": staged}
+    if args.task is not None:
+        payload["task"] = args.task
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
+def run_acceptance(cmd: str, cwd: Path) -> int:
+    """The task's own acceptance command, run as written.
+
+    The only `shell=True` in the script: the command is a shell line from a
+    `tasks.md` the plan validator has already accepted, never a flag.
+    """
+    return subprocess.run(cmd, shell=True, cwd=str(cwd), check=False).returncode
+
+
+# The Codex task prompt tells every delivery to map its requirement rows into
+# this file, so a plan that never lists it under Files must not fail the check
+# for obeying the prompt.
+DELIVERY_ALWAYS_ALLOWED = ("docs/testing/README.md",)
+
+# What the acceptance command leaves behind in a repository that need not
+# ignore it. Never part of a delivery, so neither a change nor a breach of the
+# allowlist, whichever prefix or directory level it lands at.
+TOOL_LEFTOVERS = (".venv/", "uv.lock", ".pytest_cache/", "__pycache__/",
+                  ".ruff_cache/", ".mypy_cache/", "node_modules/")
+
+
+def is_tool_leftover(path: str) -> bool:
+    segments = path.split("/")
+    return any(leftover.rstrip("/") in segments for leftover in TOOL_LEFTOVERS)
+
+
+def worktree_paths(repo: Path) -> list[str]:
+    """Every path git reports changed in the working tree: modified, staged,
+    deleted, or untracked.
+
+    `-z` rather than the default: it never quotes a path, and it spends a second
+    NUL-terminated field on a rename's source instead of an ` -> ` separator a
+    filename could contain. Both sides of a rename are changes.
+    """
+    fields = _git(repo, "status", "--porcelain", "-z",
+                  "--untracked-files=all").stdout.split("\0")
+    paths: list[str] = []
+    index = 0
+    while index < len(fields):
+        entry = fields[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        paths.append(entry[3:])
+        if entry[0] in "RC" and index < len(fields):
+            paths.append(fields[index])
+            index += 1
+    return paths
+
+
+def cmd_check_delivery(args: argparse.Namespace) -> int:
+    """Judge one Codex delivery in code, not by reading its report.
+
+    The delivery is the working tree: Codex's sandbox mounts `.git` read-only,
+    so a dispatch can never commit and the script commits afterwards. A tree
+    that is already committed still passes, so a re-check after
+    `commit code --task` reads the same delivery.
+
+    Each condition is one finding, so a test can remove exactly one and see
+    exactly one test go red.
+    """
+    loaded = _load_run(args)
+    if loaded is None:
+        return 2
+    ws, run = loaded
+    task = _task_or_exit(run, args.task)
+    if task is None:
+        return 2
+    base = _dispatched_base(_ledger_entries(Path(run["ledger"])), f"5.{args.task}")
+    # No base means no recorded dispatch: there is no diff to judge, and
+    # guessing one would grade somebody else's work.
+    if base is None:
+        print(f"orko: no `ledger 5.{args.task} dispatched --commit` line", file=sys.stderr)
+        return 2
+    code = ws / "code"
+    findings: list[str] = []
+    allowed = set(task["files"]) | set(DELIVERY_ALWAYS_ALLOWED)
+    committed = _git(code, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines()
+    # A leftover the task lists is a delivery, not a dropping: a dependency
+    # change is the ordinary reason a task's Files list names `uv.lock`.
+    changed = sorted({path for path in worktree_paths(code) + committed
+                      if path and (path in allowed or not is_tool_leftover(path))})
+    if not changed:
+        findings.append("diff-empty: no changes since the dispatch base")
+    outside = sorted(set(changed) - allowed)
+    if changed and outside:
+        findings.append("diff-outside-allowlist: " + ", ".join(outside))
+    if task["acceptance"]:
+        # The acceptance line is model-authored shell run with the conductor's
+        # privileges. Printing it is the whole of the visibility this gets.
+        # `flush=True`: the command writes to the same fd unbuffered, and an
+        # announcement printed after the output it announces is no announcement.
+        print(f"acceptance: {task['acceptance']}", flush=True)
+        rc = run_acceptance(task["acceptance"], code)
+        if rc != 0:
+            findings.append(f"acceptance-failed: exit {rc}")
+    for finding in findings:
+        print(finding)
+    return 1 if findings else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1015,29 +2344,130 @@ def build_parser() -> argparse.ArgumentParser:
     p_init = sub.add_parser("init", help="start or resume a run")
     p_init.add_argument("mode", choices=sorted(MODES))
     p_init.add_argument("topic")
-    p_init.add_argument("--team", required=True, help="Linear team key, e.g. JRF")
-    p_init.add_argument("--root", help="repo root (default: git toplevel of cwd)")
+    p_init.add_argument("--workspace", required=True,
+                        help="scaffold workspace root holding docs/ and code/")
+    p_init.add_argument("--owner", required=True)
+    p_init.add_argument("--boundaries", required=True)
+    p_init.add_argument("--trailer", action="append", default=[])
+    p_init.add_argument("--version")
+    p_init.add_argument("--executor", choices=EXECUTORS, default="claude")
+    p_init.add_argument("--codex-model")
+    p_init.add_argument("--codex-effort")
     p_init.add_argument("--date", help="YYYY-MM-DD (default: today)")
     p_init.set_defaults(func=cmd_init)
 
     p_ledger = sub.add_parser("ledger", help="append a step record")
-    p_ledger.add_argument("step", type=int)
+    p_ledger.add_argument("step")
     p_ledger.add_argument(
         "status", choices=["dispatched", "complete", "failed", "escalated"])
     p_ledger.add_argument("--slug", required=True)
-    p_ledger.add_argument("--root")
+    p_ledger.add_argument("--workspace")
     p_ledger.add_argument("--commit")
     p_ledger.set_defaults(func=cmd_ledger)
 
     p_status = sub.add_parser("status", help="print the resume point")
     p_status.add_argument("slug", nargs="?")
-    p_status.add_argument("--root")
+    p_status.add_argument("--workspace")
     p_status.set_defaults(func=cmd_status)
 
-    p_validate = sub.add_parser("validate", help="check an artifact")
-    p_validate.add_argument("kind", choices=["spec", "plan"])
-    p_validate.add_argument("path")
-    p_validate.set_defaults(func=cmd_validate)
+    p_check = sub.add_parser("check", help="validate an artifact")
+    check_sub = p_check.add_subparsers(dest="kind", required=True)
+    p_ct = check_sub.add_parser("tasks")
+    p_ct.add_argument("path")
+    # Accepted and ignored: the validator reads a path, not a run, and every
+    # `orko.py` call in build.md carries `--workspace <path>` uniformly.
+    p_ct.add_argument("--workspace")
+    p_ct.set_defaults(func=cmd_check_tasks)
+
+    p_cs = check_sub.add_parser("spec")
+    p_cs.add_argument("id")
+    p_cs.add_argument("--slug")
+    p_cs.add_argument("--workspace")
+    p_cs.add_argument("--require-plan", action="store_true")
+    p_cs.set_defaults(func=cmd_check_spec)
+
+    p_cd = check_sub.add_parser("delivery")
+    p_cd.add_argument("--slug", required=True)
+    p_cd.add_argument("--workspace")
+    p_cd.add_argument("--task", type=int, required=True)
+    p_cd.set_defaults(func=cmd_check_delivery)
+
+    p_record = sub.add_parser("record", help="mint or update a scaffold record")
+    record_sub = p_record.add_subparsers(dest="kind", required=True)
+    for kind, func, extra in (("spec", cmd_record_spec, ()),
+                              ("plan", cmd_record_plan, ("--implements",))):
+        p = record_sub.add_parser(kind)
+        p.add_argument("--slug", required=True)
+        p.add_argument("--workspace")
+        p.add_argument("--title", required=True)
+        for flag in extra:
+            p.add_argument(flag, required=True)
+        p.set_defaults(func=func)
+
+    p_review = record_sub.add_parser("review")
+    p_review.add_argument("--slug", required=True)
+    p_review.add_argument("--workspace")
+    p_review.add_argument("--title", required=True)
+    p_review.add_argument("--role", choices=["spec", "plan", "code", "analysis"], required=True)
+    p_review.add_argument("--reviews", action="append", default=[])
+    p_review.add_argument("--seat", action="append", default=[],
+                          help="seat name, repeatable; sets the order findings render in")
+    p_review.add_argument("--revision", required=True)
+    p_review.add_argument("--from-findings", required=True)
+    p_review.set_defaults(func=cmd_record_review)
+
+    p = record_sub.add_parser("disposition")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--review", required=True)
+    p.add_argument("--finding", required=True)
+    p.add_argument("--disposition", required=True,
+                   choices=["accepted", "rejected", "resolved", "noted"])
+    p.set_defaults(func=cmd_record_disposition)
+
+    p = record_sub.add_parser("status")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--id", required=True)
+    p.add_argument("--status", required=True, choices=["draft", "in_review"])
+    p.set_defaults(func=cmd_record_status)
+
+    p = record_sub.add_parser("amendment")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--id", required=True)
+    p.add_argument("--text", required=True)
+    p.set_defaults(func=cmd_record_amendment)
+
+    for kind, func in (("decision", cmd_record_decision), ("adr", cmd_record_adr),
+                       ("research", cmd_record_research)):
+        p = record_sub.add_parser(kind)
+        p.add_argument("--slug", required=True)
+        p.add_argument("--workspace")
+        p.add_argument("--title", required=True)
+        p.set_defaults(func=func)
+
+    p = record_sub.add_parser("delivery-decision")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--decision", required=True)
+    p.add_argument("--rationale", required=True)
+    p.set_defaults(func=cmd_record_delivery_decision)
+
+    p = record_sub.add_parser("risk")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--text", required=True)
+    p.set_defaults(func=cmd_record_risk)
+
+    p = record_sub.add_parser("close")
+    p.add_argument("--slug", required=True)
+    p.add_argument("--workspace")
+    p.add_argument("--summary", required=True)
+    p.add_argument("--date", help="YYYY-MM-DD stamped as STATUS.md as_of (default: today)")
+    p.add_argument("--changelog", action="append", default=[],
+                   help="'<Added|Changed|Fixed|Removed|Security>: text', repeatable")
+    p.set_defaults(func=cmd_record_close)
 
     p_prompt = sub.add_parser("prompt", help="emit a dispatch prompt")
     p_prompt.add_argument("kind", choices=sorted(PROMPT_SOURCES))
@@ -1046,67 +2476,43 @@ def build_parser() -> argparse.ArgumentParser:
     p_prompt.add_argument("--seat")
     p_prompt.add_argument("--question")
     p_prompt.add_argument("--context-file")
-    p_prompt.add_argument("--root")
+    p_prompt.add_argument("--task", type=int)
+    p_prompt.add_argument("--attempt", choices=["fresh", "resume"], default="fresh")
+    p_prompt.add_argument("--failure")
+    p_prompt.add_argument("--workspace")
     p_prompt.set_defaults(func=cmd_prompt)
 
     p_escalations = sub.add_parser(
         "escalations", help="0 when there is nothing to escalate, 1 when there is")
     p_escalations.add_argument("slug")
-    p_escalations.add_argument("--root")
+    p_escalations.add_argument("--workspace")
     p_escalations.set_defaults(func=cmd_escalations)
 
-    p_pre = sub.add_parser("preflight", help="check repo, branch, tooling, and record state")
-    p_pre.add_argument("--slug")
-    p_pre.add_argument("--mode", choices=sorted(MODES))
-    p_pre.add_argument("--root")
+    p_commit = sub.add_parser("commit", help="stage and commit this run's paths in one repo")
+    p_commit.add_argument("repo", choices=["docs", "code"])
+    p_commit.add_argument("--slug", required=True)
+    p_commit.add_argument("--workspace")
+    p_commit.add_argument("--message",
+                          help="commit subject; optional with --task, which writes its own")
+    p_commit.add_argument("--task", type=int,
+                          help="commit task N's Codex delivery from code/")
+    p_commit.add_argument("--path", action="append", default=[],
+                          help="extra repo-relative path to stage, repeatable")
+    p_commit.set_defaults(func=cmd_commit)
+
+    p_codex = sub.add_parser("codex", help="drive a background Codex job")
+    codex_sub = p_codex.add_subparsers(dest="codex_command", required=True)
+    p_wait = codex_sub.add_parser("wait")
+    p_wait.add_argument("job_id", help="the task-... id, or `latest` to resolve it")
+    p_wait.add_argument("--slug", required=True)
+    p_wait.add_argument("--workspace")
+    p_wait.add_argument("--timeout-ms", type=int, default=1800000)
+    p_wait.set_defaults(func=cmd_codex_wait)
+
+    p_pre = sub.add_parser("preflight", help="check repos, branches, tooling, and record state")
+    p_pre.add_argument("--slug", required=True)
+    p_pre.add_argument("--workspace")
     p_pre.set_defaults(func=cmd_preflight)
-
-    p_post = sub.add_parser("post", help="emit a Linear payload for the conductor to send")
-    post_sub = p_post.add_subparsers(dest="entity", required=True)
-
-    p_pp = post_sub.add_parser("project")
-    p_pp.add_argument("--slug", required=True)
-    p_pp.add_argument("--root")
-    p_pp.add_argument("--goal", required=True)
-    p_pp.add_argument("--boundaries")
-    p_pp.add_argument("--branch")
-    p_pp.set_defaults(func=cmd_post_project)
-
-    p_pd = post_sub.add_parser("document")
-    p_pd.add_argument("kind", choices=sorted(DOC_KINDS))
-    p_pd.add_argument("--slug", required=True)
-    p_pd.add_argument("--root")
-    p_pd.set_defaults(func=cmd_post_document)
-
-    p_pc = post_sub.add_parser("close")
-    p_pc.add_argument("--slug", required=True)
-    p_pc.add_argument("--root")
-    p_pc.add_argument("--summary", required=True)
-    p_pc.add_argument("--pr")
-    p_pc.set_defaults(func=cmd_post_close)
-
-    for entity in ("finding", "escalation"):
-        p_pf = post_sub.add_parser(entity)
-        p_pf.add_argument("--slug", required=True)
-        p_pf.add_argument("--root")
-        p_pf.add_argument("--seat", required=True)
-        p_pf.add_argument("--title", required=True)
-        if entity == "finding":
-            p_pf.add_argument("--outcome", required=True, choices=sorted(OUTCOMES))
-        p_pf.set_defaults(func=cmd_post_finding)
-
-    p_linear = sub.add_parser("linear", help="record or read Linear IDs")
-    linear_sub = p_linear.add_subparsers(dest="action", required=True)
-    p_set = linear_sub.add_parser("set")
-    p_set.add_argument("key", choices=LINEAR_KEYS)
-    p_set.add_argument("id")
-    p_set.add_argument("--slug", required=True)
-    p_set.add_argument("--root")
-    p_set.set_defaults(func=cmd_linear)
-    p_get = linear_sub.add_parser("get")
-    p_get.add_argument("--slug", required=True)
-    p_get.add_argument("--root")
-    p_get.set_defaults(func=cmd_linear)
 
     return parser
 
