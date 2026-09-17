@@ -21,7 +21,7 @@ Rules:
 - Do not touch the repository or git. Your only writes are the two files above.
 - No placeholders: never `TBD`, `TODO`, `Similar to Task N`, `add appropriate error handling`, `add validation`, `handle edge cases`, or a bare `Write tests for the above`.
 - Never write a value into an approval, acceptance, or decision field or column (`approved_by`, `approved_at`, `accepted_by`, `decided_at`, `Approved by`). Leave it empty, or `null`; only a human signs.
-- Every task ends in an independently testable deliverable and a commit step.
+- Every task ends in an independently testable deliverable. Write no commit step and no git command into a task, and never copy attribution trailers into the task list: the implementer or the conductor commits, with trailers the script owns.
 - Where the spec is silent, choose the option that touches the least code and say so in the task.
 
 When done:
