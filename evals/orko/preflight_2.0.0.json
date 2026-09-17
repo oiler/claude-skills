@@ -1,0 +1,88 @@
+{
+  "skill": "orko",
+  "repo": "/Users/jrf1039/files/repo/claude-skills",
+  "profile": "claude-code",
+  "change_class": "structural",
+  "candidate_version": "2.0.0",
+  "skill_content_hash": "a787cdf043e38d682f9e5df87cc37b6dc1549e0a23ed5ebf936b24dd0e804b0b",
+  "repo_commit": "71a46dfca883da67babb3aee55655d61213a4186",
+  "preflight_version": "1.1.0",
+  "timestamp": "2026-09-17T02:31:24+00:00",
+  "argv": [
+    "orko",
+    "--change-class",
+    "structural",
+    "--candidate-version",
+    "2.0.0",
+    "--out",
+    "/Users/jrf1039/files/repo/claude-skills/evals/orko/preflight_2.0.0.json"
+  ],
+  "checks": [
+    {
+      "id": "structure",
+      "status": "pass",
+      "detail": "SKILL.md present, name matches, kebab-case"
+    },
+    {
+      "id": "profile",
+      "status": "pass",
+      "detail": "combined description budget 1215/1,536"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "invocation: live-engagement report smoke-2026-09-08.md"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "clean-room: clean-room report smoke-2026-09-08.md"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report smoke-2026-09-08.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report smoke-2026-09-08.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "orko/ is committed"
+    },
+    {
+      "id": "script-tests",
+      "status": "pass",
+      "detail": "scripts suite passed"
+    },
+    {
+      "id": "script-surface",
+      "status": "advisory",
+      "detail": "review by hand: conftest.py:3 import subprocess; conftest.py:12 subprocess.run([\"git\", \"-C\", str(repo), *args], check=True,; orko.py:53 import subprocess; orko.py:340 result = subprocess.run([str(script), args.id, \"--docs\", str(docs)],; orko.py:382 result = subprocess.run(; orko.py:637 ledger.write_text(f\"{HEADER_TITLE}\\n{_header_line(header)}\\n\", encodin; orko.py:671 with ledger.open(\"a\", encoding=\"utf-8\") as handle:; orko.py:1011 prompt_path.write_text( (+139 more)"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "changelog entry for v2.0.0 present"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "tag orko-v2.0.0 is free"
+    },
+    {
+      "id": "drift",
+      "status": "advisory",
+      "detail": "upstream unchanged since 690f15c"
+    },
+    {
+      "id": "library-status",
+      "status": "pass",
+      "detail": "docs/library-status.md current"
+    }
+  ],
+  "overall": "pass"
+}
