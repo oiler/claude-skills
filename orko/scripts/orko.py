@@ -1299,6 +1299,18 @@ def _dirty(repo: Path) -> bool:
                      "--untracked-files=no").stdout.strip())
 
 
+def index_tracks(ws: Path, path: str) -> bool:
+    """Whether the repository named by `path`'s first segment tracks it.
+
+    A record path is `<repo>/<rest>`; anything else, including a bare filename,
+    belongs to no repository this run checks and is never tracked.
+    """
+    repo, _, rest = path.partition("/")
+    if not rest:
+        return False
+    return rest in _git(ws / repo, "ls-files", "-z", "--", rest).stdout.split("\0")
+
+
 def rehash_gate_records(ws: Path, run: dict) -> None:
     """Move the guard's floor to what the gate's human left behind.
 
@@ -1306,11 +1318,14 @@ def rehash_gate_records(ws: Path, run: dict) -> None:
     reviews, and which of the three a human touched is not knowable here, so
     every record the ledger names is re-hashed.
 
-    `sha256_file`, the same bytes `overwrite_guard` and `commit` hash. The caller
-    runs this only after the dirty checks passed, so the tree is the commit; a
-    floor read from the blob instead would differ from the disk under any
-    end-of-line or filter attribute, and the guard would then trip on every
-    record nobody had edited.
+    Only a tracked record, and only from `sha256_file` — the same bytes
+    `overwrite_guard` and `commit` hash. The caller runs this after the dirty
+    checks passed, so a tracked record's disk copy is its committed copy, which
+    is what makes the two byte sources one; a floor read from the blob instead
+    would differ from the disk under any end-of-line or filter attribute and the
+    guard would trip on every record nobody had edited. An untracked record has
+    no committed copy at all, so it gets no floor: the guard's own message calls
+    a floor "its last committed hash", and this is what keeps that true.
     """
     ledger = Path(run["ledger"])
     # Only a floor that actually moved is written: a run that resumes at step 5
@@ -1318,7 +1333,16 @@ def rehash_gate_records(ws: Path, run: dict) -> None:
     floor = hashes(ledger)
     for entry in records(ledger):
         target = ws / entry["path"]
+        if not index_tracks(ws, entry["path"]):
+            print(f"orko: {entry['path']} is not committed; no floor recorded",
+                  file=sys.stderr)
+            continue
+        # A tracked record absent from the tree is a `docs-dirty` finding, so
+        # `preflight` stops before this; the guard is what keeps a direct call,
+        # or a future caller, from a traceback instead of a line.
         if not target.is_file():
+            print(f"orko: {entry['path']} is tracked but missing from the tree; "
+                  "no floor recorded", file=sys.stderr)
             continue
         sha = sha256_file(target)
         if floor.get(entry["path"]) != sha:
@@ -2055,10 +2079,26 @@ def cmd_commit(args: argparse.Namespace) -> int:
         print("orko: commit needs --message, or --task N to take the task's own subject",
               file=sys.stderr)
         return 2
+    if task is not None:
+        # A conductor writing what reads as a commit subject passes the prefix
+        # too. One is enough, and `Task <n>:` has to lead for a later call to
+        # recognize this task's own commit.
+        prefix = f"Task {args.task}:"
+        tail = (args.message if args.message is not None else task["title"]).strip()
+        while tail.startswith(prefix):
+            tail = tail[len(prefix):].strip()
+        subject = f"{prefix} {tail}" if tail else ""
+    else:
+        subject = args.message.strip()
+    if not subject:
+        print("orko: --message needs a subject", file=sys.stderr)
+        return 2
     staged: list[str] = []
+    allowed: set[str] = set()
     if task is not None:
         # The delivery's allowlist, not the whole dirty tree: nothing Codex left
         # outside the task's Files list and the testing README can be staged.
+        allowed = set(task["files"]) | set(DELIVERY_ALWAYS_ALLOWED)
         staged += list(task["files"]) + list(DELIVERY_ALWAYS_ALLOWED)
     for entry in records(ledger):
         if entry["path"].startswith(args.repo + "/"):
@@ -2114,11 +2154,21 @@ def cmd_commit(args: argparse.Namespace) -> int:
         """
         if task is None:
             return None
+        # `--message` is only ever passed to name a new commit, and a step-6 fix
+        # always passes one. Reading a landed commit as that fix would drop the
+        # finding it was meant to close.
+        if args.message is not None:
+            return None
         base = _dispatched_base(_ledger_entries(ledger), f"5.{args.task}")
         if base is None:
             return None
-        if any(not is_tool_leftover(path) for path in worktree_paths(repo)):
+        # The same allowlist `check delivery` reads: a path the task lists is a
+        # delivery, never a dropping, whichever file it is in.
+        if any(path in allowed or not is_tool_leftover(path)
+               for path in worktree_paths(repo)):
             return None
+        # Newest first, as `git log` reports: when the loop made a delivery and
+        # then a fix for one task, the fix is the commit that carries it now.
         for line in _git(repo, "log", f"{base}..HEAD",
                          "--format=%H %s").stdout.splitlines():
             sha, _, subject = line.partition(" ")
@@ -2151,11 +2201,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
         print(f"orko: nothing changed in {args.repo}", file=sys.stderr)
         return 2
     ids = sorted({e["id"] for e in records(ledger) if e["id"] != "-"})
-    # `Task <n>:` leads the subject whether or not a message was passed: it is
-    # what a later `--task` call reads to recognise this task's own commit.
-    subject = (f"Task {args.task}: {args.message or task['title']}" if task is not None
-               else args.message)
-    message = subject.rstrip() + "\n\n" + (f"Refs: {', '.join(ids)}\n" if ids else "")
+    message = subject + "\n\n" + (f"Refs: {', '.join(ids)}\n" if ids else "")
     message += "\n" + "\n".join(run["trailers"]) + "\n"
     # `-- *staged` scopes the commit to orko's own paths: anything the user had
     # already staged in this repo stays staged rather than riding along under
