@@ -1397,25 +1397,54 @@ class TestPreflight:
         assert code == 1 and "code-dirty" in out
         assert orko.hashes(Path(payload["ledger"])) == before
 
-    def test_an_uncommitted_record_gets_no_hash_floor(self, workspace, capsys):
-        # The floor is committed content. A record with no commit has none, and
-        # hashing the working tree would bless a file the repository never saw.
+    def test_the_floor_is_the_bytes_the_guard_reads(self, workspace, capsys):
+        # Under `core.autocrlf` the committed blob and the file on disk differ
+        # while `git status` stays clean. The guard hashes the disk, so the floor
+        # has to as well, or the gate's own edit reads as tampering.
         _, payload = init_run(workspace, capsys)
         _, spec = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
         path = Path(spec["path"])
         path.write_text(orko.set_frontmatter(
             path.read_text(), {"status": "accepted", "approved_at": "2026-09-08"}))
-        # `-a` stages tracked changes only, so the spec itself stays untracked,
-        # which `preflight` ignores as it ignores every untracked file.
-        subprocess.run(["git", "-C", str(workspace / "docs"), "commit", "-qam", "intake"],
-                       check=True)
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m",
+                   "--path", "STATUS.md", "--workspace", str(workspace)])
+        docs = workspace / "docs"
+        subprocess.run(["git", "-C", str(docs), "config", "core.autocrlf", "true"], check=True)
+        path.unlink()
+        subprocess.run(["git", "-C", str(docs), "checkout", "--",
+                        str(path.relative_to(docs))], check=True)
+        assert b"\r\n" in path.read_bytes(), "the checkout did not convert the line endings"
         self._branch(workspace)
         for step in "01234":
             orko.main(["ledger", step, "complete", "--slug", "demo-topic",
                        "--workspace", str(workspace)])
         code, out = self._pf(workspace, capsys)
         assert code == 0, out
-        assert orko.rel(workspace, path) not in orko.hashes(Path(payload["ledger"]))
+        ledger = Path(payload["ledger"])
+        assert orko.hashes(ledger)[orko.rel(workspace, path)] == orko.sha256_file(path)
+
+    def test_a_second_clean_preflight_adds_no_hash_line(self, workspace, capsys):
+        # `hashes()` is last-wins, so only a line count sees a floor rewritten
+        # on every resume at step 5.
+        _, payload = init_run(workspace, capsys)
+        _, spec = rec(workspace, capsys, "spec", "--slug", "demo-topic", "--title", "Demo")
+        orko.main(["commit", "docs", "--slug", "demo-topic", "--message", "m",
+                   "--path", "STATUS.md", "--workspace", str(workspace)])
+        self._branch(workspace)
+        for step in "01234":
+            orko.main(["ledger", step, "complete", "--slug", "demo-topic",
+                       "--workspace", str(workspace)])
+        path = Path(spec["path"])
+        path.write_text(orko.set_frontmatter(
+            path.read_text(), {"status": "accepted", "approved_at": "2026-09-08"}))
+        subprocess.run(["git", "-C", str(workspace / "docs"), "commit", "-qam", "accept"],
+                       check=True)
+        assert self._pf(workspace, capsys)[0] == 0
+        ledger = Path(payload["ledger"])
+        before = ledger.read_text(encoding="utf-8").count("\nhash ")
+        assert before, "the gate re-hash wrote nothing to count"
+        assert self._pf(workspace, capsys)[0] == 0
+        assert ledger.read_text(encoding="utf-8").count("\nhash ") == before
 
     def test_codex_unavailable(self, workspace, capsys, monkeypatch):
         init_run(workspace, capsys, "build", "Demo Topic", "--executor", "codex")
@@ -1909,6 +1938,19 @@ class TestCommit:
         assert ("orko: nothing to stage in code; pass --path <repo-relative file> "
                 "for files the run wrote outside the record") in err
 
+    def test_a_directory_passed_as_a_path_draws_one_message(self, workspace, capsys):
+        # The two skip messages are exclusive: a directory is not a missing path,
+        # and a caller told it is both learns nothing from either.
+        init_run(workspace, capsys)
+        (workspace / "code/somedir").mkdir()
+        (workspace / "code/somedir/x.py").write_text("x\n")
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--message", "m",
+                          "--path", "somedir", "--workspace", str(workspace)]) == 2
+        err = capsys.readouterr().err
+        assert "orko: skipping somedir (not a file; list files in **Files:**)" in err
+        assert "missing, absolute, or outside" not in err
+
     def test_nothing_to_stage_exits_2(self, workspace, capsys):
         init_run(workspace, capsys)
         assert orko.main(["commit", "code", "--slug", "demo-topic", "--message", "x",
@@ -1957,13 +1999,15 @@ class TestCommitTask:
         status = git_out(workspace / "code", "status", "--porcelain", "--untracked-files=all")
         assert "?? uv.lock" in status and "?? .venv/x" in status
 
-    def test_an_explicit_message_wins_over_the_task_subject(self, workspace, capsys):
+    def test_an_explicit_message_becomes_the_tail_of_the_task_subject(self, workspace, capsys):
+        # `Task <n>:` leads every commit the loop makes for a task, because it
+        # is what a later `--task` call reads to recognise its own work.
         self._run(workspace, capsys)
         self._write(workspace, "orko/scripts/orko.py")
         assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
-                          "--message", "hand-written subject",
+                          "--message", "fix F1",
                           "--workspace", str(workspace)]) == 0
-        assert git_out(workspace / "code", "log", "-1", "--format=%s") == "hand-written subject\n"
+        assert git_out(workspace / "code", "log", "-1", "--format=%s") == "Task 1: fix F1\n"
 
     def test_task_on_docs_is_a_usage_error(self, workspace, capsys):
         self._run(workspace, capsys)
@@ -1988,19 +2032,45 @@ class TestCommitTask:
         # hash line would then raise on the directory itself.
         self._run(workspace, capsys)
         tasks = workspace / ".orko/demo-topic/tasks.md"
-        tasks.write_text(tasks.read_text().replace(
-            "- Modify: `orko/scripts/orko.py` functions", "- Modify: `orko/scripts` functions", 1))
+        tasks.write_text(tasks.read_text()
+                         .replace("- Create: `orko/scripts/orko.py` (from",
+                                  "- Create: `orko/scripts` (from", 1)
+                         .replace("- Modify: `orko/scripts/orko.py` functions",
+                                  "- Modify: `orko/scripts` functions", 1))
         self._write(workspace, "orko/scripts/test_orko.py")
         self._write(workspace, "orko/scripts/__pycache__/orko.pyc", "compiled\n")
         capsys.readouterr()
         assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
                           "--workspace", str(workspace)]) == 0
         captured = capsys.readouterr()
-        assert ("orko: skipping orko/scripts (directory; list files in **Files:**)"
-                in captured.err)
+        assert captured.err.count(
+            "orko: skipping orko/scripts (not a file; list files in **Files:**)") == 1
+        # One message per path, and not the one about a missing `--path`.
+        assert "missing, absolute, or outside" not in captured.err
         assert sorted(json.loads(captured.out)["staged"]) == ["docs/testing/README.md",
                                                              "orko/scripts/test_orko.py"]
         assert "__pycache__" not in git_out(workspace / "code", "show", "--name-only", "HEAD")
+
+    def test_a_glob_in_files_is_skipped_not_expanded(self, workspace, capsys):
+        # A pathspec that matches tracked files is not one of them. Staging it
+        # would commit every match and report the glob as the staged path.
+        self._run(workspace, capsys)
+        tasks = workspace / ".orko/demo-topic/tasks.md"
+        tasks.write_text(tasks.read_text().replace(
+            "- Create: `orko/scripts/orko.py` (from", "- Create: `src/*.py` (from", 1))
+        self._write(workspace, "src/calc.py")
+        self._write(workspace, "src/util.py")
+        subprocess.run(["git", "-C", str(workspace / "code"), "add", "-A"], check=True)
+        readme = workspace / "code/docs/testing/README.md"
+        readme.write_text(readme.read_text() + "\n| SPEC-001 R1 | test_multiplies |\n")
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        captured = capsys.readouterr()
+        assert ("orko: skipping src/*.py (not a file; list files in **Files:**)"
+                in captured.err)
+        assert json.loads(captured.out)["staged"] == ["docs/testing/README.md"]
+        assert "src/calc.py" not in git_out(workspace / "code", "show", "--name-only", "HEAD")
 
     def test_a_second_commit_of_the_same_task_reports_the_first(self, workspace, capsys):
         # A compaction between loop steps 5 and 6 leaves the conductor no way to
@@ -2019,6 +2089,58 @@ class TestCommitTask:
         payload = json.loads(capsys.readouterr().out)
         assert payload["already"] is True and payload["commit"] == head
         assert git_out(workspace / "code", "rev-parse", "HEAD").strip() == head
+
+    def _dispatch_base(self, workspace, task=1):
+        orko.main(["ledger", f"5.{task}", "dispatched", "--commit",
+                   git_out(workspace / "code", "rev-parse", "HEAD").strip(),
+                   "--slug", "demo-topic", "--workspace", str(workspace)])
+
+    def test_uncommitted_work_outside_the_task_is_never_already_landed(self, workspace, capsys):
+        # The step-6 route: a review fix lands in a file the task never listed.
+        # Reporting the earlier commit would call an uncommitted delivery done.
+        self._run(workspace, capsys)
+        self._dispatch_base(workspace)
+        self._write(workspace, "orko/scripts/orko.py")
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        (workspace / "code/CHANGELOG.md").write_text("a review fix\n")
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--message", "fix F1", "--workspace", str(workspace)]) == 2
+        assert "orko: nothing changed in code" in capsys.readouterr().err
+
+    def test_another_tasks_commit_is_not_this_tasks_delivery(self, workspace, capsys):
+        # Tasks share files: the fixture's tasks 1 and 2 both list `orko.py`.
+        # Only a `Task 2:` subject says task 2 delivered.
+        self._run(workspace, capsys)
+        self._dispatch_base(workspace, task=2)
+        self._write(workspace, "orko/scripts/orko.py")
+        self._write(workspace, "orko/scripts/test_orko.py")
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "2",
+                          "--workspace", str(workspace)]) == 2
+        assert "orko: nothing changed in code" in capsys.readouterr().err
+
+    def test_the_reported_sha_is_the_tasks_own_commit(self, workspace, capsys):
+        # Not HEAD: anything may have landed since, and the conductor reads the
+        # reported sha as the commit that carries the delivery.
+        self._run(workspace, capsys)
+        self._dispatch_base(workspace)
+        self._write(workspace, "orko/scripts/orko.py")
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        task_sha = git_out(workspace / "code", "rev-parse", "HEAD").strip()
+        (workspace / "code/CHANGELOG.md").write_text("unrelated\n")
+        subprocess.run(["git", "-C", str(workspace / "code"), "commit", "-qam", "unrelated"],
+                       check=True)
+        capsys.readouterr()
+        assert orko.main(["commit", "code", "--slug", "demo-topic", "--task", "1",
+                          "--workspace", str(workspace)]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["already"] is True and payload["commit"] == task_sha
+        assert task_sha != git_out(workspace / "code", "rev-parse", "HEAD").strip()
 
     def test_a_landed_deletion_only_task_reports_the_first_commit(self, workspace, capsys):
         # The one shape where nothing is stageable on the re-run: the task's

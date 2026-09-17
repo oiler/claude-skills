@@ -1299,38 +1299,29 @@ def _dirty(repo: Path) -> bool:
                      "--untracked-files=no").stdout.strip())
 
 
-def committed_sha256(ws: Path, path: str) -> str | None:
-    """sha256 of `path`'s content at HEAD, or None when HEAD has no such file.
-
-    The overwrite guard's floor is committed content. Hashing the working tree
-    would move the floor onto an edit nobody has committed and nobody has read,
-    which is the one thing the guard exists to catch.
-    """
-    repo, _, rest = path.partition("/")
-    if not rest:
-        return None
-    result = subprocess.run(["git", "-C", str(ws / repo), "show", f"HEAD:{rest}"],
-                            capture_output=True, check=False)
-    if result.returncode != 0:
-        return None
-    return hashlib.sha256(result.stdout).hexdigest()
-
-
 def rehash_gate_records(ws: Path, run: dict) -> None:
-    """Move the guard's floor to what the gate's human committed.
+    """Move the guard's floor to what the gate's human left behind.
 
     The gate asks for `status: accepted` on the spec and `approved_by` on both
     reviews, and which of the three a human touched is not knowable here, so
-    every record the ledger names is re-hashed. Only on a clean preflight, and
-    only from the commit.
+    every record the ledger names is re-hashed.
+
+    `sha256_file`, the same bytes `overwrite_guard` and `commit` hash. The caller
+    runs this only after the dirty checks passed, so the tree is the commit; a
+    floor read from the blob instead would differ from the disk under any
+    end-of-line or filter attribute, and the guard would then trip on every
+    record nobody had edited.
     """
     ledger = Path(run["ledger"])
     # Only a floor that actually moved is written: a run that resumes at step 5
     # repeatedly would otherwise append the same lines every time.
     floor = hashes(ledger)
     for entry in records(ledger):
-        sha = committed_sha256(ws, entry["path"])
-        if sha is not None and floor.get(entry["path"]) != sha:
+        target = ws / entry["path"]
+        if not target.is_file():
+            continue
+        sha = sha256_file(target)
+        if floor.get(entry["path"]) != sha:
             append_ledger(ledger, f"hash {entry['path']} {sha}")
 
 
@@ -2019,11 +2010,15 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
 
 def stageable(repo: Path, path: str) -> bool:
     """Whether `git add` can stage `path` as one file: a regular file on disk,
-    or a file tracked at HEAD that the delivery deleted.
+    or a file the index tracks that the delivery deleted.
 
-    A directory is neither. `git add -A -- <dir>` sweeps everything under it,
-    including the caches `check delivery` just ignored, and `sha256_file` has no
-    answer for it. A `**Files:**` entry is model-authored, so this is reachable.
+    Nothing that names more than one file qualifies. `git add -A -- <pathspec>`
+    stages every match, so a directory or a glob would sweep in the caches
+    `check delivery` just ignored and report a pathspec as the staged path, and
+    `sha256_file` has no answer for a directory. Hence the exact match against
+    `ls-files` output rather than a test for a non-empty one: a pathspec never
+    appears there verbatim, only the files it matched. A `**Files:**` entry is
+    model-authored, so all of this is reachable.
     """
     target = repo / path
     if target.is_file():
@@ -2077,42 +2072,68 @@ def cmd_commit(args: argparse.Namespace) -> int:
         return (not Path(path).is_absolute() and ".." not in Path(path).parts
                 and stageable(repo, path))
 
-    # A directory names itself, because the fix for it is an edit to `tasks.md`
-    # rather than a retry.
+    def names_more_than_a_file(path: str) -> bool:
+        """A path that exists without being a regular file, or that matches
+        tracked files without being one: a directory or a glob in `**Files:**`.
+
+        Distinct from a path that is simply missing, which the delivery may
+        legitimately not have written and which `check delivery` already judged.
+        """
+        if stageable(repo, path):
+            return False
+        if (repo / path).exists():
+            return True
+        return bool(_git(repo, "ls-files", "-z", "--", path).stdout.strip())
+
+    # It names itself, because the fix for it is an edit to `tasks.md` rather
+    # than a retry.
     for path in dict.fromkeys(staged + list(args.path)):
-        if (repo / path).is_dir():
-            print(f"orko: skipping {path} (directory; list files in **Files:**)",
+        if names_more_than_a_file(path):
+            print(f"orko: skipping {path} (not a file; list files in **Files:**)",
                   file=sys.stderr)
     # A typo'd `--path` that silently vanished meant the file never committed and
     # nothing said so, so every dropped one is named on stderr.
     for path in args.path:
-        if not keeps(path) and not (repo / path).is_dir():
+        if not keeps(path) and not names_more_than_a_file(path):
             print(f"orko: skipping {path} (missing, absolute, or outside {args.repo}/)",
                   file=sys.stderr)
     staged = list(dict.fromkeys(p for p in staged + list(args.path) if keeps(p)))
 
-    def already_landed() -> bool:
-        """Whether this task's delivery is already in `<base>..HEAD`.
+    def already_landed() -> str | None:
+        """The sha of this task's own commit, when there is nothing left to
+        commit for it. None otherwise.
 
         Exit 2 is a stop everywhere in the skill, so a re-run of step 5 after a
         compaction must report the commit it finds instead of ending the run.
+        Three questions, because a weaker test called somebody else's commit
+        this task's delivery: the working tree must hold no change at all beyond
+        the acceptance command's leftovers, whatever file it would be in, and a
+        commit whose subject leads with this task's number must exist since the
+        dispatch base. The subject is the only mark the loop leaves that says
+        which task a commit belongs to.
         """
         if task is None:
-            return False
+            return None
         base = _dispatched_base(_ledger_entries(ledger), f"5.{args.task}")
         if base is None:
-            return False
-        landed = _git(repo, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines()
-        return bool(set(landed) & set(task["files"]))
+            return None
+        if any(not is_tool_leftover(path) for path in worktree_paths(repo)):
+            return None
+        for line in _git(repo, "log", f"{base}..HEAD",
+                         "--format=%H %s").stdout.splitlines():
+            sha, _, subject = line.partition(" ")
+            if subject.startswith(f"Task {args.task}:"):
+                return sha
+        return None
 
-    def report_landed() -> int:
-        print(json.dumps({"repo": args.repo,
-                          "commit": _git(repo, "rev-parse", "HEAD").stdout.strip(),
-                          "staged": [], "task": args.task, "already": True}, indent=2))
+    def report_landed(sha: str) -> int:
+        print(json.dumps({"repo": args.repo, "commit": sha, "staged": [],
+                          "task": args.task, "already": True}, indent=2))
         return 0
 
-    if not staged and already_landed():
-        return report_landed()
+    landed = already_landed()
+    if not staged and landed is not None:
+        return report_landed(landed)
     if not staged:
         # Naming the escape hatch here, because exit 2 is a stop everywhere
         # else: `record` logs no path under `code/src`, so the step-6 commit of
@@ -2125,12 +2146,15 @@ def cmd_commit(args: argparse.Namespace) -> int:
         print(f"orko: git add failed: {result.stderr.strip()}", file=sys.stderr)
         return 2
     if _git(repo, "diff", "--cached", "--quiet", "--", *staged).returncode == 0:
-        if already_landed():
-            return report_landed()
+        if landed is not None:
+            return report_landed(landed)
         print(f"orko: nothing changed in {args.repo}", file=sys.stderr)
         return 2
     ids = sorted({e["id"] for e in records(ledger) if e["id"] != "-"})
-    subject = args.message if args.message is not None else f"Task {args.task}: {task['title']}"
+    # `Task <n>:` leads the subject whether or not a message was passed: it is
+    # what a later `--task` call reads to recognise this task's own commit.
+    subject = (f"Task {args.task}: {args.message or task['title']}" if task is not None
+               else args.message)
     message = subject.rstrip() + "\n\n" + (f"Refs: {', '.join(ids)}\n" if ids else "")
     message += "\n" + "\n".join(run["trailers"]) + "\n"
     # `-- *staged` scopes the commit to orko's own paths: anything the user had
