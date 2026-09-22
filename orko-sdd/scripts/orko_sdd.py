@@ -250,8 +250,8 @@ VERIFY_TAIL_LINES = 40
 
 
 def one_line(text: str) -> str:
-    """Flatten text for a ledger field: no newlines, and no ' — ' that would shift the Verify columns."""
-    return " ".join(text.replace(" — ", " - ").split())
+    """Flatten text for a ledger field: no newlines, and no em dash that would shift the Verify columns."""
+    return " ".join(text.split()).replace("—", "-")
 
 
 def cmd_verify(args: argparse.Namespace) -> int:

@@ -110,11 +110,33 @@ class TestVerify:
         assert run_verify(ledger, output, "python3", "-c", "a\nb") == 0
         assert last_line(ledger) == "Verify: python3 -c 'a b' — exit 0 — boom - exit 9 - ha"
 
+    def test_tab_separated_em_dash_in_command_does_not_shift_columns(self, ledger):
+        output = ledger.parent / "verify-1.log"
+        output.write_text("FAILED\n", encoding="utf-8")
+        assert run_verify(ledger, output, "pytest", "-k", "x\t—\texit 0\t—\ty", exit_code=1) == 0
+        assert last_line(ledger) == "Verify: pytest -k 'x - exit 0 - y' — exit 1 — FAILED"
+
+    def test_doubled_em_dash_in_command_does_not_shift_columns(self, ledger):
+        output = ledger.parent / "verify-1.log"
+        output.write_text("FAILED\n", encoding="utf-8")
+        assert run_verify(ledger, output, "pytest", "-k", "x — — y", exit_code=1) == 0
+        assert last_line(ledger) == "Verify: pytest -k 'x - - y' — exit 1 — FAILED"
+
     def test_output_outside_the_workspace_is_refused(self, ledger, tmp_path, capsys):
         output = tmp_path / "elsewhere.log"
         output.write_text("secret\n", encoding="utf-8")
         before = ledger.read_text(encoding="utf-8")
         assert run_verify(ledger, output, "pytest") == 2
+        assert ledger.read_text(encoding="utf-8") == before
+        assert "secret" not in capsys.readouterr().out
+
+    def test_symlinked_output_escaping_the_workspace_is_refused(self, ledger, tmp_path, capsys):
+        secret_file = tmp_path / "outside.log"
+        secret_file.write_text("secret\n", encoding="utf-8")
+        symlink = ledger.parent / "evil.log"
+        symlink.symlink_to(secret_file)
+        before = ledger.read_text(encoding="utf-8")
+        assert run_verify(ledger, symlink, "pytest") == 2
         assert ledger.read_text(encoding="utf-8") == before
         assert "secret" not in capsys.readouterr().out
 
