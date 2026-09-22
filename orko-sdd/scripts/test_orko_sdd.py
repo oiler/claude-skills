@@ -1,4 +1,5 @@
 """Tests for orko_sdd.py, the deterministic half of the orko-sdd skill."""
+import re
 from pathlib import Path
 
 import pytest
@@ -409,3 +410,18 @@ class TestReportOnARun:
         assert len(kept) + orko_sdd.RECOMMENDED_RESERVE <= 40
         assert f"more in {ledger}" in out
         assert sum(1 for line in out.splitlines() if line.startswith("| decision ")) == 30
+
+
+class TestSkillMd:
+    @pytest.fixture
+    def text(self):
+        return (orko_sdd.SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    def test_role_table_matches_the_script(self, text):
+        assert orko_sdd.render_role_table() in text
+
+    def test_allowed_tools_grants_exactly_the_four_subcommands(self, text):
+        frontmatter = text.split("---", 2)[1]
+        grants = re.findall(r"Bash\(([^)]*)\)", frontmatter.split("allowed-tools:", 1)[1])
+        assert grants == [f"python3 ${{CLAUDE_SKILL_DIR}}/scripts/orko_sdd.py {sub} *"
+                          for sub in ("preflight", "log", "verify", "report")]
