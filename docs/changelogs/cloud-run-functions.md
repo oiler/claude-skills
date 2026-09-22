@@ -4,6 +4,12 @@ All notable changes to the `cloud-run-functions` skill.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning is [semver](https://semver.org/), tagged per-skill as `cloud-run-functions-vX.Y.Z`.
 
+## [0.1.1] — 2026-09-22
+
+### Security
+
+- **`allowed-tools` scoped to local and read-only commands.** `Bash(gcloud *)` pre-approved `gcloud functions deploy`, `gcloud functions delete`, `gcloud projects create`, and billing and IAM changes; `Bash(curl *)` pre-approved requests to any host; `Bash(uv *)` pre-approved `uv pip install`. The grant now covers the local loop (`uv run functions-framework`, `functions-framework`, `uv venv`, `uv export`, `curl` to `localhost`) and the read-only `gcloud functions describe` and `gcloud functions logs read`. Deploys, deletes, project and billing changes, and package installs now ask first. Claude Code applies a skill's `allowed-tools` without a permission prompt, and workspace trust doesn't gate the grant, so each rule now names the exact command the skill runs.
+
 ## [0.1.0] — 2026-07-13
 
 Initial release.

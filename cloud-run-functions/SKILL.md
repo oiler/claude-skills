@@ -1,10 +1,10 @@
 ---
 name: cloud-run-functions
 description: Build, deploy, debug, and cost-tune Google Cloud Run functions (formerly Cloud Functions gen2) in Python — AND judge whether a workload belongs in a function at all. Use whenever the user mentions Cloud Run functions, Cloud Functions, "gcloud functions deploy", functions-framework, an HTTP function, a Pub/Sub-triggered or Cloud Storage-triggered function, Eventarc, a serverless function on GCP, an unexpected Cloud Run bill, or wants to put some job "in a cloud function". Also use when the user proposes a Cloud Run function for something and you should sanity-check the fit — long-running work, background threads, GPU/ML inference, WebSockets, large payloads, system packages like ffmpeg, and high-QPS low-concurrency traffic are common misfits that belong in a Cloud Run service, job, or worker pool instead. Covers the fit gate, the local uv loop, deploy, verify, teardown, event triggers, idempotency, cost, and Google Workspace / Gemini bridges. NOT for: Cloud Run *services* built from a Dockerfile as the primary task, GKE, or App Engine.
-allowed-tools: Bash(gcloud *) Bash(uv *) Bash(curl *) Bash(functions-framework *)
+allowed-tools: Bash(uv run functions-framework *) Bash(functions-framework *) Bash(uv venv *) Bash(uv export *) Bash(gcloud functions describe *) Bash(gcloud functions logs read *) Bash(curl localhost:*) Bash(curl http://localhost:*)
 metadata:
   author: oiler
-  version: 0.1.0
+  version: 0.1.1
 ---
 
 # Cloud Run functions (Python)
