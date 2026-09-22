@@ -2,7 +2,7 @@
 name: sumlog
 description: Generate an on-demand session log written to a dated Markdown file in the current project. Use ONLY when explicitly invoked as /sumlog, or when the user says "log this session", "summarize this session to a file", "create a session log", "session handoff", or "write a session log". Produces a log with a 3-4 sentence human summary, every prompt the user typed verbatim and untruncated, the session task list, a model/token usage breakdown by agent and subagent, a table of any subagents dispatched, and a YAML handoff-state block for resuming work in a future session.
 disable-model-invocation: true
-allowed-tools: Bash, Read, Write
+allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/extract_session.py *) Bash(mktemp *) Read Write
 ---
 
 # sumlog — on-demand session log
@@ -16,7 +16,7 @@ The script owns every prompt byte and the final file write. You author only the 
 1. **Read the session context.** Run:
 
    ```bash
-   uv run "${CLAUDE_SKILL_DIR}/scripts/extract_session.py"
+   uv run ${CLAUDE_SKILL_DIR}/scripts/extract_session.py
    ```
 
    It prints one JSON object: `{ "prompts_markdown": "...", "agents_markdown": "...", "tasks_markdown": "...", "model_usage_markdown": "...", "metadata": {...} }`.
@@ -33,8 +33,7 @@ The script owns every prompt byte and the final file write. You author only the 
 3. **Assemble the log.** Run:
 
    ```bash
-   uv run "${CLAUDE_SKILL_DIR}/scripts/extract_session.py" --assemble \
-     --slug <slug> --summary-file "$summary" --handoff-file "$handoff"
+   uv run ${CLAUDE_SKILL_DIR}/scripts/extract_session.py --assemble --slug <slug> --summary-file "$summary" --handoff-file "$handoff"
    ```
 
    The script splices your verbatim prompts and deterministic metadata, injects your summary and handoff fields, writes `docs/session-logs/<date>-<slug>.md` (numeric suffix on same-day collision), and prints the path.
