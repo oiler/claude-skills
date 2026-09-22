@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -245,6 +246,38 @@ def cmd_preflight(argv: list[str]) -> int:
     return 0
 
 
+VERIFY_TAIL_LINES = 40
+
+
+def one_line(text: str) -> str:
+    """Flatten text for a ledger field: no newlines, and no ' — ' that would shift the Verify columns."""
+    return " ".join(text.replace(" — ", " - ").split())
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    ledger = Path(args.ledger)
+    if err := ledger_error(ledger):
+        print(err, file=sys.stderr)
+        return 2
+    cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
+    if not cmd:
+        print("refused: give the command you ran after --", file=sys.stderr)
+        return 2
+    workspace = ledger.resolve().parent
+    output = Path(args.output).resolve()
+    if output.parent != workspace:
+        print(f"refused: --output must be a file directly in the SDD workspace ({workspace})", file=sys.stderr)
+        return 2
+    try:
+        lines = output.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        lines = ["(output file missing)"]
+    tail = next((one_line(line) for line in reversed(lines) if line.strip()), "(no output)")[:120]
+    append_line(ledger, f"Verify: {one_line(shlex.join(cmd))} — exit {args.exit} — {tail}")
+    print("\n".join(lines[-VERIFY_TAIL_LINES:]))
+    return 0
+
+
 def cmd_log(args: argparse.Namespace) -> int:
     ledger = Path(args.ledger)
     if err := ledger_error(ledger):
@@ -287,6 +320,13 @@ def build_parser() -> argparse.ArgumentParser:
     log.add_argument("--why", required=True)
     log.add_argument("--override", action="store_true")
     log.set_defaults(func=cmd_log)
+
+    verify = sub.add_parser("verify", help="record a test or lint command's exit code and last output line")
+    verify.add_argument("--ledger", required=True)
+    verify.add_argument("--exit", type=int, required=True, help="the command's exit code, from $?")
+    verify.add_argument("--output", required=True, help="the command's output file, in the SDD workspace")
+    verify.add_argument("cmd", nargs=argparse.REMAINDER, help="-- then the command as it was run")
+    verify.set_defaults(func=cmd_verify)
 
     return parser
 

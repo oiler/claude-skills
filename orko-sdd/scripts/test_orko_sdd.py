@@ -86,6 +86,48 @@ class TestLog:
         assert run_log(ledger, model="fable", **final) == 0
 
 
+def run_verify(ledger, output, *cmd, exit_code=0):
+    return orko_sdd.main(["verify", "--ledger", str(ledger), "--exit", str(exit_code),
+                          "--output", str(output), "--", *cmd])
+
+
+class TestVerify:
+    def test_records_the_exit_code_and_last_output_line(self, ledger):
+        output = ledger.parent / "verify-1.log"
+        output.write_text("collected 3 items\n3 passed\n\n", encoding="utf-8")
+        assert run_verify(ledger, output, "pytest", "-q", exit_code=3) == 0
+        assert last_line(ledger) == "Verify: pytest -q — exit 3 — 3 passed"
+
+    def test_undecodable_output_is_replaced_not_fatal(self, ledger):
+        output = ledger.parent / "verify-1.log"
+        output.write_bytes(b"ok\n\xff\xfe\n")
+        assert run_verify(ledger, output, "pytest") == 0
+        assert last_line(ledger) == "Verify: pytest — exit 0 — ��"
+
+    def test_separators_and_newlines_are_flattened(self, ledger):
+        output = ledger.parent / "verify-1.log"
+        output.write_text("boom — exit 9 — ha\n", encoding="utf-8")
+        assert run_verify(ledger, output, "python3", "-c", "a\nb") == 0
+        assert last_line(ledger) == "Verify: python3 -c 'a b' — exit 0 — boom - exit 9 - ha"
+
+    def test_output_outside_the_workspace_is_refused(self, ledger, tmp_path, capsys):
+        output = tmp_path / "elsewhere.log"
+        output.write_text("secret\n", encoding="utf-8")
+        before = ledger.read_text(encoding="utf-8")
+        assert run_verify(ledger, output, "pytest") == 2
+        assert ledger.read_text(encoding="utf-8") == before
+        assert "secret" not in capsys.readouterr().out
+
+    def test_a_missing_output_file_is_recorded(self, ledger):
+        assert run_verify(ledger, ledger.parent / "none.log", "pytest", exit_code=1) == 0
+        assert last_line(ledger) == "Verify: pytest — exit 1 — (output file missing)"
+
+    def test_refuses_an_empty_command(self, ledger):
+        output = ledger.parent / "verify-1.log"
+        output.write_text("x\n", encoding="utf-8")
+        assert run_verify(ledger, output) == 2
+
+
 class TestPreflight:
     def test_ok_run_reports_resolved_values_through_symlinked_agents(self, fake_home, repo):
         out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
