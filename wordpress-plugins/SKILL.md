@@ -16,7 +16,7 @@ description: >
   theme code in functions.php or theme templates (use wordpress-themes);
   generic OWASP fundamentals unrelated to WordPress (use web-security); block
   themes or FSE (not covered).
-allowed-tools: Bash(uv run *) Bash(composer *) Bash(grep *) Read Write Edit
+allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/scaffold_plugin.py *) Bash(composer lint *) Bash(composer fix *) Bash(composer test *) Bash(grep *) Read Write Edit
 ---
 
 ## WordPress Plugins skill

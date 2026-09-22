@@ -1,5 +1,15 @@
 # wordpress-plugins — Changelog
 
+## v0.2.1 — 2026-09-22
+
+### Security
+
+- **`allowed-tools` scoped to the commands the skill runs.** `Bash(uv run *)` pre-approved any Python program and `Bash(composer *)` pre-approved `composer install` and `composer require`, which fetch and run third-party code. The grant is now the bundled scaffolder (`uv run ${CLAUDE_SKILL_DIR}/scripts/scaffold_plugin.py`) plus the emitted `composer lint`, `composer fix`, and `composer test` scripts. Dependency installs now ask first. Claude Code applies a skill's `allowed-tools` without a permission prompt, and workspace trust doesn't gate the grant, so each rule now names the exact command the skill runs. Verified in `default` permission mode: the scaffolder runs unprompted, `composer install` is denied.
+
+### Removed
+
+- **`SKILL.md.bak-2026-08-18`**, a stray tracked backup inside the skill folder. The folder is the distributable unit, and a second `SKILL.md`-shaped file in it can be read as current guidance.
+
 ## v0.2.0 — 2026-08-07
 
 ### Added — test harness, audit coverage, admin-UI reference
