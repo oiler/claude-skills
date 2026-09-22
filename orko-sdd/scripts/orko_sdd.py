@@ -283,7 +283,7 @@ LEDGER_PLAN_RE = re.compile(r"^# SDD ledger — plan: (.+)$")
 PLAN_TASK_RE = re.compile(r"^#{2,4} Task (\d+):\s*(.*)$")
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 TASK_LINE_RE = re.compile(r"^Task (\d+): ")
-RULING_RE = re.compile(r"\bRuling(?: \([^)]*\))?:\s*(.*)$")
+RULING_RE = re.compile(r"\bRuling(?: \(.*?\))?:\s*(.*)$")
 COMPLETE_RE = re.compile(
     r"^Task (\d+): (?:\w+ )?complete \(commits ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})(.*)$")
 SKIPPED_RE = re.compile(r"^Task (\d+): skipped — (.+)$")
@@ -350,9 +350,14 @@ def parse_ledger(text: str) -> Ledger:
 
 def split_ruling(text: str) -> tuple[str, str, str]:
     parts = [p.strip() for p in text.split(" — ")]
-    detail: list[str] = []
+    rest = parts[1:]
     cost = ""
-    for part in parts[1:]:
+    # SDD 6.4.1 writes plain rulings with no labels at all: <what> — <why> — <cost>.
+    # Only fall back to positional cost when no part carries the "cost if wrong" label.
+    if len(parts) >= 3 and not any(p.lower().startswith("cost if wrong") for p in rest):
+        rest, cost = rest[:-1], rest[-1]
+    detail: list[str] = []
+    for part in rest:
         lower = part.lower()
         if lower.startswith("cost if wrong"):
             cost = part.split(":", 1)[1].strip() if ":" in part else part
@@ -361,8 +366,12 @@ def split_ruling(text: str) -> tuple[str, str, str]:
     return parts[0], " — ".join(detail), cost
 
 
-def plan_tasks(plan: str | None, repo: Path) -> list[tuple[str, str]]:
-    """Task headings outside code fences, first occurrence wins (matches SDD's task-brief)."""
+def plan_tasks(plan: str | None, repo: Path, problems: list[str] | None = None) -> list[tuple[str, str]]:
+    """Task headings outside code fences, first occurrence wins (matches SDD's task-brief).
+
+    A set-but-unreadable plan is tolerated (never-dispatched tasks just don't show up in
+    Done), but it's noted in `problems` when the caller wants to surface that to oiler.
+    """
     if not plan:
         return []
     path = Path(plan)
@@ -370,6 +379,8 @@ def plan_tasks(plan: str | None, repo: Path) -> list[tuple[str, str]]:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
+        if problems is not None:
+            problems.append(f"- plan not readable: {path}; tasks never dispatched are not listed")
         return []
     tasks: dict[str, str] = {}
     fence = None
@@ -398,7 +409,8 @@ def cell(text: str) -> str:
 
 def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> str:
     led = parse_ledger(ledger_path.read_text(encoding="utf-8"))
-    tasks = plan_tasks(plan_override or led.plan, repo)
+    plan_problems: list[str] = []
+    tasks = plan_tasks(plan_override or led.plan, repo, plan_problems)
     titles = dict(tasks)
     order = [n for n, _ in tasks] + sorted((n for n in led.seen if n not in titles), key=int)
 
@@ -422,7 +434,7 @@ def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> s
         done.append(f"| final review | dispatched | — | {', '.join(led.models['final'])} |")
 
     decided = [f"| {' | '.join(cell(p) or '—' for p in split_ruling(r))} |" for r in led.rulings]
-    followups = [f"- Task {n} skipped: {reason}" for n, reason in led.skipped.items()]
+    followups = list(plan_problems) + [f"- Task {n} skipped: {reason}" for n, reason in led.skipped.items()]
     if led.minors:
         followups.append(f"- {led.minors} deferred minor finding(s): see {ledger_path}")
     followups += [f"- Task {n} parked: {text}" for n, text in led.parked]

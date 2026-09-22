@@ -339,9 +339,15 @@ class TestReportOnARun:
         assert out.count("| 1. Alpha |") == 1
         assert "| 6. Foxtrot | not started | — | — |" in out
 
+    def test_an_unreadable_plan_is_noted_first_in_follow_up(self, ledger, capsys):
+        write_ledger(ledger)  # HEADER points the ledger's plan at /nonexistent/plan.md
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Recommended")
+        assert follow_up.strip().splitlines()[0] == (
+            "- plan not readable: /nonexistent/plan.md; tasks never dispatched are not listed")
+
     def test_empty_sections_say_so(self, ledger, capsys):
         write_ledger(ledger)
-        out = run_report(ledger, capsys)
+        out = run_report(ledger, capsys, "--plan", str(FIXTURES / "plan-sample.md"))
         assert "| none | — | — |" in out
         assert "- none" in section(out, "Follow-up", "Recommended")
         assert "| none run | — | — |" in out
@@ -358,6 +364,16 @@ class TestReportOnARun:
         out = run_report(ledger, capsys)
         assert "| use X | y | z |" in out
         assert out.count("| same | a | b |") == 2
+
+    def test_an_unlabeled_ruling_treats_its_last_part_as_the_cost(self, ledger, capsys):
+        # SDD 6.4.1's plain format carries no "why:"/"cost if wrong:" labels at all.
+        write_ledger(ledger, "Ruling: use X — because Y — rework of Z")
+        assert "| use X | because Y | rework of Z |" in run_report(ledger, capsys)
+
+    def test_a_ruling_with_nested_parens_in_its_annotation_still_matches(self, ledger, capsys):
+        write_ledger(ledger, "Ruling (supersedes Task 3 (merge-base) ruling): drop it "
+                             "— why: y — cost if wrong: z")
+        assert "| drop it | y | z |" in run_report(ledger, capsys)
 
     def test_rulings_inside_dispatch_lines_are_not_decisions(self, ledger, capsys):
         write_ledger(ledger, "Task 1: dispatch implementer-scoped sonnet/high — fine. Ruling: ship it — why: x")
