@@ -370,6 +370,12 @@ class TestReportOnARun:
         write_ledger(ledger, "Ruling: use X — because Y — rework of Z")
         assert "| use X | because Y | rework of Z |" in run_report(ledger, capsys)
 
+    def test_a_labeled_why_with_its_own_em_dash_does_not_donate_a_cost(self, ledger, capsys):
+        # A "why:"-labeled ruling with no cost label must not treat its own why text's
+        # trailing " — " clause as a positional cost.
+        write_ledger(ledger, "Ruling: keep A — why: B is slow — measured at 3s")
+        assert "| keep A | B is slow — measured at 3s | — |" in run_report(ledger, capsys)
+
     def test_a_ruling_with_nested_parens_in_its_annotation_still_matches(self, ledger, capsys):
         write_ledger(ledger, "Ruling (supersedes Task 3 (merge-base) ruling): drop it "
                              "— why: y — cost if wrong: z")

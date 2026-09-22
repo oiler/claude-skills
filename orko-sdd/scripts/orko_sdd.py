@@ -353,8 +353,9 @@ def split_ruling(text: str) -> tuple[str, str, str]:
     rest = parts[1:]
     cost = ""
     # SDD 6.4.1 writes plain rulings with no labels at all: <what> — <why> — <cost>.
-    # Only fall back to positional cost when no part carries the "cost if wrong" label.
-    if len(parts) >= 3 and not any(p.lower().startswith("cost if wrong") for p in rest):
+    # Only fall back to positional cost when no part carries a "why:" or "cost if wrong"
+    # label — a labeled why whose own text contains " — " must not donate its tail to cost.
+    if len(parts) >= 3 and not any(p.lower().startswith(("why:", "cost if wrong")) for p in rest):
         rest, cost = rest[:-1], rest[-1]
     detail: list[str] = []
     for part in rest:
