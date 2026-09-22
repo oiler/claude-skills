@@ -8,7 +8,10 @@ The ledger is the one superpowers:subagent-driven-development keeps at
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -119,6 +122,129 @@ def render_role_table() -> str:
     return "\n".join(rows)
 
 
+FLAGS = ("--release-critical",)
+USAGE = "usage: /orko-sdd <plan-path> [--release-critical]"
+FRONTMATTER_FIELD_RE = re.compile(r"^(name|effort):\s*(\S+)\s*$", re.M)
+AGENT_INSTALL = f"ln -s {SKILL_DIR / 'agents'} ~/.claude/agents/orko-sdd"
+
+
+def installed_sdd_version(home: Path) -> str | None:
+    path = home / ".claude" / "plugins" / "installed_plugins.json"
+    try:
+        plugins = json.loads(path.read_text(encoding="utf-8")).get("plugins", {})
+    except (OSError, ValueError):
+        return None
+    for key, entries in plugins.items():
+        if key.startswith("superpowers@") and entries:
+            return entries[0].get("version")
+    return None
+
+
+def git_out(cwd: Path, *args: str) -> str | None:
+    proc = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def project_agent_dirs(cwd: Path) -> list[Path]:
+    """.claude/agents from cwd up to the repository root, plus the main checkout's when cwd is a worktree."""
+    start = cwd.resolve()
+    top = git_out(start, "rev-parse", "--show-toplevel")
+    stop = Path(top).resolve() if top else start
+    dirs = []
+    for directory in (start, *start.parents):
+        dirs.append(directory / ".claude" / "agents")
+        if directory == stop:
+            break
+    common = git_out(start, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common:
+        dirs.append(Path(common).resolve().parent / ".claude" / "agents")
+    return dirs
+
+
+def installed_agents(*roots: Path) -> dict[str, str]:
+    """Map orko-sdd agent name -> effort, scanning as Claude Code does: recursively, through symlinks."""
+    found: dict[str, str] = {}
+    seen: set[str] = set()
+    for root in roots:
+        for dirpath, dirs, files in os.walk(root, followlinks=True):
+            real = os.path.realpath(dirpath)
+            if real in seen:
+                dirs[:] = []
+                continue
+            seen.add(real)
+            for name in files:
+                if not name.endswith(".md"):
+                    continue
+                try:
+                    text = (Path(dirpath) / name).read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                parts = text.split("---", 2)
+                if not text.startswith("---") or len(parts) < 3:
+                    continue
+                fields = dict(FRONTMATTER_FIELD_RE.findall(parts[1]))
+                if fields.get("name", "").startswith("orko-sdd-"):
+                    found[fields["name"]] = fields.get("effort", "")
+    return found
+
+
+def preflight_lines(argv: list[str], home: Path, cwd: Path) -> list[str]:
+    out: list[str] = []
+    problems: list[str] = []
+    flags = [a for a in argv if a.startswith("--")]
+    positionals = [a for a in argv if not a.startswith("--")]
+    unknown = [f for f in flags if f not in FLAGS]
+    if unknown:
+        problems.append(f"unknown flag(s): {' '.join(unknown)}; {USAGE}")
+    if len(positionals) != 1:
+        problems.append(f"expected one plan path, got {len(positionals)} "
+                        f"(wrap a path with spaces in quotes); {USAGE}")
+    else:
+        plan = (cwd / positionals[0]).resolve()
+        out.append(f"plan: {plan}")
+        if not plan.is_file():
+            problems.append(f"plan not found: {plan}")
+    known = [f for f in flags if f in FLAGS]
+    out.append(f"flags: {' '.join(known) or 'none'}")
+
+    version = installed_sdd_version(home)
+    out.append(f"sdd: {version or 'not found'}")
+    if version is None:
+        problems.append("superpowers plugin not found in ~/.claude/plugins/installed_plugins.json")
+    elif version != SDD_PIN:
+        out.append(f"warning: orko-sdd was written against SDD {SDD_PIN}; installed {version}. "
+                   "Check that SKILL.md's changes still apply")
+
+    agents = installed_agents(home / ".claude" / "agents", *project_agent_dirs(cwd))
+    wanted = [f"orko-sdd-{e}" for e in EFFORTS]
+    present = [a for a, e in zip(wanted, EFFORTS) if agents.get(a) == e]
+    out.append(f"agents: {', '.join(present) or 'none'}")
+    if len(present) < len(wanted):
+        missing = ", ".join(a for a in wanted if a not in present)
+        problems.append(f"missing agent(s): {missing}; install with: {AGENT_INSTALL}")
+
+    if git_out(cwd, "rev-parse", "--verify", "--quiet", "refs/heads/master") is not None:
+        out.append("base-branch: master")
+    elif git_out(cwd, "rev-parse", "--verify", "--quiet", "refs/heads/main") is not None:
+        out.append("base-branch: main")
+    else:
+        problems.append(f"no master or main branch in {cwd} (is it a git repository?)")
+
+    out.append(f"final-review: {'fable/high' if '--release-critical' in known else 'opus/high'}")
+    out += [f"problem: {p}" for p in problems]
+    out.append("STATUS: blocked" if problems else "STATUS: ok")
+    return out
+
+
+def cmd_preflight(argv: list[str]) -> int:
+    try:
+        lines = preflight_lines(argv, Path.home(), Path.cwd())
+    except Exception as exc:  # the injection aborts the whole invocation on a nonzero exit
+        lines = [f"problem: preflight crashed: {exc!r}", "STATUS: blocked"]
+    print("\n".join(lines))
+    return 0
+
+
 def cmd_log(args: argparse.Namespace) -> int:
     ledger = Path(args.ledger)
     if err := ledger_error(ledger):
@@ -167,6 +293,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["preflight"]:
+        # Raw args: argparse exits 2 on an unknown flag, and preflight must always exit 0.
+        return cmd_preflight(argv[1:])
     args = build_parser().parse_args(argv)
     return args.func(args)
 
