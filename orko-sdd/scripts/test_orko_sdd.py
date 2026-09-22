@@ -1,4 +1,8 @@
 """Tests for orko_sdd.py, the deterministic half of the orko-sdd skill."""
+from pathlib import Path
+
+import pytest
+
 from conftest import git, write_plugins
 
 import orko_sdd
@@ -253,3 +257,133 @@ class TestPreflight:
         out = capsys.readouterr().out
         assert "problem: preflight crashed: RuntimeError('boom')" in out
         assert out.rstrip().endswith("STATUS: blocked")
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+HEADER = "# SDD ledger — plan: /nonexistent/plan.md"
+
+
+def run_report(ledger, capsys, *extra, repo=None):
+    code = orko_sdd.main(["report", "--ledger", str(ledger),
+                          "--repo", str(repo or ledger.parent), *extra])
+    assert code == 0
+    return capsys.readouterr().out
+
+
+def write_ledger(ledger, *lines):
+    ledger.write_text("\n".join([HEADER, *lines]) + "\n", encoding="utf-8")
+
+
+def section(out, name, following):
+    return out.split(f"## {name}", 1)[1].split(f"## {following}", 1)[0]
+
+
+class TestReportOnARealLedger:
+    @pytest.fixture
+    def out(self, ledger, capsys):
+        ledger.write_text((FIXTURES / "ledger-orko-v2-build.md").read_text(encoding="utf-8"),
+                          encoding="utf-8")
+        return run_report(ledger, capsys, "--plan", "/nonexistent/plan.md")
+
+    def test_every_ruling_is_a_decided_row(self, out):
+        rows = [line for line in section(out, "Decided", "Follow-up").splitlines()
+                if line.startswith("| ") and not line.startswith("| Ruling | Detail |")]
+        assert len(rows) == 18
+
+    def test_a_ruling_splits_into_ruling_detail_and_cost(self, out):
+        assert ("| fixtures copied in T8 are refreshed once more after T11 if the workshop plan changed"
+                " | spec says copies refresh when originals change"
+                " | stale fixture, no behavior impact. |") in out
+
+    def test_complete_tasks_carry_their_commit_ranges(self, out):
+        assert "| 1 | complete | b41d456..fcc0685 (?) | — |" in out
+        assert "| 11 | complete | c8d2903..63d6119 (?) | — |" in out
+
+    def test_parked_findings_and_deferred_minors_reach_follow_up(self, out):
+        follow_up = section(out, "Follow-up", "Recommended")
+        assert "- 19 deferred minor finding(s): see " in follow_up
+        assert "- Task 9 parked: em-dashes across orko/references and SKILL.md" in follow_up
+
+
+class TestReportOnARun:
+    def test_statuses_models_and_verify_rows(self, ledger, repo, capsys):
+        a = git(repo, "rev-parse", "HEAD")
+        git(repo, "commit", "-q", "--allow-empty", "-m", "task 1")
+        b = git(repo, "rev-parse", "HEAD")
+        ledger.write_text("\n".join([
+            f"# SDD ledger — plan: {FIXTURES / 'plan-sample.md'}",
+            "Task 1: dispatch implementer-scoped sonnet/high — plan has the code",
+            "Task 1: dispatch reviewer opus/low — task review",
+            f"Task 1: complete (commits {a[:7]}..{b[:7]}, review clean)",
+            "Task 2: dispatch implementer-multifile opus/medium — three files",
+            "Task 3: skipped — evergreen conflict — CLAUDE.md:3 — adds a third-party dependency",
+            "Task 4: skipped — depends on Task 3",
+            "Task final: dispatch final-reviewer opus/high — whole branch",
+            "Verify: uv run pytest -q — exit 0 — 12 passed | 0 failed",
+        ]) + "\n", encoding="utf-8")
+        out = run_report(ledger, capsys, repo=repo)
+        assert f"| 1. Alpha | complete | {a[:7]}..{b[:7]} (1) | sonnet/high, opus/low |" in out
+        assert "| 2. Bravo | in progress | — | opus/medium |" in out
+        assert ("| 3. Charlie | skipped — evergreen conflict — CLAUDE.md:3 — adds a third-party"
+                " dependency | — | — |") in out
+        assert "| 4. Delta | skipped — depends on Task 3 | — | — |" in out
+        assert "| 5. Echo | not started | — | — |" in out
+        assert "| final review | dispatched | — | opus/high |" in out
+        assert "| uv run pytest -q | 0 | 12 passed \\| 0 failed |" in out
+        assert "- Task 3 skipped: evergreen conflict" in section(out, "Follow-up", "Recommended")
+
+    def test_plan_headings_inside_fences_are_ignored(self, ledger, capsys):
+        ledger.write_text(f"# SDD ledger — plan: {FIXTURES / 'plan-sample.md'}\n", encoding="utf-8")
+        out = run_report(ledger, capsys)
+        assert "Not a real task" not in out
+        assert out.count("| 1. Alpha |") == 1
+        assert "| 6. Foxtrot | not started | — | — |" in out
+
+    def test_empty_sections_say_so(self, ledger, capsys):
+        write_ledger(ledger)
+        out = run_report(ledger, capsys)
+        assert "| none | — | — |" in out
+        assert "- none" in section(out, "Follow-up", "Recommended")
+        assert "| none run | — | — |" in out
+
+    def test_pipes_in_rulings_are_escaped(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use a | b table — why: clarity — cost if wrong: none")
+        assert "| use a \\| b table | clarity | none |" in run_report(ledger, capsys)
+
+    def test_ruling_variants_and_repeats_are_all_kept(self, ledger, capsys):
+        write_ledger(ledger,
+                     "Ruling (supersedes the one above): use X — why: y — cost if wrong: z",
+                     "Ruling: same — why: a — cost if wrong: b",
+                     "Ruling: same — why: a — cost if wrong: b")
+        out = run_report(ledger, capsys)
+        assert "| use X | y | z |" in out
+        assert out.count("| same | a | b |") == 2
+
+    def test_rulings_inside_dispatch_lines_are_not_decisions(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: dispatch implementer-scoped sonnet/high — fine. Ruling: ship it — why: x")
+        assert "| none | — | — |" in section(run_report(ledger, capsys), "Decided", "Follow-up")
+
+    def test_bulleted_lines_parse(self, ledger, capsys):
+        write_ledger(ledger,
+                     "- Task 1: complete (commits aaaaaaa..bbbbbbb, 2 parked)",
+                     "- Ruling: keep going — why: nothing blocks — cost if wrong: rework")
+        out = run_report(ledger, capsys)
+        assert "| 1 | complete (2 parked) | aaaaaaa..bbbbbbb (?) | — |" in out
+        assert "| keep going | nothing blocks | rework |" in out
+
+    def test_a_batch_dispatch_reaches_each_task(self, ledger, capsys):
+        write_ledger(ledger, "Task 3,4: dispatch implementer-scoped sonnet/high — same-shape batch")
+        out = run_report(ledger, capsys)
+        assert "| 3 | in progress | — | sonnet/high |" in out
+        assert "| 4 | in progress | — | sonnet/high |" in out
+
+    def test_non_decided_sections_fit_forty_lines(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: complete (commits aaaaaaa..bbbbbbb, review clean)",
+                     *[f"Follow-up: item {i}" for i in range(60)],
+                     *[f"Ruling: decision {i} — why: reason {i} — cost if wrong: none" for i in range(30)])
+        out = run_report(ledger, capsys)
+        before, rest = out.split("## Decided", 1)
+        kept = (before + "## Follow-up" + rest.split("## Follow-up", 1)[1]).splitlines()
+        assert len(kept) + orko_sdd.RECOMMENDED_RESERVE <= 40
+        assert f"more in {ledger}" in out
+        assert sum(1 for line in out.splitlines() if line.startswith("| decision ")) == 30

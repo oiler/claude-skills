@@ -14,6 +14,7 @@ import re
 import shlex
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 SDD_PIN = "6.4.1"
@@ -278,6 +279,188 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0
 
 
+LEDGER_PLAN_RE = re.compile(r"^# SDD ledger — plan: (.+)$")
+PLAN_TASK_RE = re.compile(r"^#{2,4} Task (\d+):\s*(.*)$")
+FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+TASK_LINE_RE = re.compile(r"^Task (\d+): ")
+RULING_RE = re.compile(r"\bRuling(?: \([^)]*\))?:\s*(.*)$")
+COMPLETE_RE = re.compile(
+    r"^Task (\d+): (?:\w+ )?complete \(commits ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})(.*)$")
+SKIPPED_RE = re.compile(r"^Task (\d+): skipped — (.+)$")
+PARKED_RE = re.compile(r"^Task (\d+): parked — (.+)$")
+MINOR_RE = re.compile(r"^Task (\d+): minor \(deferred\)")
+VERIFY_RE = re.compile(r"^Verify: (.+?) — exit (-?\d+) — (.*)$")
+PARKED_COUNT_RE = re.compile(r"(\d+) parked")
+REPORT_LINE_CAP = 40
+RECOMMENDED_RESERVE = 3
+
+
+@dataclass
+class Ledger:
+    plan: str | None = None
+    seen: list[str] = field(default_factory=list)
+    complete: dict[str, tuple[str, str, int]] = field(default_factory=dict)
+    skipped: dict[str, str] = field(default_factory=dict)
+    models: dict[str, list[str]] = field(default_factory=dict)
+    parked: list[tuple[str, str]] = field(default_factory=list)
+    minors: int = 0
+    followups: list[str] = field(default_factory=list)
+    rulings: list[str] = field(default_factory=list)
+    verifies: list[tuple[str, str, str]] = field(default_factory=list)
+
+
+def parse_ledger(text: str) -> Ledger:
+    """Read an orchestrator-written ledger. SDD's lines are freeform, so unknown lines are ignored."""
+    led = Ledger()
+    for raw in text.splitlines():
+        line = raw.strip()
+        line = line[2:] if line.startswith("- ") else line
+        if m := LEDGER_PLAN_RE.match(line):
+            led.plan = m.group(1).strip()
+            continue
+        if dispatch := DISPATCH_RE.match(line):
+            combo = f"{dispatch.group(3)}/{dispatch.group(4)}"
+            for task in dispatch.group(1).split(","):
+                combos = led.models.setdefault(task, [])
+                if combo not in combos:
+                    combos.append(combo)
+                if task != "final" and task not in led.seen:
+                    led.seen.append(task)
+            continue
+        # SDD asks for every ruling, in order: variants count and repeats are kept.
+        if (m := RULING_RE.search(line)) and m.group(1).strip():
+            led.rulings.append(m.group(1).strip())
+        if (m := TASK_LINE_RE.match(line)) and m.group(1) not in led.seen:
+            led.seen.append(m.group(1))
+        if m := COMPLETE_RE.match(line):
+            parked = PARKED_COUNT_RE.search(m.group(4))
+            led.complete[m.group(1)] = (m.group(2), m.group(3), int(parked.group(1)) if parked else 0)
+        elif m := SKIPPED_RE.match(line):
+            led.skipped[m.group(1)] = m.group(2)
+        elif m := PARKED_RE.match(line):
+            led.parked.append((m.group(1), m.group(2)))
+        elif MINOR_RE.match(line):
+            led.minors += 1
+        elif line.startswith("Follow-up"):
+            led.followups.append(line)
+        elif m := VERIFY_RE.match(line):
+            led.verifies.append((m.group(1), m.group(2), m.group(3)))
+    return led
+
+
+def split_ruling(text: str) -> tuple[str, str, str]:
+    parts = [p.strip() for p in text.split(" — ")]
+    detail: list[str] = []
+    cost = ""
+    for part in parts[1:]:
+        lower = part.lower()
+        if lower.startswith("cost if wrong"):
+            cost = part.split(":", 1)[1].strip() if ":" in part else part
+        else:
+            detail.append(part[4:].strip() if lower.startswith("why:") else part)
+    return parts[0], " — ".join(detail), cost
+
+
+def plan_tasks(plan: str | None, repo: Path) -> list[tuple[str, str]]:
+    """Task headings outside code fences, first occurrence wins (matches SDD's task-brief)."""
+    if not plan:
+        return []
+    path = Path(plan)
+    path = path if path.is_absolute() else repo / path
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    tasks: dict[str, str] = {}
+    fence = None
+    for line in text.splitlines():
+        if m := FENCE_RE.match(line):
+            marker = m.group(1)
+            if fence is None:
+                fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence) and line.strip() == marker:
+                fence = None
+            continue
+        if fence is None and (m := PLAN_TASK_RE.match(line)) and m.group(1) not in tasks:
+            tasks[m.group(1)] = m.group(2).strip()
+    return list(tasks.items())
+
+
+def commit_count(repo: Path, a: str, b: str) -> str:
+    proc = subprocess.run(["git", "-C", str(repo), "rev-list", "--count", f"{a}..{b}"],
+                          capture_output=True, text=True)
+    return proc.stdout.strip() if proc.returncode == 0 else "?"
+
+
+def cell(text: str) -> str:
+    return text.replace("|", "\\|")
+
+
+def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> str:
+    led = parse_ledger(ledger_path.read_text(encoding="utf-8"))
+    tasks = plan_tasks(plan_override or led.plan, repo)
+    titles = dict(tasks)
+    order = [n for n, _ in tasks] + sorted((n for n in led.seen if n not in titles), key=int)
+
+    done = []
+    for n in order:
+        commits = "—"
+        if n in led.skipped:
+            status = f"skipped — {led.skipped[n]}"
+        elif n in led.complete:
+            a, b, parked = led.complete[n]
+            status = f"complete ({parked} parked)" if parked else "complete"
+            commits = f"{a}..{b} ({commit_count(repo, a, b)})"
+        elif n in led.seen:
+            status = "in progress"
+        else:
+            status = "not started"
+        label = f"{n}. {titles[n]}" if titles.get(n) else n
+        models = ", ".join(led.models.get(n, [])) or "—"
+        done.append(f"| {cell(label)} | {cell(status)} | {commits} | {models} |")
+    if "final" in led.models:
+        done.append(f"| final review | dispatched | — | {', '.join(led.models['final'])} |")
+
+    decided = [f"| {' | '.join(cell(p) or '—' for p in split_ruling(r))} |" for r in led.rulings]
+    followups = [f"- Task {n} skipped: {reason}" for n, reason in led.skipped.items()]
+    if led.minors:
+        followups.append(f"- {led.minors} deferred minor finding(s): see {ledger_path}")
+    followups += [f"- Task {n} parked: {text}" for n, text in led.parked]
+    followups += [f"- {line}" for line in led.followups]
+    verified = [f"| {cell(c)} | {e} | {cell(t)} |" for c, e, t in led.verifies]
+
+    done_block = ["## Done", "| Task | Status | Commits | Models |", "|---|---|---|---|", *done, ""]
+    recommended = ["## Recommended",
+                   "<!-- orchestrator: at most 3 items, only ones that change what oiler does next -->", ""]
+    verified_block = ["## Verified", "| Command | Exit | Last line |", "|---|---|---|",
+                      *(verified or ["| none run | — | — |"])]
+    followups = followups or ["- none"]
+    # Decided is exempt from the cap (SDD: every ruling reaches oiler); Follow-up gives way.
+    budget = REPORT_LINE_CAP - (len(done_block) + 2 + len(recommended) + RECOMMENDED_RESERVE
+                                + len(verified_block))
+    if len(followups) > max(budget, 1):
+        keep = max(budget - 1, 0)
+        followups = followups[:keep] + [f"- +{len(followups) - keep} more in {ledger_path}"]
+
+    return "\n".join([
+        *done_block,
+        "## Decided", "| Ruling | Detail | Cost if wrong |", "|---|---|---|",
+        *(decided or ["| none | — | — |"]), "",
+        "## Follow-up", *followups, "",
+        *recommended,
+        *verified_block,
+    ])
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    ledger = Path(args.ledger)
+    if err := ledger_error(ledger):
+        print(err, file=sys.stderr)
+        return 2
+    print(render_report(ledger, args.plan, Path(args.repo)))
+    return 0
+
+
 def cmd_log(args: argparse.Namespace) -> int:
     ledger = Path(args.ledger)
     if err := ledger_error(ledger):
@@ -327,6 +510,12 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--output", required=True, help="the command's output file, in the SDD workspace")
     verify.add_argument("cmd", nargs=argparse.REMAINDER, help="-- then the command as it was run")
     verify.set_defaults(func=cmd_verify)
+
+    report = sub.add_parser("report", help="build the final report from the ledger and git")
+    report.add_argument("--ledger", required=True)
+    report.add_argument("--plan", help="plan path; defaults to the one on the ledger's first line")
+    report.add_argument("--repo", default=".", help="repository for commit counts")
+    report.set_defaults(func=cmd_report)
 
     return parser
 
