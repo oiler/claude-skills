@@ -90,7 +90,7 @@ If the script also rejects `fix-tier-up` (the stuck implementer already ran at o
 
 Resuming the implementer before its first review, over its own DONE_WITH_CONCERNS, isn't a fix round, so it needs no ledger line.
 
-Record each final-review residual you park as `Task final: parked — <finding> — Ruling: <why> — cost if wrong: <cost>`. After the final re-review, append `Task final: complete (commits <fix-base7>..<head7>, review clean)`, with `<K> parked` in place of `review clean` when you parked any; `<fix-base7>` is the commit the final fixer started from.
+Record each final-review residual you park as `Task final: parked — <finding> — Ruling: <why> — cost if wrong: <cost>`. After the final re-review, append `Task final: complete (commits <fix-base7>..<head7>, review clean)`, with `<K> parked` in place of `review clean` when you parked any and `<fix-base7>` the commit the final fixer started from; when the final review comes back clean with no fix wave, append `Task final: complete (commits <merge-base7>..<head7>, review clean)`, the branch range that review saw.
 
 ## Dispatch lines
 
