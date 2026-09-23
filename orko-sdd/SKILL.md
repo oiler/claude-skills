@@ -130,7 +130,7 @@ SDD deletes its workspace as soon as the final review is clean. Hold that deleti
    <command> > <workspace>/verify-<n>.log 2>&1; python3 ${CLAUDE_SKILL_DIR}/scripts/orko_sdd.py verify --ledger <ledger> --exit $? --output <workspace>/verify-<n>.log -- '<command>'
    ```
 
-   The command runs under normal permission rules. The script only records its exit code and last output line.
+   The command runs under normal permission rules. The script only records its exit code and last output line. Don't pipe `<command>` into another program: `$?` would be the last program's exit code, so a failing suite could record exit 0.
 
 2. Build the report:
 
@@ -140,4 +140,4 @@ SDD deletes its workspace as soon as the final review is clean. Hold that deleti
 
 3. Invoke `superpowers:finishing-a-development-branch`. In the message that presents its options, put the report first, verbatim, with only the Recommended section filled in: at most three items, and only ones that would change what oiler does next. The report's Decided table is SDD's "Rulings I made" list, so don't repeat it. Merging and pushing are stops.
 
-4. Only after `finishing-a-development-branch` has completed, delete everything in the workspace except `progress.md`, which the report's "see <ledger>" pointers still name: `find <workspace> -mindepth 1 ! -name progress.md -delete`.
+4. Only after `finishing-a-development-branch` has completed, delete the workspace as SDD does: `rm -rf <workspace>`.
