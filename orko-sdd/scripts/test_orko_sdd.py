@@ -330,8 +330,12 @@ class TestReportOnARealLedger:
         assert "| 1 | complete | b41d456..fcc0685 (?) | — |" in out
         assert "| 11 | complete | c8d2903..63d6119 (?) | — |" in out
 
+    def test_a_task_parked_line_keeps_its_finding_in_decided(self, out):
+        assert ("| parked: em-dashes across orko/references and SKILL.md (34 in the two new files)"
+                " | branch-wide house style question, decided at final review, not per task. | — |") in out
+
     def test_parked_findings_and_deferred_minors_reach_follow_up(self, out):
-        follow_up = section(out, "Follow-up", "Recommended")
+        follow_up = section(out, "Follow-up", "Verified")
         assert "- 19 deferred minor finding(s): see " in follow_up
         assert "- Task 9 parked: em-dashes across orko/references and SKILL.md" in follow_up
 
@@ -361,7 +365,24 @@ class TestReportOnARun:
         assert "| 5. Echo | not started | — | — |" in out
         assert "| final review | dispatched | — | opus/high |" in out
         assert "| uv run pytest -q | 0 | 12 passed \\| 0 failed |" in out
-        assert "- Task 3 skipped: evergreen conflict" in section(out, "Follow-up", "Recommended")
+        assert "- Task 3 skipped: evergreen conflict" in section(out, "Follow-up", "Verified")
+
+    def test_recommended_is_the_last_section_after_verified(self, ledger, capsys):
+        write_ledger(ledger, "Verify: pytest -q — exit 0 — 3 passed")
+        headings = [line for line in run_report(ledger, capsys).splitlines() if line.startswith("## ")]
+        assert headings == ["## Done", "## Decided", "## Follow-up", "## Verified", "## Recommended"]
+
+    def test_a_final_parked_line_names_its_finding_in_decided_and_follow_up(self, ledger, capsys):
+        write_ledger(ledger, "Task final: parked — X — Ruling: Y — cost if wrong: Z")
+        out = run_report(ledger, capsys)
+        assert "| parked: X | Y | Z |" in section(out, "Decided", "Follow-up")
+        assert "- Task final parked: X" in section(out, "Follow-up", "Verified")
+
+    def test_a_final_completion_line_shows_the_final_review_complete(self, ledger, capsys):
+        write_ledger(ledger, "Task final: dispatch final-reviewer opus/high — whole branch",
+                     "Task final: complete (commits aaaaaaa..bbbbbbb, 2 parked)")
+        out = run_report(ledger, capsys)
+        assert "| final review | complete (2 parked) | aaaaaaa..bbbbbbb (?) | opus/high |" in out
 
     def test_plan_headings_inside_fences_are_ignored(self, ledger, capsys):
         ledger.write_text(f"# SDD ledger — plan: {FIXTURES / 'plan-sample.md'}\n", encoding="utf-8")
@@ -372,7 +393,7 @@ class TestReportOnARun:
 
     def test_an_unreadable_plan_is_noted_first_in_follow_up(self, ledger, capsys):
         write_ledger(ledger)  # HEADER points the ledger's plan at /nonexistent/plan.md
-        follow_up = section(run_report(ledger, capsys), "Follow-up", "Recommended")
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
         assert follow_up.strip().splitlines()[0] == (
             "- plan not readable: /nonexistent/plan.md; tasks never dispatched are not listed")
 
@@ -380,7 +401,7 @@ class TestReportOnARun:
         write_ledger(ledger)
         out = run_report(ledger, capsys, "--plan", str(FIXTURES / "plan-sample.md"))
         assert "| none | — | — |" in out
-        assert "- none" in section(out, "Follow-up", "Recommended")
+        assert "- none" in section(out, "Follow-up", "Verified")
         assert "| none run | — | — |" in out
 
     def test_pipes_in_rulings_are_escaped(self, ledger, capsys):

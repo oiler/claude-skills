@@ -88,16 +88,26 @@ Rounds 1-3 run as SDD says: resume the original implementer. It keeps its model,
 
 If the script also rejects `fix-tier-up` (the stuck implementer already ran at opus/high), rerun it with `--override` and the reason.
 
+Resuming the implementer before its first review, over its own DONE_WITH_CONCERNS, isn't a fix round, so it needs no ledger line.
+
+Record each final-review residual you park as `Task final: parked — <finding> — Ruling: <why> — cost if wrong: <cost>`. After the final re-review, append `Task final: complete (commits <fix-base7>..<head7>, review clean)`, with `<K> parked` in place of `review clean` when you parked any; `<fix-base7>` is the commit the final fixer started from.
+
 ## Dispatch lines
 
 Add each of these sentences verbatim where it applies:
 
-- Every implementer dispatch: "Use red/green TDD for any logic in this task: write the failing test, run it and watch it fail, then implement."
-- Implementer and reviewer dispatches for a task that touches request handling, auth, user input, output encoding, or secrets: "Invoke the web-security skill before writing or reviewing code for this task."
+- Every implementer and fixer dispatch, including the final fixer: "Use red/green TDD for any logic in this task: write the failing test, run it and watch it fail, then implement."
+- Every implementer, fixer, and reviewer dispatch whose code touches request handling, auth, user input, output encoding, or secrets, including the final reviewer, the final fixer, and re-reviewers: "Invoke the web-security skill before writing or reviewing code for this task."
 
 ## Branch
 
-oiler's standing preference, which is the consent SDD and `superpowers:using-git-worktrees` ask for: create an isolated worktree without asking, on a new `feat/<plan-slug>` branch off preflight's `base-branch`, unless the session already runs in a feature worktree, in which case use it. `<plan-slug>` is the plan file's basename without `.md`, and `<worktree>` is the worktree the run uses.
+oiler's standing preference, which is the consent SDD and `superpowers:using-git-worktrees` ask for: create an isolated worktree without asking, unless the session already runs in a feature worktree, in which case use it. Don't create it with the built-in `EnterWorktree(name=…)`: that branches from `origin/<default>` under its own name and fails when there's no remote. Instead:
+
+1. Run `git worktree add <repo-root>/.worktrees/<plan-slug> -b feat/<plan-slug> <base-branch>`, with preflight's `base-branch`.
+2. If `.worktrees/` isn't ignored, add it to `.git/info/exclude`.
+3. Work from that directory: enter it with `EnterWorktree(path=…)` if available, otherwise use absolute paths.
+
+`<plan-slug>` is the plan file's basename without `.md`, and `<worktree>` is the worktree the run uses. Once in the worktree, pass SDD's scripts (`sdd-workspace`, `task-brief`, `review-package`) the plan's path inside the worktree, so the workspace and ledger live there.
 
 ## Speed
 
@@ -120,6 +130,8 @@ A message with no tool call ends your turn, and work stops until I return. Don't
 
 Put status notes and recommendations in the same message as your next tool call, and keep going on anything that doesn't depend on me. Stop only when nothing can advance without me, or when an action needs confirmation under the rules above.
 
+While a subagent you dispatched is running and nothing local remains, ending the turn with one status line is fine, because its completion notification resumes you.
+
 ## Finish
 
 SDD deletes its workspace as soon as the final review is clean. Hold that deletion: the ledger feeds the report. Instead, after the final review and its fix wave:
@@ -130,7 +142,7 @@ SDD deletes its workspace as soon as the final review is clean. Hold that deleti
    <command> > <workspace>/verify-<n>.log 2>&1; python3 ${CLAUDE_SKILL_DIR}/scripts/orko_sdd.py verify --ledger <ledger> --exit $? --output <workspace>/verify-<n>.log -- '<command>'
    ```
 
-   The command runs under normal permission rules. The script only records its exit code and last output line. Don't pipe `<command>` into another program: `$?` would be the last program's exit code, so a failing suite could record exit 0.
+   The command runs under normal permission rules. The script only records its exit code and last output line. Don't pipe `<command>` into another program: `$?` would be the last program's exit code, so a failing suite could record exit 0. If the project has no lint command, record only its test commands.
 
 2. Build the report:
 
@@ -138,6 +150,6 @@ SDD deletes its workspace as soon as the final review is clean. Hold that deleti
    python3 ${CLAUDE_SKILL_DIR}/scripts/orko_sdd.py report --ledger <ledger> --repo <worktree>
    ```
 
-3. Invoke `superpowers:finishing-a-development-branch`. In the message that presents its options, put the report first, verbatim, with only the Recommended section filled in: at most three items, and only ones that would change what oiler does next. The report's Decided table is SDD's "Rulings I made" list, so don't repeat it. Merging and pushing are stops.
+3. Invoke `superpowers:finishing-a-development-branch`. In the message that presents its options, put the report first; a one-line announcement before it is fine. Paste the script's output unchanged, from `## Done` through the Verified table, then write the Recommended items under `## Recommended` in place of the HTML comment: at most three, and only ones that would change what oiler does next. The report's Decided table is SDD's "Rulings I made" list, so don't repeat it. Merging and pushing are stops.
 
 4. Only after `finishing-a-development-branch` has completed, delete the workspace as SDD does: `rm -rf <workspace>`.

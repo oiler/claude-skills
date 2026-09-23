@@ -297,9 +297,9 @@ FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 TASK_LINE_RE = re.compile(r"^Task (\d+): ")
 RULING_RE = re.compile(r"\bRuling(?: \(.*?\))?:\s*(.*)$")
 COMPLETE_RE = re.compile(
-    r"^Task (\d+(?:,\d+)*): (?:\w+ )?complete \(commits ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})(.*)$")
+    r"^Task (\d+(?:,\d+)*|final): (?:\w+ )?complete \(commits ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})(.*)$")
 SKIPPED_RE = re.compile(r"^Task (\d+): skipped — (.+)$")
-PARKED_RE = re.compile(r"^Task (\d+): parked — (.+)$")
+PARKED_RE = re.compile(r"^Task (\d+|final): parked — (.+)$")
 MINOR_RE = re.compile(r"^Task (\d+): minor \(deferred\)")
 VERIFY_RE = re.compile(r"^Verify: (.+?) — exit (-?\d+) — (.*)$")
 PARKED_COUNT_RE = re.compile(r"(\d+) parked")
@@ -317,7 +317,7 @@ class Ledger:
     parked: list[tuple[str, str]] = field(default_factory=list)
     minors: int = 0
     followups: list[str] = field(default_factory=list)
-    rulings: list[str] = field(default_factory=list)
+    rulings: list[tuple[str, str, str]] = field(default_factory=list)
     verifies: list[tuple[str, str, str]] = field(default_factory=list)
 
 
@@ -340,22 +340,28 @@ def parse_ledger(text: str) -> Ledger:
                     led.seen.append(task)
             continue
         # SDD asks for every ruling, in order: variants count and repeats are kept.
-        # A deferred minor or a Verify line that mentions "Ruling:" is not one.
-        if (not (MINOR_RE.match(line) or VERIFY_RE.match(line))
+        # A deferred minor or a Verify line that mentions "Ruling:" is not one; a parked line's is read below.
+        if (not (MINOR_RE.match(line) or VERIFY_RE.match(line) or PARKED_RE.match(line))
                 and (m := RULING_RE.search(line)) and m.group(1).strip()):
-            led.rulings.append(m.group(1).strip())
+            led.rulings.append(split_ruling(m.group(1).strip()))
         if (m := TASK_LINE_RE.match(line)) and m.group(1) not in led.seen:
             led.seen.append(m.group(1))
         if m := COMPLETE_RE.match(line):
             parked = PARKED_COUNT_RE.search(m.group(4))
             for task in m.group(1).split(","):
                 led.complete[task] = (m.group(2), m.group(3), int(parked.group(1)) if parked else 0)
-                if task not in led.seen:
+                if task != "final" and task not in led.seen:
                     led.seen.append(task)
         elif m := SKIPPED_RE.match(line):
             led.skipped[m.group(1)] = m.group(2)
         elif m := PARKED_RE.match(line):
-            led.parked.append((m.group(1), m.group(2)))
+            finding = m.group(2)
+            # The Ruling column names the parked finding, which the text after "Ruling:" never does.
+            if (r := RULING_RE.search(finding)) and r.group(1).strip():
+                finding = finding[:r.start()].rstrip().removesuffix("—").rstrip()
+                led.rulings.append((f"parked: {finding}",
+                                    *detail_and_cost([p.strip() for p in r.group(1).strip().split(" — ")])))
+            led.parked.append((m.group(1), finding))
         elif MINOR_RE.match(line):
             led.minors += 1
         elif line.startswith("Follow-up"):
@@ -367,12 +373,16 @@ def parse_ledger(text: str) -> Ledger:
 
 def split_ruling(text: str) -> tuple[str, str, str]:
     parts = [p.strip() for p in text.split(" — ")]
-    rest = parts[1:]
+    return (parts[0], *detail_and_cost(parts[1:]))
+
+
+def detail_and_cost(rest: list[str]) -> tuple[str, str]:
+    """The parts of a ruling after its <what>, as (detail, cost)."""
     cost = ""
     # SDD 6.4.1 writes plain rulings with no labels at all: <what> — <why> — <cost>.
     # Only fall back to positional cost when no part carries a "why:" or "cost if wrong"
     # label — a labeled why whose own text contains " — " must not donate its tail to cost.
-    if len(parts) >= 3 and not any(p.lower().startswith(("why:", "cost if wrong")) for p in rest):
+    if len(rest) >= 2 and not any(p.lower().startswith(("why:", "cost if wrong")) for p in rest):
         rest, cost = rest[:-1], rest[-1]
     detail: list[str] = []
     for part in rest:
@@ -381,7 +391,7 @@ def split_ruling(text: str) -> tuple[str, str, str]:
             cost = part.split(":", 1)[1].strip() if ":" in part else part
         else:
             detail.append(part[4:].strip() if lower.startswith("why:") else part)
-    return parts[0], " — ".join(detail), cost
+    return " — ".join(detail), cost
 
 
 def plan_tasks(plan: str | None, repo: Path, problems: list[str] | None = None) -> list[tuple[str, str]]:
@@ -448,10 +458,16 @@ def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> s
         label = f"{n}. {titles[n]}" if titles.get(n) else n
         models = ", ".join(led.models.get(n, [])) or "—"
         done.append(f"| {cell(label)} | {cell(status)} | {commits} | {models} |")
-    if "final" in led.models:
-        done.append(f"| final review | dispatched | — | {', '.join(led.models['final'])} |")
+    if "final" in led.models or "final" in led.complete:
+        status, commits = "dispatched", "—"
+        if "final" in led.complete:
+            a, b, parked = led.complete["final"]
+            status = f"complete ({parked} parked)" if parked else "complete"
+            commits = f"{a}..{b} ({commit_count(repo, a, b)})"
+        models = ", ".join(led.models.get("final", [])) or "—"
+        done.append(f"| final review | {status} | {commits} | {models} |")
 
-    decided = [f"| {' | '.join(cell(p) or '—' for p in split_ruling(r))} |" for r in led.rulings]
+    decided = [f"| {' | '.join(cell(p) or '—' for p in r)} |" for r in led.rulings]
     followups = list(plan_problems) + [f"- Task {n} skipped: {reason}" for n, reason in led.skipped.items()]
     if led.minors:
         followups.append(f"- {led.minors} deferred minor finding(s): see {ledger_path}")
@@ -460,10 +476,11 @@ def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> s
     verified = [f"| {cell(c)} | {e} | {cell(t)} |" for c, e, t in led.verifies]
 
     done_block = ["## Done", "| Task | Status | Commits | Models |", "|---|---|---|---|", *done, ""]
-    recommended = ["## Recommended",
-                   "<!-- orchestrator: at most 3 items, only ones that change what oiler does next -->", ""]
     verified_block = ["## Verified", "| Command | Exit | Last line |", "|---|---|---|",
-                      *(verified or ["| none run | — | — |"])]
+                      *(verified or ["| none run | — | — |"]), ""]
+    # Recommended, the one section the orchestrator writes, comes last so its edit can't swallow script text.
+    recommended = ["## Recommended",
+                   "<!-- orchestrator: at most 3 items, only ones that change what oiler does next -->"]
     followups = followups or ["- none"]
     # Decided is exempt from the cap (SDD: every ruling reaches oiler); Follow-up gives way.
     budget = REPORT_LINE_CAP - (len(done_block) + 2 + len(recommended) + RECOMMENDED_RESERVE
@@ -477,8 +494,8 @@ def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> s
         "## Decided", "| Ruling | Detail | Cost if wrong |", "|---|---|---|",
         *(decided or ["| none | — | — |"]), "",
         "## Follow-up", *followups, "",
-        *recommended,
         *verified_block,
+        *recommended,
     ])
 
 
