@@ -90,6 +90,11 @@ class TestLog:
         assert run_log(ledger, model="opus", **final) == 2
         assert run_log(ledger, model="fable", **final) == 0
 
+    def test_a_bulleted_release_critical_marker_still_counts(self, ledger):
+        with ledger.open("a", encoding="utf-8") as fh:
+            fh.write("- `orko-sdd: release-critical`\n")
+        assert run_log(ledger, task="final", role="final-reviewer", model="opus", why="w") == 2
+
 
 def run_verify(ledger, output, *cmd, exit_code=0):
     return orko_sdd.main(["verify", "--ledger", str(ledger), "--exit", str(exit_code),
@@ -154,6 +159,18 @@ class TestVerify:
         output.write_text("x\n", encoding="utf-8")
         assert run_verify(ledger, output) == 2
 
+    def test_a_single_quoted_command_is_recorded_as_given(self, ledger):
+        output = ledger.parent / "verify-1.log"
+        output.write_text("3 passed\n", encoding="utf-8")
+        assert run_verify(ledger, output, "cd a && pytest -q") == 0
+        assert last_line(ledger) == "Verify: cd a && pytest -q — exit 0 — 3 passed"
+
+    def test_the_ledger_itself_is_refused_as_output(self, ledger, capsys):
+        before = ledger.read_text(encoding="utf-8")
+        assert run_verify(ledger, ledger, "pytest") == 2
+        assert ledger.read_text(encoding="utf-8") == before
+        assert capsys.readouterr().out == ""
+
 
 class TestPreflight:
     def test_ok_run_reports_resolved_values_through_symlinked_agents(self, fake_home, repo):
@@ -210,6 +227,19 @@ class TestPreflight:
         out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
         problem = next(line for line in out if line.startswith("problem: missing agent(s)"))
         assert "ln -s" in problem
+        assert out[-1] == "STATUS: blocked"
+
+    def test_an_agent_with_the_wrong_effort_blocks(self, fake_home, repo):
+        agents = fake_home / ".claude" / "agents"
+        (agents / "orko-sdd").unlink()
+        for effort in ("medium", "high"):
+            name = f"orko-sdd-{effort}.md"
+            (agents / name).write_text((orko_sdd.SKILL_DIR / "agents" / name).read_text(encoding="utf-8"),
+                                       encoding="utf-8")
+        (agents / "orko-sdd-low.md").write_text("---\nname: orko-sdd-low\neffort: high\n---\n",
+                                                encoding="utf-8")
+        out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
+        assert any(line.startswith("problem: missing agent(s): orko-sdd-low;") for line in out)
         assert out[-1] == "STATUS: blocked"
 
     def test_project_level_agents_satisfy_the_check(self, fake_home, repo):
@@ -399,6 +429,17 @@ class TestReportOnARun:
         out = run_report(ledger, capsys)
         assert "| 3 | in progress | — | sonnet/high |" in out
         assert "| 4 | in progress | — | sonnet/high |" in out
+
+    def test_a_batch_completion_marks_each_task_complete(self, ledger, capsys):
+        write_ledger(ledger, "Task 3,4: complete (commits aaaaaaa..bbbbbbb, review clean)")
+        out = run_report(ledger, capsys)
+        assert "| 3 | complete | aaaaaaa..bbbbbbb (?) | — |" in out
+        assert "| 4 | complete | aaaaaaa..bbbbbbb (?) | — |" in out
+
+    def test_rulings_inside_minor_and_verify_lines_are_not_decisions(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: minor (deferred): naming nit. Ruling: leave it — why: cosmetic",
+                     "Verify: grep -c Ruling: progress.md — exit 0 — Ruling: 3")
+        assert "| none | — | — |" in section(run_report(ledger, capsys), "Decided", "Follow-up")
 
     def test_non_decided_sections_fit_forty_lines(self, ledger, capsys):
         write_ledger(ledger, "Task 1: complete (commits aaaaaaa..bbbbbbb, review clean)",

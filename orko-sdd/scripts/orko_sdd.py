@@ -95,6 +95,13 @@ def rank(combo: tuple[str, str]) -> tuple[int, int]:
     return MODELS.index(combo[0]), EFFORTS.index(combo[1])
 
 
+def marker_text(line: str) -> str:
+    """A ledger line as the orchestrator meant it: bullets and backticks dropped."""
+    line = line.strip()
+    line = line[2:] if line.startswith("- ") else line
+    return line.strip("`")
+
+
 def allowed_combos(role: str, task: str, ledger_text: str) -> tuple[tuple[str, str], ...]:
     if role in ("fix-incomplete", "fix-tier-up"):
         prior = last_implementer_dispatch(ledger_text, task)
@@ -103,16 +110,16 @@ def allowed_combos(role: str, task: str, ledger_text: str) -> tuple[tuple[str, s
         if role == "fix-incomplete":
             return ((prior[0], NEXT_EFFORT[prior[1]]),) if prior[1] in NEXT_EFFORT else ()
         return tuple(c for c in ROLE_TABLE[role] if rank(c) > rank(prior))
-    if role == "final-reviewer" and RELEASE_CRITICAL_MARKER in ledger_text.splitlines():
+    if role == "final-reviewer" and RELEASE_CRITICAL_MARKER in map(marker_text, ledger_text.splitlines()):
         return RELEASE_CRITICAL_FINAL
     return ROLE_TABLE[role]
 
 
 def combos_text(role: str) -> str:
     if role == "fix-incomplete":
-        return "same model as the task's last implementer dispatch, next effort up (low → medium → high)"
+        return "same model as the task's last implementer or fix dispatch, next effort up (low → medium → high)"
     if role == "fix-tier-up":
-        return "opus/medium, opus/high; only above the task's last implementer dispatch"
+        return "opus/medium, opus/high; only above the task's last implementer or fix dispatch"
     if role == "final-reviewer":
         return "opus/high; fable/high when the ledger carries `orko-sdd: release-critical`"
     return ", ".join(f"{m}/{e}" for m, e in ROLE_TABLE[role])
@@ -269,12 +276,17 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if output.parent != workspace:
         print(f"refused: --output must be a file directly in the SDD workspace ({workspace})", file=sys.stderr)
         return 2
+    if output == ledger.resolve():
+        print("refused: --output is the ledger itself; redirect the command into its own file", file=sys.stderr)
+        return 2
     try:
         lines = output.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         lines = ["(output file missing)"]
     tail = next((one_line(line) for line in reversed(lines) if line.strip()), "(no output)")[:120]
-    append_line(ledger, f"Verify: {one_line(shlex.join(cmd))} — exit {args.exit} — {tail}")
+    # One argument is a single-quoted shell command line: record it as written, not re-quoted.
+    shown = cmd[0] if len(cmd) == 1 else shlex.join(cmd)
+    append_line(ledger, f"Verify: {one_line(shown)} — exit {args.exit} — {tail}")
     print("\n".join(lines[-VERIFY_TAIL_LINES:]))
     return 0
 
@@ -285,7 +297,7 @@ FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 TASK_LINE_RE = re.compile(r"^Task (\d+): ")
 RULING_RE = re.compile(r"\bRuling(?: \(.*?\))?:\s*(.*)$")
 COMPLETE_RE = re.compile(
-    r"^Task (\d+): (?:\w+ )?complete \(commits ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})(.*)$")
+    r"^Task (\d+(?:,\d+)*): (?:\w+ )?complete \(commits ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})(.*)$")
 SKIPPED_RE = re.compile(r"^Task (\d+): skipped — (.+)$")
 PARKED_RE = re.compile(r"^Task (\d+): parked — (.+)$")
 MINOR_RE = re.compile(r"^Task (\d+): minor \(deferred\)")
@@ -328,13 +340,18 @@ def parse_ledger(text: str) -> Ledger:
                     led.seen.append(task)
             continue
         # SDD asks for every ruling, in order: variants count and repeats are kept.
-        if (m := RULING_RE.search(line)) and m.group(1).strip():
+        # A deferred minor or a Verify line that mentions "Ruling:" is not one.
+        if (not (MINOR_RE.match(line) or VERIFY_RE.match(line))
+                and (m := RULING_RE.search(line)) and m.group(1).strip()):
             led.rulings.append(m.group(1).strip())
         if (m := TASK_LINE_RE.match(line)) and m.group(1) not in led.seen:
             led.seen.append(m.group(1))
         if m := COMPLETE_RE.match(line):
             parked = PARKED_COUNT_RE.search(m.group(4))
-            led.complete[m.group(1)] = (m.group(2), m.group(3), int(parked.group(1)) if parked else 0)
+            for task in m.group(1).split(","):
+                led.complete[task] = (m.group(2), m.group(3), int(parked.group(1)) if parked else 0)
+                if task not in led.seen:
+                    led.seen.append(task)
         elif m := SKIPPED_RE.match(line):
             led.skipped[m.group(1)] = m.group(2)
         elif m := PARKED_RE.match(line):
@@ -368,7 +385,7 @@ def split_ruling(text: str) -> tuple[str, str, str]:
 
 
 def plan_tasks(plan: str | None, repo: Path, problems: list[str] | None = None) -> list[tuple[str, str]]:
-    """Task headings outside code fences, first occurrence wins (matches SDD's task-brief).
+    """The plan's H2-H4 `Task N:` headings outside code fences; the first occurrence of each N wins.
 
     A set-but-unreadable plan is tolerated (never-dispatched tasks just don't show up in
     Done), but it's noted in `problems` when the caller wants to surface that to oiler.

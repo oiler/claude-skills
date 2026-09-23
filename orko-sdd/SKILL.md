@@ -37,16 +37,19 @@ If that block ends in `STATUS: blocked`, report its `problem:` lines and stop. O
 - A task that conflicts with an evergreen doc is skipped, not ruled on. Append `Task <N>: skipped — evergreen conflict — <doc>:<line> — <what conflicts>` to the ledger, then `Task <M>: skipped — depends on Task <N>` for every task that builds on it, and continue with independent work. In this run, the skip is CLAUDE.md's "halt", and the report's Follow-up line is its "ask".
 - You own every other decision the plan leaves open. Make it, record it as an SDD ruling on its own ledger line, and keep going; a ruling carried only in a `log --why` never reaches the report. Ask oiler only for the actions under Stops, or when nothing else can proceed without the answer.
 - Material product, behavior, or architecture ambiguity is a ruling for you, not a reason to pick a bigger model.
+- Record anything oiler must act on after the run as a `Follow-up: <item>` ledger line, so the report carries it.
 
 ## Models and effort
 
 Log every dispatch before you make it:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/orko_sdd.py log --ledger <ledger> --task <N|N,M,…|final> --role <role> --model <model> --effort <effort> --why "<one line>"
+python3 ${CLAUDE_SKILL_DIR}/scripts/orko_sdd.py log --ledger <ledger> --task <N|N,M,…|final> --role <role> --model <model> --effort <effort> --why '<one line>'
 ```
 
-On success, the script prints `subagent_type` and `model`: dispatch with exactly those. SDD's templates say `general-purpose`; use the printed `subagent_type` instead. Exit 2 means the combination is off-policy: choose again, or rerun with `--override` and put the reason in `--why`.
+Single-quote the `--why` text here and the command after `--` in Finish's `verify` call, and write `'\''` for a literal single quote: double quotes let `$` and backticks run, and an unquoted command splits at `&&`.
+
+On success, the script prints `subagent_type` and `model`: dispatch with exactly those. SDD's templates say `general-purpose`; use the printed `subagent_type` instead. Exit 2 means the combination is off-policy or the call was refused; stderr says which. For an off-policy combination, choose again, or rerun with `--override` and put the reason in `--why`.
 
 | Role | Model/effort | MODELS.md row |
 |---|---|---|
@@ -57,9 +60,9 @@ On success, the script prints `subagent_type` and `model`: dispatch with exactly
 | `implementer-ui-replication` | opus/medium | Implementer: high-fidelity UI replication or difficult visual debugging |
 | `reviewer` | opus/low | Per-task code reviewer |
 | `re-reviewer` | opus/low | Scoped re-review (CLAUDE.md: opus for scoped re-reviews) |
-| `fix-incomplete` | same model as the task's last implementer dispatch, next effort up (low → medium → high) | Fix failure caused by skipped files, incomplete execution or missing verification (xhigh is reserved, so a high-effort failure goes to fix-tier-up) |
+| `fix-incomplete` | same model as the task's last implementer or fix dispatch, next effort up (low → medium → high) | Fix failure caused by skipped files, incomplete execution or missing verification (xhigh is reserved, so a high-effort failure goes to fix-tier-up) |
 | `fix-wrong-diagnosis` | fable/high | Fix failure after thorough investigation produced a confident but wrong diagnosis |
-| `fix-tier-up` | opus/medium, opus/high; only above the task's last implementer dispatch | SDD fix rounds 4-5: at least one step above the stuck implementer |
+| `fix-tier-up` | opus/medium, opus/high; only above the task's last implementer or fix dispatch | SDD fix rounds 4-5: at least one step above the stuck implementer |
 | `final-reviewer` | opus/high; fable/high when the ledger carries `orko-sdd: release-critical` | Final review: ordinary / release-critical whole-branch review |
 | `final-fixer` | opus/medium | SDD's single final-review fix dispatch |
 
@@ -69,7 +72,7 @@ Choosing a role:
 - One small local gap with one conventional reading: `implementer-gap`. Record the assumption in the ledger.
 - Several files with integration concerns: `implementer-multifile`, at opus/high only when the task is unusually difficult.
 - Downgrade when a task turns out to be mechanical.
-- A batch of small same-shape tasks (SDD's batching rule) is one dispatch: log it with `--task 3,4,5`.
+- A batch of small same-shape tasks (SDD's batching rule) is one dispatch: log it with `--task 3,4,5`. Record its completion as one `Task <N>: complete (…)` line per task, because SDD's resume check reads per-task lines.
 - SDD's BLOCKED re-dispatch "with a more capable model": `fix-tier-up`. Any other fresh re-dispatch (NEEDS_CONTEXT, or a fix round 1-3 when the implementer can't be resumed) logs again under the task's original role.
 - Scoped re-reviews log as `re-reviewer`. The final whole-branch review logs as `--task final --role final-reviewer`; for an unusually large branch, `--override` to fable/high with the reason. Its single fix dispatch logs as `--task final --role final-fixer`.
 
@@ -94,7 +97,7 @@ Add each of these sentences verbatim where it applies:
 
 ## Branch
 
-oiler's standing preference, which is the consent SDD and `superpowers:using-git-worktrees` ask for: create an isolated worktree without asking, on a new `feat/<plan-slug>` branch off preflight's `base-branch`.
+oiler's standing preference, which is the consent SDD and `superpowers:using-git-worktrees` ask for: create an isolated worktree without asking, on a new `feat/<plan-slug>` branch off preflight's `base-branch`, unless the session already runs in a feature worktree, in which case use it. `<plan-slug>` is the plan file's basename without `.md`, and `<worktree>` is the worktree the run uses.
 
 ## Speed
 
@@ -124,7 +127,7 @@ SDD deletes its workspace as soon as the final review is clean. Hold that deleti
 1. Run each of the project's test and lint commands with its output redirected into the workspace, and record the result in the same Bash call:
 
    ```bash
-   <command> > <workspace>/verify-<n>.log 2>&1; python3 ${CLAUDE_SKILL_DIR}/scripts/orko_sdd.py verify --ledger <ledger> --exit $? --output <workspace>/verify-<n>.log -- <command>
+   <command> > <workspace>/verify-<n>.log 2>&1; python3 ${CLAUDE_SKILL_DIR}/scripts/orko_sdd.py verify --ledger <ledger> --exit $? --output <workspace>/verify-<n>.log -- '<command>'
    ```
 
    The command runs under normal permission rules. The script only records its exit code and last output line.
@@ -137,4 +140,4 @@ SDD deletes its workspace as soon as the final review is clean. Hold that deleti
 
 3. Invoke `superpowers:finishing-a-development-branch`. In the message that presents its options, put the report first, verbatim, with only the Recommended section filled in: at most three items, and only ones that would change what oiler does next. The report's Decided table is SDD's "Rulings I made" list, so don't repeat it. Merging and pushing are stops.
 
-4. Delete the workspace (`rm -rf <workspace>`) only after `finishing-a-development-branch` has completed.
+4. Only after `finishing-a-development-branch` has completed, delete everything in the workspace except `progress.md`, which the report's "see <ledger>" pointers still name: `find <workspace> -mindepth 1 ! -name progress.md -delete`.
