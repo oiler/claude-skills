@@ -1,6 +1,6 @@
-# SDD ledger — plan: /Users/jrf1039/files/projects/001-claude-skills-creator/docs/superpowers/plans/2026-09-04-orko-v2-build.md
-Spec: /Users/jrf1039/files/projects/001-claude-skills-creator/docs/superpowers/specs/2026-09-04-orko-v2-build-design.md
-Repo: /Users/jrf1039/files/repo/claude-skills, branch feat/orko-v2 off master (68d9ba9) + cherry-pick of c19f28c (v2 design in upgrades.md, from branch claude/ai-workflow-lead-subagents-isz2co)
+# SDD ledger — plan: ~/files/projects/001-claude-skills-creator/docs/superpowers/plans/2026-09-04-orko-v2-build.md
+Spec: ~/files/projects/001-claude-skills-creator/docs/superpowers/specs/2026-09-04-orko-v2-build-design.md
+Repo: ~/files/repo/claude-skills, branch feat/orko-v2 off master (68d9ba9) + cherry-pick of c19f28c (v2 design in upgrades.md, from branch claude/ai-workflow-lead-subagents-isz2co)
 
 ## Pre-flight conflict scan
 
@@ -100,4 +100,4 @@ Task 11: complete (commits c8d2903..63d6119 + workshop 70ae15a, review clean)
 Final review (fable): 1 Critical (save_issue_label payload carries `team`, not a schema param — controller confirmed against the live schema), 4 Important (label bootstrap per-run not per-team; SKILL.md analysis post project omits --boundaries; team-key resolution unverified until smoke; upgrades.md claims unshipped competing-implementation judge), 9 minor. Verdict: mergeable after fixes. Report: final-review-report.md.
 Ruling: one fix wave covers C1, I1, I2, I4, triage 62, M3, M8; M2 (preamble consolidation), M4, M5, M6 go to the v1.0.1 backlog — why: they reshape nothing a conductor runs — cost if wrong: none.
 Ruling: em-dashes in skill prose stay (M1) — why: oiler's rule governs replies to oiler; the library already uses them; a one-off strip creates inconsistency — cost if wrong: a later library-wide pass.
-Ruling: I3 (team key "JRF" resolving in addTeams/team) is the smoke engagement's first checkpoint — why: cannot be verified without a live Linear call — cost if wrong: init --team takes the team name instead and TEAM_RE relaxes.
+Ruling: I3 (team key "TEAM" resolving in addTeams/team) is the smoke engagement's first checkpoint — why: cannot be verified without a live Linear call — cost if wrong: init --team takes the team name instead and TEAM_RE relaxes.
