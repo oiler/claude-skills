@@ -1,6 +1,6 @@
 # orko-sdd — Changelog
 
-## v0.1.0 — 2026-09-22
+## v0.1.0 — 2026-09-23
 
 First release: oiler's standing SDD orchestrator prompt, as a slash-only overlay on `superpowers:subagent-driven-development` 6.4.1.
 
