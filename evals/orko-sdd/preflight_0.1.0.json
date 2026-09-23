@@ -1,0 +1,93 @@
+{
+  "skill": "orko-sdd",
+  "repo": "/Users/jrf1039/files/repo/claude-skills",
+  "profile": "claude-code",
+  "change_class": "new",
+  "candidate_version": "0.1.0",
+  "skill_content_hash": "4a6164af9bd3709d2a4eacbfc11784adaf7a0c4f6d965d1b4a172f310c36e3a9",
+  "repo_commit": "aab2cb844d31f69a3e930a55d09e8f57e00e556c",
+  "preflight_version": "1.1.0",
+  "timestamp": "2026-09-23T21:48:00+00:00",
+  "argv": [
+    "orko-sdd",
+    "--change-class",
+    "new",
+    "--candidate-version",
+    "0.1.0",
+    "--out",
+    "/Users/jrf1039/files/repo/claude-skills/evals/orko-sdd/preflight_0.1.0.json"
+  ],
+  "checks": [
+    {
+      "id": "structure",
+      "status": "pass",
+      "detail": "SKILL.md present, name matches, kebab-case"
+    },
+    {
+      "id": "profile",
+      "status": "pass",
+      "detail": "combined description budget 331/1,536"
+    },
+    {
+      "id": "frontmatter-parse",
+      "status": "pass",
+      "detail": "claude plugin validate passed"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "invocation: live-engagement report smoke-2026-09-23c.md"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "clean-room: clean-room report smoke-2026-09-23c.md"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report smoke-2026-09-23c.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report smoke-2026-09-23c.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "orko-sdd/ is committed"
+    },
+    {
+      "id": "script-tests",
+      "status": "pass",
+      "detail": "scripts suite passed"
+    },
+    {
+      "id": "script-surface",
+      "status": "advisory",
+      "detail": "review by hand: conftest.py:3 import subprocess; conftest.py:12 proc = subprocess.run(; conftest.py:20 path.write_text(json.dumps({\"version\": 2, \"plugins\": {; conftest.py:30 path.write_text(\"# SDD ledger \u2014 plan: docs/plan.md\\n\", encoding=\"utf-8; conftest.py:50 (root / \"docs\" / \"plan.md\").write_text(\"### Task 1: Alpha\\n\", encoding; orko_sdd.py:15 import subprocess; orko_sdd.py:72 with resolved.open(encoding=\"utf-8\", errors=\"replace\") as fh:; orko_sdd.py:81 with path.open(\"a\", encoding=\"utf-8\") as fh: (+23 more)"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "changelog entry for v0.1.0 present"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "tag orko-sdd-v0.1.0 is free"
+    },
+    {
+      "id": "drift",
+      "status": "advisory",
+      "detail": "upstream unchanged since 690f15c"
+    },
+    {
+      "id": "library-status",
+      "status": "advisory",
+      "detail": "docs/library-status.md drifted \u2014 regenerate (PYTHONPATH=\"$HOME/files/projects/001-claude-skills-creator/tools/skill-evals\" python3 -m scripts.library_status)"
+    }
+  ],
+  "overall": "pass"
+}
