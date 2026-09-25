@@ -1,0 +1,34 @@
+[
+  {
+    "ledger": "orko-sdd/scripts/fixtures/ledger-orko-v2-build.md",
+    "sha256": "1472ea7626ee256ad3861e42b322f7c5e432012548a61ceee38be8736aaacd59",
+    "outputs": {
+      "old": "1d62cf68c4e70c25eb634aaad44ed684924fd055b7960dbe1a62c7fb2fc9c890",
+      "new": "494f3ff0897ac66fe9833dde7d8ad088585b5af4c3448ac1c69108a26df410b2"
+    }
+  },
+  {
+    "ledger": "orko-sdd/scripts/fixtures/ledger-orko-sdd-run1.md",
+    "sha256": "a02bcab354873902542311a0731587c9777e1610ac2eb7ce60180e39bee55edf",
+    "outputs": {
+      "old": "487302b707da8756ef50d9e7f32b34ffd6f53c4a456bfafab3fdf4b6e3e92271",
+      "new": "eba75e061b40191983dbd5e7de6fe3a0b0eeb11dd9a067da7baa15c7c8f87ab2"
+    }
+  },
+  {
+    "ledger": "orko-sdd/scripts/fixtures/ledger-orko-sdd-run2.md",
+    "sha256": "8799f7d70ac481e559aeaea302099f605bac6d2121862be2835a64302ec6ad98",
+    "outputs": {
+      "old": "a411f580033fdf3df3cae6b018befa58ae960af77f77584ed14f13172ee3c3aa",
+      "new": "7db3d8b22c33f807a7bb5ee36b1aa3182e5667a9b2a7a3c2ceeb7af01d2901db"
+    }
+  },
+  {
+    "ledger": "orko-sdd/scripts/fixtures/ledger-orko-sdd-run3.md",
+    "sha256": "92c2f91dccd28e3207513d61e13b6c139ddbd4c8e49f6ef86d5b1c8808fdef7a",
+    "outputs": {
+      "old": "f9f9dd5b856731eb6ecc86e0042079eacb4cec60afb55def294904bda65d162a",
+      "new": "c4b995dbce3695f4906e49b8b32ce59120900472be52b18b6856114c4522e237"
+    }
+  }
+]

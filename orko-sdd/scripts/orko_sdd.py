@@ -295,16 +295,42 @@ LEDGER_PLAN_RE = re.compile(r"^# SDD ledger — plan: (.+)$")
 PLAN_TASK_RE = re.compile(r"^#{2,4} Task (\d+):\s*(.*)$")
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 TASK_LINE_RE = re.compile(r"^Task (\d+): ")
-RULING_RE = re.compile(r"\bRuling(?: \(.*?\))?:\s*(.*)$")
+RULING_WORD_RE = re.compile(r"\bRuling\b")
+# "Ruling" near a colon on a line no ruling was read from: probably a ruling in a shape the parser missed.
+RULING_LIKE_RE = re.compile(r"\bRuling\b[^:]{0,60}:")
+BOLD_RULING_RE = re.compile(r"\*\*(Ruling\b[^*]*?)\*\*")
+SUPERSEDES_WORD_RE = re.compile(r"\bsupersedes\b", re.I)
+SUPERSEDES_RE = re.compile(r'\bsupersedes\s+["“](.+?)["”]', re.I | re.S)
+# A plain ruling that reverses another should carry a supersedes note instead.
+REVERSAL_RE = re.compile(r"\b(?:supersed|revers|replac)\w*\b.{0,80}?\brulings?\b", re.I)
 COMPLETE_RE = re.compile(
     r"^Task (\d+(?:,\d+)*|final): (?:\w+ )?complete \(commits ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})(.*)$")
 SKIPPED_RE = re.compile(r"^Task (\d+): skipped — (.+)$")
-PARKED_RE = re.compile(r"^Task (\d+|final): parked — (.+)$")
-MINOR_RE = re.compile(r"^Task (\d+): minor \(deferred\)")
+SKIP_DECISION_RE = re.compile(r"^Task (\d+): skip decision — (.+)$")
+DEPENDS_RE = re.compile(r"^depends on Tasks? (\d+)\b", re.I)
+PARKED_RE = re.compile(r"^(?:Task )?(\d+(?:,\d+)*|final|Final): parked\s*[—:-]\s*(.+)$")
+MINOR_RE = re.compile(r"^Task (\d+(?:,\d+)*|final): minor \(deferred\)(?::|\s+[—-](?=\s|$))?\s*(.*)$")
 VERIFY_RE = re.compile(r"^Verify: (.+?) — exit (-?\d+) — (.*)$")
+FOLLOW_UP_RE = re.compile(r"^Follow-up(?:\s*\([^)]*\))?\s*:\s*")
+# A line a wrapped ruling can't continue into: it starts an entry of its own, such as
+# "Task 3,4:", "Final review (fable):", "orko-sdd:", a heading, or a table row.
+ENTRY_RE = re.compile(r"^(?:#|\||Ruling\b|orko-sdd:|[A-Z][\w,-]*(?: [\w#,-]+){0,5}(?: \([^)]*\))?:)")
+LIST_ITEM_RE = re.compile(r"^(?:[-*+] |\d+[.)] )")
 PARKED_COUNT_RE = re.compile(r"(\d+) parked")
-REPORT_LINE_CAP = 40
-RECOMMENDED_RESERVE = 3
+CELL_PIPE_RE = re.compile(r"(?<!\\)\|")
+ROLE_LABELS = {"reviewer": "rev", "re-reviewer": "re-rev", "final-reviewer": "rev", "final-fixer": "fix"}
+RULING_SHAPE = "`Ruling: <what> — <why> — cost if wrong: <cost>`"
+SUPERSEDES_SHAPE = '`Ruling (supersedes "<words>"): …`'
+SKIP_DECISION_SHAPE = "`Task <N>: skip decision — <options>`"
+
+
+@dataclass
+class Ruling:
+    body: str
+    annotation: str = ""
+    parked: str | None = None  # the parked finding, for a `Task <N>: parked` line
+    supersedes: int | None = None
+    superseded_by: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -313,37 +339,106 @@ class Ledger:
     seen: list[str] = field(default_factory=list)
     complete: dict[str, tuple[str, str, int]] = field(default_factory=dict)
     skipped: dict[str, str] = field(default_factory=dict)
+    skip_decisions: dict[str, str] = field(default_factory=dict)
     models: dict[str, list[str]] = field(default_factory=dict)
-    parked: list[tuple[str, str]] = field(default_factory=list)
-    minors: int = 0
+    unruled_parks: list[tuple[str, str]] = field(default_factory=list)
+    minors: list[tuple[str, str]] = field(default_factory=list)
     followups: list[str] = field(default_factory=list)
-    rulings: list[tuple[str, str, str]] = field(default_factory=list)
+    rulings: list[Ruling] = field(default_factory=list)
+    unjoined: list[int] = field(default_factory=list)  # rulings an unindented line may continue
+    unparsed: list[str] = field(default_factory=list)  # lines that look like rulings but didn't parse
     verifies: list[tuple[str, str, str]] = field(default_factory=list)
+
+
+def closing_paren(text: str, start: int) -> int | None:
+    """Index of the ")" that closes the "(" at `start`, skipping nested pairs and quoted text."""
+    depth, quoted = 0, False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch in '"“”':
+            quoted = ch == "“" or (ch == '"' and not quoted)
+        elif not quoted and ch == "(":
+            depth += 1
+        elif not quoted and ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return None
+
+
+def find_ruling(line: str) -> tuple[str, str, str] | None:
+    """(text before it, annotation, body) for the first `Ruling:` or `Ruling (<annotation>):` on a line."""
+    line = BOLD_RULING_RE.sub(r"\1", line)
+    for m in RULING_WORD_RE.finditer(line):
+        i, annotation = m.end(), ""
+        if line.startswith(" (", i):
+            close = closing_paren(line, i + 1)
+            if close is None:
+                # Unbalanced parentheses or a stray quote: fall back to the first "):" after the "(".
+                close = line.find("):", i + 2)
+                if close == -1:
+                    continue
+            annotation, i = line[i + 2:close].strip(), close + 1
+        if line.startswith(":", i):
+            return line[:m.start()], annotation, line[i + 1:].replace("\\|", "|").strip()
+    return None
+
+
+def find_rulings(line: str) -> list[tuple[str, str, str]]:
+    """Every cell's ruling on a table row, in order, where each ruling ends at its cell's closing pipe;
+    otherwise the line's first ruling."""
+    cells = CELL_PIPE_RE.split(line)[1:] if line.startswith("|") else [line]
+    return [found for c in cells if (found := find_ruling(c))]
+
+
+def role_label(role: str) -> str:
+    if role in ROLE_LABELS:
+        return ROLE_LABELS[role]
+    if role.startswith("implementer-"):
+        return "impl"
+    return "fix" if role.startswith("fix-") else role
 
 
 def parse_ledger(text: str) -> Ledger:
     """Read an orchestrator-written ledger. SDD's lines are freeform, so unknown lines are ignored."""
     led = Ledger()
+    wrapping = False  # the previous line was a ruling that the next line may continue
     for raw in text.splitlines():
         line = raw.strip()
+        # A bold or backticked entry still starts an entry of its own.
+        probe = BOLD_RULING_RE.sub(r"\1", line).strip("`")
+        if wrapping and line and not LIST_ITEM_RE.match(probe) and not ENTRY_RE.match(probe):
+            if raw[:1] in (" ", "\t"):
+                led.rulings[-1].body = f"{led.rulings[-1].body} {line}".strip()
+                continue
+            led.unjoined.append(len(led.rulings))
+        wrapping = False
         line = line[2:] if line.startswith("- ") else line
         if m := LEDGER_PLAN_RE.match(line):
             led.plan = m.group(1).strip()
             continue
         if dispatch := DISPATCH_RE.match(line):
-            combo = f"{dispatch.group(3)}/{dispatch.group(4)}"
+            model = f"{role_label(dispatch.group(2))} {dispatch.group(3)}/{dispatch.group(4)}"
             for task in dispatch.group(1).split(","):
-                combos = led.models.setdefault(task, [])
-                if combo not in combos:
-                    combos.append(combo)
+                models = led.models.setdefault(task, [])
+                if model not in models:
+                    models.append(model)
                 if task != "final" and task not in led.seen:
                     led.seen.append(task)
             continue
-        # SDD asks for every ruling, in order: variants count and repeats are kept.
-        # A deferred minor or a Verify line that mentions "Ruling:" is not one; a parked line's is read below.
-        if (not (MINOR_RE.match(line) or VERIFY_RE.match(line) or PARKED_RE.match(line))
-                and (m := RULING_RE.search(line)) and m.group(1).strip()):
-            led.rulings.append(split_ruling(m.group(1).strip()))
+        if m := SKIP_DECISION_RE.match(line):
+            # A decision isn't work on the task, so it doesn't mark the task seen.
+            led.skip_decisions[m.group(1)] = m.group(2)
+            continue
+        # SDD asks for every ruling, in order: variants count and repeats are kept. A ruling quoted in
+        # a deferred minor, a Verify line, or a Follow-up line is not one; a parked line's is read below.
+        if not (MINOR_RE.match(line) or VERIFY_RE.match(line) or PARKED_RE.match(line)
+                or line.startswith("Follow-up")):
+            if found_all := find_rulings(line):
+                led.rulings += [Ruling(body=found[2], annotation=found[1]) for found in found_all]
+                wrapping = True
+            elif RULING_LIKE_RE.search(BOLD_RULING_RE.sub(r"\1", line)):
+                led.unparsed.append(line)
         if (m := TASK_LINE_RE.match(line)) and m.group(1) not in led.seen:
             led.seen.append(m.group(1))
         if m := COMPLETE_RE.match(line):
@@ -355,25 +450,103 @@ def parse_ledger(text: str) -> Ledger:
         elif m := SKIPPED_RE.match(line):
             led.skipped[m.group(1)] = m.group(2)
         elif m := PARKED_RE.match(line):
-            finding = m.group(2)
-            # The Ruling column names the parked finding, which the text after "Ruling:" never does.
-            if (r := RULING_RE.search(finding)) and r.group(1).strip():
-                finding = finding[:r.start()].rstrip().removesuffix("—").rstrip()
-                led.rulings.append((f"parked: {finding}",
-                                    *detail_and_cost([p.strip() for p in r.group(1).strip().split(" — ")])))
-            led.parked.append((m.group(1), finding))
-        elif MINOR_RE.match(line):
-            led.minors += 1
+            task = m.group(1).lower()
+            if found := find_ruling(m.group(2)):
+                finding = found[0].rstrip().removesuffix("—").rstrip()
+                led.rulings.append(Ruling(body=found[2], annotation=found[1], parked=finding))
+                wrapping = True
+            else:
+                led.unruled_parks.append((task, m.group(2)))
+        elif m := MINOR_RE.match(line):
+            led.minors.append((m.group(1), m.group(2).strip()))
         elif line.startswith("Follow-up"):
-            led.followups.append(line)
+            prefix = FOLLOW_UP_RE.match(line)
+            led.followups.append(line[prefix.end():] if prefix else line)
         elif m := VERIFY_RE.match(line):
             led.verifies.append((m.group(1), m.group(2), m.group(3)))
     return led
 
 
-def split_ruling(text: str) -> tuple[str, str, str]:
-    parts = [p.strip() for p in text.split(" — ")]
+def ruling_row(ruling: Ruling) -> tuple[str, str, str]:
+    """(ruling, detail, cost); an empty part means the ruling lacks that part."""
+    parts = [p.strip() for p in ruling.body.split(" — ")]
+    if ruling.parked is not None:
+        return (f"parked: {ruling.parked}", *detail_and_cost(parts if ruling.body else []))
     return (parts[0], *detail_and_cost(parts[1:]))
+
+
+def link_supersedes(rulings: list[Ruling]) -> list[int]:
+    """Point each `Ruling (supersedes "<words>")` at the latest earlier ruling containing those words.
+
+    The words match case-sensitively against the earlier ruling's parked finding and body, with
+    whitespace collapsed. Returns the 1-based numbers of rulings whose supersedes note matched nothing.
+    """
+    unmatched = []
+    for i, ruling in enumerate(rulings):
+        if not SUPERSEDES_WORD_RE.search(ruling.annotation):
+            continue
+        quoted = SUPERSEDES_RE.search(ruling.annotation)
+        words = " ".join(quoted.group(1).split()) if quoted else ""
+        target = next((j for j in range(i - 1, -1, -1)
+                       if words and words in " ".join(f"{rulings[j].parked or ''} {rulings[j].body}".split())),
+                      None)
+        if target is None:
+            unmatched.append(i + 1)
+        else:
+            ruling.supersedes = target + 1
+            rulings[target].superseded_by.append(i + 1)
+    return unmatched
+
+
+def skip_root(task: str, skipped: dict[str, str]) -> str:
+    """The skipped task a chain of `depends on Task <N>` skips leads back to; in a cycle, its lowest task."""
+    chain = [task]
+    while (m := DEPENDS_RE.match(skipped[chain[-1]])) and m.group(1) in skipped:
+        if m.group(1) in chain:
+            return min(chain[chain.index(m.group(1)):], key=int)
+        chain.append(m.group(1))
+    return chain[-1]
+
+
+def skip_followups(skipped: dict[str, str], decisions: dict[str, str]) -> list[str]:
+    """One line per skipped chain: the root's reason, its dependents, and the decision oiler must make."""
+    dependents: dict[str, list[str]] = {}
+    chain_decisions: dict[str, list[str]] = {}
+    for task in skipped:
+        root = skip_root(task, skipped)
+        if root != task:
+            dependents.setdefault(root, []).append(task)
+        if task in decisions:
+            chain_decisions.setdefault(root, []).append(decisions[task])
+    lines = []
+    for task, reason in skipped.items():
+        if skip_root(task, skipped) != task:
+            continue
+        deps = dependents.get(task, [])
+        line = f"- Task {task} skipped: {reason.rstrip('.')}"
+        if len(deps) == 1:
+            line += f" (Task {deps[0]} depends on it)"
+        elif deps:
+            line += f" (Tasks {', '.join(deps)} depend on it)"
+        for decision in chain_decisions.get(task, []):
+            line += f". Decide: {decision}"
+        lines.append(line)
+    # A decision for a task that wasn't skipped still reaches oiler.
+    lines += [f"- Task {task} decision: {decision}" for task, decision in decisions.items() if task not in skipped]
+    return lines
+
+
+def minor_followups(minors: list[tuple[str, str]]) -> list[str]:
+    """Deferred minors inline, one line per task: the workspace holding the ledger is deleted at Finish."""
+    grouped: dict[str, list[str]] = {}
+    for task, text in minors:
+        grouped.setdefault(task, []).append(text or "(no text)")
+    return [f"- Task {task} deferred minor{'s' if len(texts) > 1 else ''}: {' · '.join(texts)}"
+            for task, texts in grouped.items()]
+
+
+def refs(numbers: list[int]) -> str:
+    return ", ".join(f"#{n}" for n in numbers)
 
 
 def detail_and_cost(rest: list[str]) -> tuple[str, str]:
@@ -446,7 +619,8 @@ def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> s
     for n in order:
         commits = "—"
         if n in led.skipped:
-            status = f"skipped — {led.skipped[n]}"
+            # The reason's detail is in Follow-up; Done names the kind of skip only.
+            status = f"skipped — {led.skipped[n].split(' — ', 1)[0]}"
         elif n in led.complete:
             a, b, parked = led.complete[n]
             status = f"complete ({parked} parked)" if parked else "complete"
@@ -456,7 +630,7 @@ def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> s
         else:
             status = "not started"
         label = f"{n}. {titles[n]}" if titles.get(n) else n
-        models = ", ".join(led.models.get(n, [])) or "—"
+        models = " · ".join(led.models.get(n, [])) or "—"
         done.append(f"| {cell(label)} | {cell(status)} | {commits} | {models} |")
     if "final" in led.models or "final" in led.complete:
         status, commits = "dispatched", "—"
@@ -464,38 +638,57 @@ def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> s
             a, b, parked = led.complete["final"]
             status = f"complete ({parked} parked)" if parked else "complete"
             commits = f"{a}..{b} ({commit_count(repo, a, b)})"
-        models = ", ".join(led.models.get("final", [])) or "—"
+        models = " · ".join(led.models.get("final", [])) or "—"
         done.append(f"| final review | {status} | {commits} | {models} |")
 
-    decided = [f"| {' | '.join(cell(p) or '—' for p in r)} |" for r in led.rulings]
-    followups = list(plan_problems) + [f"- Task {n} skipped: {reason}" for n, reason in led.skipped.items()]
-    if led.minors:
-        followups.append(f"- {led.minors} deferred minor finding(s): see {ledger_path}")
-    followups += [f"- Task {n} parked: {text}" for n, text in led.parked]
-    followups += [f"- {line}" for line in led.followups]
+    unmatched = link_supersedes(led.rulings)
+    decided, malformed, reversals = [], [], []
+    for n, ruling in enumerate(led.rulings, 1):
+        what, detail, cost = ruling_row(ruling)
+        if not (what and detail and cost) or ruling.parked == "":
+            malformed.append(n)
+        if not SUPERSEDES_WORD_RE.search(ruling.annotation) and REVERSAL_RE.search(ruling.body):
+            reversals.append(n)
+        what = what or "(no ruling text)"
+        if ruling.supersedes:
+            what += f" (supersedes #{ruling.supersedes})"
+        if ruling.superseded_by:
+            what += f" (superseded by {refs(ruling.superseded_by)})"
+        decided.append(f"| {n} | {cell(what)} | {cell(detail) or '—'} | {cell(cost) or '—'} |")
+
+    # Follow-up is never truncated: once Finish deletes the workspace, the report is the only copy.
+    followups = list(plan_problems)
+    if malformed:
+        followups.append(f"- Decided {refs(malformed)}: not in the {RULING_SHAPE} shape")
+    if unmatched:
+        followups.append(f"- Decided {refs(unmatched)}: supersedes no earlier ruling; "
+                         f"quote its words, as in {SUPERSEDES_SHAPE}")
+    if reversals:
+        followups.append(f"- Decided {refs(reversals)}: reads as reversing an earlier ruling; "
+                         f"if it does, mark it with {SUPERSEDES_SHAPE}")
+    if led.unjoined:
+        followups.append(f"- Decided {refs(led.unjoined)}: the next ledger line may continue it; "
+                         "indent that line if it does, or put a blank line between them if it doesn't")
+    followups += [f"- Not read as a ruling: {line}" for line in led.unparsed]
+    followups += skip_followups(led.skipped, led.skip_decisions)
+    followups += [f"- {text}" for text in led.followups]
+    followups += [f"- Task {n} parked without a ruling: {text}" for n, text in led.unruled_parks]
+    if led.minors and ("final" in led.models or "final" in led.complete):
+        followups.append("- Deferred minors as ledgered; the final fix wave may have resolved"
+                         " the ones the final review marked must-fix:")
+    followups += minor_followups(led.minors)
     verified = [f"| {cell(c)} | {e} | {cell(t)} |" for c, e, t in led.verifies]
 
-    done_block = ["## Done", "| Task | Status | Commits | Models |", "|---|---|---|---|", *done, ""]
-    verified_block = ["## Verified", "| Command | Exit | Last line |", "|---|---|---|",
-                      *(verified or ["| none run | — | — |"]), ""]
-    # Recommended, the one section the orchestrator writes, comes last so its edit can't swallow script text.
-    recommended = ["## Recommended",
-                   "<!-- orchestrator: at most 3 items, only ones that change what oiler does next -->"]
-    followups = followups or ["- none"]
-    # Decided is exempt from the cap (SDD: every ruling reaches oiler); Follow-up gives way.
-    budget = REPORT_LINE_CAP - (len(done_block) + 2 + len(recommended) + RECOMMENDED_RESERVE
-                                + len(verified_block))
-    if len(followups) > max(budget, 1):
-        keep = max(budget - 1, 0)
-        followups = followups[:keep] + [f"- +{len(followups) - keep} more in {ledger_path}"]
-
     return "\n".join([
-        *done_block,
-        "## Decided", "| Ruling | Detail | Cost if wrong |", "|---|---|---|",
-        *(decided or ["| none | — | — |"]), "",
-        "## Follow-up", *followups, "",
-        *verified_block,
-        *recommended,
+        "## Done", "| Task | Status | Commits | Models |", "|---|---|---|---|", *done, "",
+        "## Decided", "| # | Ruling | Detail | Cost if wrong |", "|---|---|---|---|",
+        *(decided or ["| — | none | — | — |"]), "",
+        "## Follow-up", *(followups or ["- none"]), "",
+        "## Verified", "| Command | Exit | Last line |", "|---|---|---|",
+        *(verified or ["| none run | — | — |"]), "",
+        # Recommended, the one section the orchestrator writes, comes last so its edit can't swallow script text.
+        "## Recommended",
+        "<!-- orchestrator: at most 3 items, only ones that change what oiler does next -->",
     ])
 
 
