@@ -473,7 +473,7 @@ class TestReportOnARun:
     def test_rulings_inside_minor_and_verify_lines_are_not_decisions(self, ledger, capsys):
         write_ledger(ledger, "Task 1: minor (deferred): naming nit. Ruling: leave it — why: cosmetic",
                      "Verify: grep -c Ruling: progress.md — exit 0 — Ruling: 3")
-        assert "| none | — | — |" in section(run_report(ledger, capsys), "Decided", "Follow-up")
+        assert "| — | none | — | — |" in section(run_report(ledger, capsys), "Decided", "Follow-up")
 
     def test_follow_up_is_never_truncated(self, ledger, capsys):
         write_ledger(ledger, *[f"Follow-up: item {i}" for i in range(60)])
@@ -547,7 +547,8 @@ class TestRulings:
     def test_a_plain_ruling_that_reverses_another_is_flagged(self, ledger, capsys):
         write_ledger(ledger, "Ruling: ship no entry point — b — c",
                      "Ruling: the final review reverses the Task 2 entry-point ruling — b — c")
-        assert ("- Decided #2: reads as reversing an earlier ruling"
+        assert ("- Decided #2: reads as reversing an earlier ruling; if it does, mark it with"
+                ' `Ruling (supersedes "<words>"): …`'
                 in section(run_report(ledger, capsys), "Follow-up", "Verified"))
 
     def test_an_unindented_line_after_a_ruling_is_flagged(self, ledger, capsys):
@@ -626,6 +627,36 @@ class TestRulings:
         assert "| 2 | use Y | b | c |" in out
         assert "- Decided #2: supersedes no earlier ruling" in section(out, "Follow-up", "Verified")
 
+    def test_an_indented_bold_ruling_after_a_ruling_stays_its_own_row(self, ledger, capsys):
+        write_ledger(ledger, "**Ruling:** keep B — b — cost if wrong: c",
+                     "  **Ruling:** keep C — b — cost if wrong: c")
+        out = run_report(ledger, capsys)
+        assert "| 1 | keep B | b | c |" in out
+        assert "| 2 | keep C | b | c |" in out
+
+    def test_an_unindented_bold_ruling_after_a_ruling_is_not_flagged_as_a_continuation(self, ledger, capsys):
+        write_ledger(ledger, "**Ruling:** keep A — b — cost if wrong: c",
+                     "**Ruling:** keep B — b — cost if wrong: c")
+        assert "may continue it" not in run_report(ledger, capsys)
+
+    def test_an_indented_backticked_entry_after_a_ruling_is_not_joined_to_it(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: keep A — b — c", "  `Task 2: complete (commits aaaaaaa..bbbbbbb)`")
+        assert "| 1 | keep A | b | c |" in run_report(ledger, capsys)
+
+    def test_a_parked_line_with_no_finding_is_flagged(self, ledger, capsys):
+        write_ledger(ledger, "Task 6: parked — Ruling: x — cost if wrong: z")
+        assert "- Decided #1: not in the" in section(run_report(ledger, capsys), "Follow-up", "Verified")
+
+    def test_every_cell_ruling_on_a_table_row_is_a_row(self, ledger, capsys):
+        write_ledger(ledger, "| T3 | Ruling: keep A — b — c | Ruling: keep B — d — e |")
+        out = run_report(ledger, capsys)
+        assert "| 1 | keep A | b | c |" in out
+        assert "| 2 | keep B | d | e |" in out
+
+    def test_supersedes_words_match_with_whitespace_collapsed(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use   X — b — c", 'Ruling (supersedes "use X"): use Y — b — c')
+        assert "| 2 | use Y (supersedes #1) | b | c |" in run_report(ledger, capsys)
+
 
 class TestFollowUp:
     def test_dependent_skips_fold_into_their_root(self, ledger, capsys):
@@ -701,6 +732,45 @@ class TestFollowUp:
         follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
         assert "- Task 1 deferred minors: a · b" in follow_up
         assert "- Task final deferred minor: c" in follow_up
+
+    def test_a_dashed_deferred_minor_drops_its_dash(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: minor (deferred) — text")
+        assert "- Task 1 deferred minor: text" in run_report(ledger, capsys)
+
+    def test_a_deferred_minor_without_a_colon_keeps_its_text(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: minor (deferred) nit")
+        assert "- Task 1 deferred minor: nit" in run_report(ledger, capsys)
+
+    def test_a_capitalized_depends_on_folds_into_its_chain(self, ledger, capsys):
+        write_ledger(ledger, "Task 3: skipped — evergreen conflict — x", "Task 4: skipped — Depends on Task 3")
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
+        assert "- Task 3 skipped: evergreen conflict — x (Task 4 depends on it)" in follow_up
+        assert "Task 4 skipped" not in follow_up
+
+    def test_depends_on_tasks_plural_folds_into_its_chain(self, ledger, capsys):
+        write_ledger(ledger, "Task 3: skipped — evergreen conflict — x", "Task 4: skipped — depends on Tasks 3")
+        assert "- Task 3 skipped: evergreen conflict — x (Task 4 depends on it)" in run_report(ledger, capsys)
+
+    def test_a_skip_reason_drops_its_trailing_period(self, ledger, capsys):
+        write_ledger(ledger, "Task 3: skipped — evergreen conflict — x.")
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified").splitlines()
+        assert "- Task 3 skipped: evergreen conflict — x" in follow_up
+
+    def test_a_noted_follow_up_line_drops_its_prefix(self, ledger, capsys):
+        write_ledger(ledger, "Follow-up (final review): decide X")
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
+        assert "- decide X" in follow_up
+        assert "final review" not in follow_up
+
+    def test_parked_lines_accept_colon_and_hyphen_separators(self, ledger, capsys):
+        write_ledger(ledger, "Task 2: parked: nit a", "Task 3: parked - nit b")
+        out = run_report(ledger, capsys)
+        assert "- Task 2 parked without a ruling: nit a" in out
+        assert "- Task 3 parked without a ruling: nit b" in out
+
+    def test_a_parked_line_on_a_batch_stays_under_the_batch(self, ledger, capsys):
+        write_ledger(ledger, "Task 3,4: parked — shared nit")
+        assert "- Task 3,4 parked without a ruling: shared nit" in run_report(ledger, capsys)
 
 
 

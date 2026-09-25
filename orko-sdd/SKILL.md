@@ -107,7 +107,7 @@ Add each of these sentences verbatim where it applies:
 
 oiler's standing preference, which is the consent SDD and `superpowers:using-git-worktrees` ask for: create an isolated worktree without asking, unless the session already runs in a feature worktree, in which case use it. Don't create it with the built-in `EnterWorktree(name=…)`: it picks its own branch name and directory under `.claude/worktrees/`, and with the default `worktree.baseRef: fresh` it branches from `origin/<default>`, which a repository with no remote doesn't have. Instead:
 
-1. Run `git worktree add <repo-root>/.worktrees/<plan-slug> -b feat/<plan-slug> <base-branch>`, with preflight's `base-branch`.
+1. Run `git worktree add <repo-root>/.worktrees/<plan-slug> -b feat/<plan-slug> <base-branch>`, with preflight's `base-branch` (or `<repo-root>`'s, see below).
 2. If `.worktrees/` isn't ignored, add it to `.git/info/exclude`.
 3. Work from that directory: enter it with `EnterWorktree(path=…)`, loading the tool with ToolSearch first if it's deferred. Use absolute paths instead when the tool is unavailable or you decline it, or when the session is already in a worktree, where `EnterWorktree(path=…)` accepts only targets under `.claude/worktrees/`.
 
@@ -156,7 +156,7 @@ SDD deletes its workspace as soon as the final review is clean. Hold that deleti
    python3 ${CLAUDE_SKILL_DIR}/scripts/orko_sdd.py report --ledger <ledger> --repo <worktree>
    ```
 
-   If Follow-up flags Decided rows, fix those ledger lines and run `report` once more. Paste that output, with any flags that remain.
+   If Follow-up flags Decided rows or lists lines not read as rulings, fix those ledger lines and run `report` once more. Paste that output, with any flags that remain.
 
 3. Invoke `superpowers:finishing-a-development-branch`. In the message that presents its options, put the report first; a one-line announcement before it is fine. Paste the script's output unchanged, from `## Done` through the Verified table, then write the Recommended items under `## Recommended` in place of the HTML comment: at most three, and only ones that would change what oiler does next. The report's Decided table is SDD's "Rulings I made" list, so don't repeat it. Merging and pushing are stops.
 

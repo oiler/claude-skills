@@ -307,9 +307,9 @@ COMPLETE_RE = re.compile(
     r"^Task (\d+(?:,\d+)*|final): (?:\w+ )?complete \(commits ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})(.*)$")
 SKIPPED_RE = re.compile(r"^Task (\d+): skipped — (.+)$")
 SKIP_DECISION_RE = re.compile(r"^Task (\d+): skip decision — (.+)$")
-DEPENDS_RE = re.compile(r"^depends on Tasks? (\d+)\b")
+DEPENDS_RE = re.compile(r"^depends on Tasks? (\d+)\b", re.I)
 PARKED_RE = re.compile(r"^(?:Task )?(\d+(?:,\d+)*|final|Final): parked\s*[—:-]\s*(.+)$")
-MINOR_RE = re.compile(r"^Task (\d+(?:,\d+)*|final): minor \(deferred\):?\s*(.*)$")
+MINOR_RE = re.compile(r"^Task (\d+(?:,\d+)*|final): minor \(deferred\)(?::|\s+[—-](?=\s|$))?\s*(.*)$")
 VERIFY_RE = re.compile(r"^Verify: (.+?) — exit (-?\d+) — (.*)$")
 FOLLOW_UP_RE = re.compile(r"^Follow-up(?:\s*\([^)]*\))?\s*:\s*")
 # A line a wrapped ruling can't continue into: it starts an entry of its own, such as
@@ -317,6 +317,7 @@ FOLLOW_UP_RE = re.compile(r"^Follow-up(?:\s*\([^)]*\))?\s*:\s*")
 ENTRY_RE = re.compile(r"^(?:#|\||Ruling\b|orko-sdd:|[A-Z][\w,-]*(?: [\w#,-]+){0,5}(?: \([^)]*\))?:)")
 LIST_ITEM_RE = re.compile(r"^(?:[-*+] |\d+[.)] )")
 PARKED_COUNT_RE = re.compile(r"(\d+) parked")
+CELL_PIPE_RE = re.compile(r"(?<!\\)\|")
 ROLE_LABELS = {"reviewer": "rev", "re-reviewer": "re-rev", "final-reviewer": "rev", "final-fixer": "fix"}
 RULING_SHAPE = "`Ruling: <what> — <why> — cost if wrong: <cost>`"
 SUPERSEDES_SHAPE = '`Ruling (supersedes "<words>"): …`'
@@ -379,12 +380,15 @@ def find_ruling(line: str) -> tuple[str, str, str] | None:
                     continue
             annotation, i = line[i + 2:close].strip(), close + 1
         if line.startswith(":", i):
-            body = line[i + 1:]
-            if line.startswith("|"):
-                # A ruling written in a table cell ends at the cell's closing pipe.
-                body = re.split(r"(?<!\\)\|", body, maxsplit=1)[0]
-            return line[:m.start()], annotation, body.replace("\\|", "|").strip()
+            return line[:m.start()], annotation, line[i + 1:].replace("\\|", "|").strip()
     return None
+
+
+def find_rulings(line: str) -> list[tuple[str, str, str]]:
+    """Every cell's ruling on a table row, in order, where each ruling ends at its cell's closing pipe;
+    otherwise the line's first ruling."""
+    cells = CELL_PIPE_RE.split(line)[1:] if line.startswith("|") else [line]
+    return [found for c in cells if (found := find_ruling(c))]
 
 
 def role_label(role: str) -> str:
@@ -401,7 +405,9 @@ def parse_ledger(text: str) -> Ledger:
     wrapping = False  # the previous line was a ruling that the next line may continue
     for raw in text.splitlines():
         line = raw.strip()
-        if wrapping and line and not LIST_ITEM_RE.match(line) and not ENTRY_RE.match(line):
+        # A bold or backticked entry still starts an entry of its own.
+        probe = BOLD_RULING_RE.sub(r"\1", line).strip("`")
+        if wrapping and line and not LIST_ITEM_RE.match(probe) and not ENTRY_RE.match(probe):
             if raw[:1] in (" ", "\t"):
                 led.rulings[-1].body = f"{led.rulings[-1].body} {line}".strip()
                 continue
@@ -428,8 +434,8 @@ def parse_ledger(text: str) -> Ledger:
         # a deferred minor, a Verify line, or a Follow-up line is not one; a parked line's is read below.
         if not (MINOR_RE.match(line) or VERIFY_RE.match(line) or PARKED_RE.match(line)
                 or line.startswith("Follow-up")):
-            if found := find_ruling(line):
-                led.rulings.append(Ruling(body=found[2], annotation=found[1]))
+            if found_all := find_rulings(line):
+                led.rulings += [Ruling(body=found[2], annotation=found[1]) for found in found_all]
                 wrapping = True
             elif RULING_LIKE_RE.search(BOLD_RULING_RE.sub(r"\1", line)):
                 led.unparsed.append(line)
@@ -639,7 +645,7 @@ def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> s
     decided, malformed, reversals = [], [], []
     for n, ruling in enumerate(led.rulings, 1):
         what, detail, cost = ruling_row(ruling)
-        if not (what and detail and cost):
+        if not (what and detail and cost) or ruling.parked == "":
             malformed.append(n)
         if not SUPERSEDES_WORD_RE.search(ruling.annotation) and REVERSAL_RE.search(ruling.body):
             reversals.append(n)
@@ -659,7 +665,7 @@ def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> s
                          f"quote its words, as in {SUPERSEDES_SHAPE}")
     if reversals:
         followups.append(f"- Decided {refs(reversals)}: reads as reversing an earlier ruling; "
-                         f"mark it with {SUPERSEDES_SHAPE}")
+                         f"if it does, mark it with {SUPERSEDES_SHAPE}")
     if led.unjoined:
         followups.append(f"- Decided {refs(led.unjoined)}: the next ledger line may continue it; "
                          "indent that line if it does, or put a blank line between them if it doesn't")
