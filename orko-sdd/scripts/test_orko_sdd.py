@@ -747,3 +747,8 @@ class TestSkillMd:
         grants = re.findall(r"Bash\(([^)]*)\)", frontmatter.split("allowed-tools:", 1)[1])
         assert grants == [f"python3 ${{CLAUDE_SKILL_DIR}}/scripts/orko_sdd.py {sub} *"
                           for sub in ("preflight", "log", "verify", "report")]
+
+    def test_ruling_formats_match_the_script(self, text):
+        assert orko_sdd.RULING_SHAPE in text
+        assert orko_sdd.SUPERSEDES_SHAPE in text
+        assert orko_sdd.SKIP_DECISION_SHAPE in text
