@@ -318,7 +318,7 @@ class TestReportOnARealLedger:
 
     def test_every_ruling_is_a_decided_row(self, out):
         rows = [line for line in section(out, "Decided", "Follow-up").splitlines()
-                if line.startswith("| ") and not line.startswith("| Ruling | Detail |")]
+                if line.startswith("| ") and not line.startswith("| # | Ruling |")]
         assert len(rows) == 18
 
     def test_a_ruling_splits_into_ruling_detail_and_cost(self, out):
@@ -334,10 +334,11 @@ class TestReportOnARealLedger:
         assert ("| parked: em-dashes across orko/references and SKILL.md (34 in the two new files)"
                 " | branch-wide house style question, decided at final review, not per task. | — |") in out
 
-    def test_parked_findings_and_deferred_minors_reach_follow_up(self, out):
+    def test_deferred_minors_are_listed_inline_and_parked_rulings_stay_in_decided(self, out):
         follow_up = section(out, "Follow-up", "Verified")
-        assert "- 19 deferred minor finding(s): see " in follow_up
-        assert "- Task 9 parked: em-dashes across orko/references and SKILL.md" in follow_up
+        assert ("- Task 1 deferred minors: test_orko.py continuation-line indentation over-indented"
+                " after sed (E127, ~40 sites) — reflow once before branch review · ") in follow_up
+        assert "parked" not in follow_up
 
 
 class TestReportOnARun:
@@ -357,32 +358,33 @@ class TestReportOnARun:
             "Verify: uv run pytest -q — exit 0 — 12 passed | 0 failed",
         ]) + "\n", encoding="utf-8")
         out = run_report(ledger, capsys, repo=repo)
-        assert f"| 1. Alpha | complete | {a[:7]}..{b[:7]} (1) | sonnet/high, opus/low |" in out
-        assert "| 2. Bravo | in progress | — | opus/medium |" in out
-        assert ("| 3. Charlie | skipped — evergreen conflict — CLAUDE.md:3 — adds a third-party"
-                " dependency | — | — |") in out
+        assert f"| 1. Alpha | complete | {a[:7]}..{b[:7]} (1) | impl sonnet/high · rev opus/low |" in out
+        assert "| 2. Bravo | in progress | — | impl opus/medium |" in out
+        assert "| 3. Charlie | skipped — evergreen conflict | — | — |" in out
         assert "| 4. Delta | skipped — depends on Task 3 | — | — |" in out
         assert "| 5. Echo | not started | — | — |" in out
-        assert "| final review | dispatched | — | opus/high |" in out
+        assert "| final review | dispatched | — | rev opus/high |" in out
         assert "| uv run pytest -q | 0 | 12 passed \\| 0 failed |" in out
-        assert "- Task 3 skipped: evergreen conflict" in section(out, "Follow-up", "Verified")
+        assert section(out, "Follow-up", "Verified").strip() == (
+            "- Task 3 skipped: evergreen conflict — CLAUDE.md:3 — adds a third-party dependency"
+            " (Task 4 depends on it)")
 
     def test_recommended_is_the_last_section_after_verified(self, ledger, capsys):
         write_ledger(ledger, "Verify: pytest -q — exit 0 — 3 passed")
         headings = [line for line in run_report(ledger, capsys).splitlines() if line.startswith("## ")]
         assert headings == ["## Done", "## Decided", "## Follow-up", "## Verified", "## Recommended"]
 
-    def test_a_final_parked_line_names_its_finding_in_decided_and_follow_up(self, ledger, capsys):
+    def test_a_final_parked_line_keeps_its_finding_in_decided_only(self, ledger, capsys):
         write_ledger(ledger, "Task final: parked — X — Ruling: Y — cost if wrong: Z")
         out = run_report(ledger, capsys)
-        assert "| parked: X | Y | Z |" in section(out, "Decided", "Follow-up")
-        assert "- Task final parked: X" in section(out, "Follow-up", "Verified")
+        assert "| 1 | parked: X | Y | Z |" in section(out, "Decided", "Follow-up")
+        assert "parked" not in section(out, "Follow-up", "Verified")
 
     def test_a_final_completion_line_shows_the_final_review_complete(self, ledger, capsys):
         write_ledger(ledger, "Task final: dispatch final-reviewer opus/high — whole branch",
                      "Task final: complete (commits aaaaaaa..bbbbbbb, 2 parked)")
         out = run_report(ledger, capsys)
-        assert "| final review | complete (2 parked) | aaaaaaa..bbbbbbb (?) | opus/high |" in out
+        assert "| final review | complete (2 parked) | aaaaaaa..bbbbbbb (?) | rev opus/high |" in out
 
     def test_plan_headings_inside_fences_are_ignored(self, ledger, capsys):
         ledger.write_text(f"# SDD ledger — plan: {FIXTURES / 'plan-sample.md'}\n", encoding="utf-8")
@@ -392,7 +394,7 @@ class TestReportOnARun:
         assert "| 6. Foxtrot | not started | — | — |" in out
 
     def test_an_unreadable_plan_is_noted_first_in_follow_up(self, ledger, capsys):
-        write_ledger(ledger)  # HEADER points the ledger's plan at /nonexistent/plan.md
+        write_ledger(ledger, "Ruling: no cost — b")  # HEADER points the ledger's plan at /nonexistent/plan.md
         follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
         assert follow_up.strip().splitlines()[0] == (
             "- plan not readable: /nonexistent/plan.md; tasks never dispatched are not listed")
@@ -400,7 +402,7 @@ class TestReportOnARun:
     def test_empty_sections_say_so(self, ledger, capsys):
         write_ledger(ledger)
         out = run_report(ledger, capsys, "--plan", str(FIXTURES / "plan-sample.md"))
-        assert "| none | — | — |" in out
+        assert "| — | none | — | — |" in out
         assert "- none" in section(out, "Follow-up", "Verified")
         assert "| none run | — | — |" in out
 
@@ -435,7 +437,7 @@ class TestReportOnARun:
 
     def test_rulings_inside_dispatch_lines_are_not_decisions(self, ledger, capsys):
         write_ledger(ledger, "Task 1: dispatch implementer-scoped sonnet/high — fine. Ruling: ship it — why: x")
-        assert "| none | — | — |" in section(run_report(ledger, capsys), "Decided", "Follow-up")
+        assert "| — | none | — | — |" in section(run_report(ledger, capsys), "Decided", "Follow-up")
 
     def test_bulleted_lines_parse(self, ledger, capsys):
         write_ledger(ledger,
@@ -445,11 +447,22 @@ class TestReportOnARun:
         assert "| 1 | complete (2 parked) | aaaaaaa..bbbbbbb (?) | — |" in out
         assert "| keep going | nothing blocks | rework |" in out
 
+    def test_models_carry_a_label_for_each_role(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: dispatch fix-incomplete opus/high — w",
+                     "Task 2: dispatch scout opus/low — w",
+                     "Task final: dispatch final-reviewer opus/high — w",
+                     "Task final: dispatch final-fixer opus/medium — w",
+                     "Task final: dispatch re-reviewer opus/low — w")
+        out = run_report(ledger, capsys)
+        assert "| 1 | in progress | — | fix opus/high |" in out
+        assert "| 2 | in progress | — | scout opus/low |" in out
+        assert "| final review | dispatched | — | rev opus/high · fix opus/medium · re-rev opus/low |" in out
+
     def test_a_batch_dispatch_reaches_each_task(self, ledger, capsys):
         write_ledger(ledger, "Task 3,4: dispatch implementer-scoped sonnet/high — same-shape batch")
         out = run_report(ledger, capsys)
-        assert "| 3 | in progress | — | sonnet/high |" in out
-        assert "| 4 | in progress | — | sonnet/high |" in out
+        assert "| 3 | in progress | — | impl sonnet/high |" in out
+        assert "| 4 | in progress | — | impl sonnet/high |" in out
 
     def test_a_batch_completion_marks_each_task_complete(self, ledger, capsys):
         write_ledger(ledger, "Task 3,4: complete (commits aaaaaaa..bbbbbbb, review clean)")
@@ -462,16 +475,263 @@ class TestReportOnARun:
                      "Verify: grep -c Ruling: progress.md — exit 0 — Ruling: 3")
         assert "| none | — | — |" in section(run_report(ledger, capsys), "Decided", "Follow-up")
 
-    def test_non_decided_sections_fit_forty_lines(self, ledger, capsys):
-        write_ledger(ledger, "Task 1: complete (commits aaaaaaa..bbbbbbb, review clean)",
-                     *[f"Follow-up: item {i}" for i in range(60)],
-                     *[f"Ruling: decision {i} — why: reason {i} — cost if wrong: none" for i in range(30)])
+    def test_follow_up_is_never_truncated(self, ledger, capsys):
+        write_ledger(ledger, *[f"Follow-up: item {i}" for i in range(60)])
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
+        assert "- item 59" in follow_up
+        assert "more in" not in follow_up
+
+
+class TestRulings:
+    def test_a_bold_ruling_parses(self, ledger, capsys):
+        write_ledger(ledger, "**Ruling:** keep A — why: b — cost if wrong: c")
+        assert "| 1 | keep A | b | c |" in run_report(ledger, capsys)
+
+    def test_a_ruling_in_a_table_cell_ends_at_the_cell(self, ledger, capsys):
+        write_ledger(ledger, "| T3 | Ruling: keep A — b — c |")
+        assert "| 1 | keep A | b | c |" in run_report(ledger, capsys)
+
+    def test_an_escaped_pipe_in_a_table_cell_ruling_stays_in_the_cell(self, ledger, capsys):
+        write_ledger(ledger, "| T3 | Ruling: use a \\| b — c — d | x |")
+        assert "| 1 | use a \\| b | c | d |" in run_report(ledger, capsys)
+
+    def test_a_wrapped_ruling_keeps_its_indented_continuation(self, ledger, capsys):
+        write_ledger(ledger, "- Ruling: keep A — because the", "  loop is slow — cost if wrong: rework")
+        assert "| 1 | keep A | because the loop is slow | rework |" in run_report(ledger, capsys)
+
+    def test_an_empty_ruling_is_kept_and_flagged(self, ledger, capsys):
+        write_ledger(ledger, "Ruling:")
         out = run_report(ledger, capsys)
-        before, rest = out.split("## Decided", 1)
-        kept = (before + "## Follow-up" + rest.split("## Follow-up", 1)[1]).splitlines()
-        assert len(kept) + orko_sdd.RECOMMENDED_RESERVE <= 40
-        assert f"more in {ledger}" in out
-        assert sum(1 for line in out.splitlines() if line.startswith("| decision ")) == 30
+        assert "| 1 | (no ruling text) | — | — |" in out
+        assert "- Decided #1: not in the" in section(out, "Follow-up", "Verified")
+
+    def test_a_ruling_missing_its_why_is_flagged(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: keep A — why: b — cost if wrong: c",
+                     "Ruling: keep B — cost if wrong: c")
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
+        assert ("- Decided #2: not in the `Ruling: <what> — <why> — cost if wrong: <cost>` shape"
+                in follow_up)
+        assert "#1" not in follow_up
+
+    def test_a_superseding_ruling_marks_the_row_it_replaces(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: ship no entry point — plan asks only for main — cost if wrong: add one",
+                     "Ruling: keep going — x — y",
+                     'Ruling (supersedes "ship no entry point"): add __main__.py — users need a command'
+                     " — cost if wrong: delete it")
+        out = run_report(ledger, capsys)
+        assert "| 1 | ship no entry point (superseded by #3) | plan asks only for main | add one |" in out
+        assert "| 3 | add __main__.py (supersedes #1) | users need a command | delete it |" in out
+
+    def test_a_supersedes_note_may_quote_parentheses(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use f(x) — b — c",
+                     'Ruling (supersedes "use f(x)"): use g — b — c')
+        assert "| 2 | use g (supersedes #1) | b | c |" in run_report(ledger, capsys)
+
+    def test_a_supersedes_phrase_links_the_latest_matching_ruling(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use X for A — b — c", "Ruling: use X for B — b — c",
+                     'Ruling (supersedes "use X"): use Y — b — c')
+        out = run_report(ledger, capsys)
+        assert "| 1 | use X for A | b | c |" in out
+        assert "| 2 | use X for B (superseded by #3) | b | c |" in out
+
+    def test_a_sub_bullet_under_a_ruling_is_not_joined_to_it(self, ledger, capsys):
+        write_ledger(ledger, "- Ruling: keep A — b — c", "  - Task 1: minor (deferred): nit")
+        out = run_report(ledger, capsys)
+        assert "| 1 | keep A | b | c |" in out
+        assert "- Task 1 deferred minor: nit" in out
+
+    def test_a_supersedes_note_may_use_typographic_quotes(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use X — b — c", "Ruling (supersedes “use X”): use Y — b — c")
+        assert "| 2 | use Y (supersedes #1) | b | c |" in run_report(ledger, capsys)
+
+    def test_a_plain_ruling_that_reverses_another_is_flagged(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: ship no entry point — b — c",
+                     "Ruling: the final review reverses the Task 2 entry-point ruling — b — c")
+        assert ("- Decided #2: reads as reversing an earlier ruling"
+                in section(run_report(ledger, capsys), "Follow-up", "Verified"))
+
+    def test_an_unindented_line_after_a_ruling_is_flagged(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: keep A — because the", "loop is slow — cost if wrong: rework")
+        assert ("- Decided #1: the next ledger line may continue it"
+                in section(run_report(ledger, capsys), "Follow-up", "Verified"))
+
+    def test_bold_is_stripped_only_from_rulings(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: minor (deferred): **Ruling:** leaves ** in the row")
+        assert "- Task 1 deferred minor: **Ruling:** leaves ** in the row" in run_report(ledger, capsys)
+
+    def test_an_unbalanced_annotation_falls_back_to_the_first_colon(self, ledger, capsys):
+        write_ledger(ledger, "Ruling (supersedes Task 2 (entry point): add main — b — cost if wrong: c")
+        assert "| 1 | add main | b | c |" in run_report(ledger, capsys)
+
+    def test_a_bold_word_with_the_colon_outside_parses(self, ledger, capsys):
+        write_ledger(ledger, "**Ruling**: keep A — b — cost if wrong: c")
+        assert "| 1 | keep A | b | c |" in run_report(ledger, capsys)
+
+    def test_a_line_that_looks_like_a_ruling_but_does_not_parse_is_flagged(self, ledger, capsys):
+        write_ledger(ledger, "Ruling (draft: keep A — b — c")
+        assert "- Not read as a ruling: Ruling (draft: keep A — b — c" in run_report(ledger, capsys)
+
+    def test_other_annotations_are_ignored(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use X — b — c", "Ruling (oiler approved): use Y — b — c")
+        out = run_report(ledger, capsys)
+        assert "| 2 | use Y | b | c |" in out
+        assert "Decided #" not in out
+
+    def test_a_supersedes_note_counts_anywhere_in_the_annotation(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use X — b — c", 'Ruling (oiler approved; Supersedes "use X"): use Y — b — c')
+        assert "| 2 | use Y (supersedes #1) | b | c |" in run_report(ledger, capsys)
+
+    def test_a_supersedes_chain_marks_each_pair(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use X — b — c", 'Ruling (supersedes "use X"): use Y — b — c',
+                     'Ruling (supersedes "use Y"): use Z — b — c')
+        out = run_report(ledger, capsys)
+        assert "| 2 | use Y (supersedes #1) (superseded by #3) | b | c |" in out
+        assert "| 3 | use Z (supersedes #2) | b | c |" in out
+
+    def test_a_row_superseded_twice_names_both(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use X — b — c", 'Ruling (supersedes "use X"): use Y — b — c',
+                     'Ruling (supersedes "use X"): use Z — b — c')
+        assert "| 1 | use X (superseded by #2, #3) | b | c |" in run_report(ledger, capsys)
+
+    def test_a_quoted_supersedes_note_that_matches_nothing_is_flagged(self, ledger, capsys):
+        write_ledger(ledger, 'Ruling (supersedes "nothing like this"): use Y — b — c')
+        assert "- Decided #1: supersedes no earlier ruling" in run_report(ledger, capsys)
+
+    def test_reversal_wording_variants_are_flagged(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: the final review reversed both Task 2 rulings — b — c")
+        assert "- Decided #1: reads as reversing" in run_report(ledger, capsys)
+
+    def test_a_numbered_item_under_a_ruling_is_not_joined_to_it(self, ledger, capsys):
+        write_ledger(ledger, "- Ruling: keep A — b — cost if wrong: c", "  1. nit")
+        assert "| 1 | keep A | b | c |" in run_report(ledger, capsys)
+
+    def test_an_escaped_pipe_in_a_plain_ruling_is_not_doubled(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use a \\| b — c — d")
+        assert "| 1 | use a \\| b | c | d |" in run_report(ledger, capsys)
+
+    def test_a_ruling_quoted_in_a_follow_up_line_is_not_a_decision(self, ledger, capsys):
+        write_ledger(ledger, "Follow-up: revisit Ruling: X — y — cost if wrong: z")
+        out = run_report(ledger, capsys)
+        assert "| — | none | — | — |" in out
+        assert "- revisit Ruling: X — y — cost if wrong: z" in out
+
+    def test_a_final_prefixed_parked_line_keeps_its_finding(self, ledger, capsys):
+        write_ledger(ledger, "Final: parked — fd never closed — Ruling: process exits — cost if wrong: none")
+        assert "| 1 | parked: fd never closed | process exits | none |" in run_report(ledger, capsys)
+
+    def test_a_supersedes_note_that_matches_nothing_is_flagged(self, ledger, capsys):
+        write_ledger(ledger, "Ruling: use X — b — c",
+                     "Ruling (supersedes the one above): use Y — b — c")
+        out = run_report(ledger, capsys)
+        assert "| 2 | use Y | b | c |" in out
+        assert "- Decided #2: supersedes no earlier ruling" in section(out, "Follow-up", "Verified")
+
+
+class TestFollowUp:
+    def test_dependent_skips_fold_into_their_root(self, ledger, capsys):
+        write_ledger(ledger, "Task 3: skipped — evergreen conflict — CLAUDE.md:3 — adds a dependency",
+                     "Task 4: skipped — depends on Task 3",
+                     "Task 5: skipped — depends on Task 4")
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
+        assert ("- Task 3 skipped: evergreen conflict — CLAUDE.md:3 — adds a dependency"
+                " (Tasks 4, 5 depend on it)") in follow_up
+        assert "Task 4 skipped" not in follow_up
+
+    def test_a_dependent_skip_whose_root_ran_keeps_its_own_line(self, ledger, capsys):
+        write_ledger(ledger, "Task 4: skipped — depends on Task 3")
+        assert "- Task 4 skipped: depends on Task 3" in run_report(ledger, capsys)
+
+    def test_minors_on_a_batch_group_under_the_batch(self, ledger, capsys):
+        write_ledger(ledger, "Task 3,4: minor (deferred): shared nit")
+        assert "- Task 3,4 deferred minor: shared nit" in run_report(ledger, capsys)
+
+    def test_a_skip_decision_joins_its_chain_line(self, ledger, capsys):
+        write_ledger(ledger, "Task 3: skipped — evergreen conflict — CLAUDE.md:3 — adds a dependency",
+                     "Task 4: skipped — depends on Task 3",
+                     "Task 3: skip decision — rewrite on the stdlib, or amend CLAUDE.md")
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
+        assert ("- Task 3 skipped: evergreen conflict — CLAUDE.md:3 — adds a dependency"
+                " (Task 4 depends on it). Decide: rewrite on the stdlib, or amend CLAUDE.md") in follow_up
+        assert "Task 4 skipped" not in follow_up
+
+    def test_minors_after_a_final_review_say_they_may_be_resolved(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: minor (deferred): a",
+                     "Task final: dispatch final-reviewer opus/high — whole branch")
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
+        assert "- Deferred minors as ledgered; the final fix wave may have resolved" in follow_up
+
+    def test_a_skip_decision_on_a_dependent_joins_the_root_line(self, ledger, capsys):
+        write_ledger(ledger, "Task 3: skipped — evergreen conflict — CLAUDE.md:3 — x",
+                     "Task 4: skipped — depends on Task 3", "Task 4: skip decision — drop both")
+        assert "(Task 4 depends on it). Decide: drop both" in run_report(ledger, capsys)
+
+    def test_a_skip_decision_for_an_unskipped_task_gets_its_own_line(self, ledger, capsys):
+        write_ledger(ledger, "Task 5: skip decision — drop it")
+        out = run_report(ledger, capsys)
+        assert "- Task 5 decision: drop it" in out
+        assert "| 5 |" not in out
+
+    def test_a_skip_cycle_still_reaches_follow_up(self, ledger, capsys):
+        write_ledger(ledger, "Task 3: skipped — depends on Task 4", "Task 4: skipped — depends on Task 3")
+        assert "- Task 3 skipped: depends on Task 4 (Task 4 depends on it)" in run_report(ledger, capsys)
+
+    def test_the_minors_lead_line_needs_a_final_review(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: minor (deferred): a")
+        assert "Deferred minors as ledgered" not in run_report(ledger, capsys)
+        write_ledger(ledger, "Task 1: minor (deferred): a", "Task final: complete (commits aaaaaaa..bbbbbbb, review clean)")
+        assert "Deferred minors as ledgered" in run_report(ledger, capsys)
+
+    def test_a_follow_up_line_without_a_leading_colon_is_kept_whole(self, ledger, capsys):
+        write_ledger(ledger, "Follow-up — fix cli.py:9 crash")
+        assert "- Follow-up — fix cli.py:9 crash" in run_report(ledger, capsys)
+
+    def test_follow_up_lines_drop_their_prefix(self, ledger, capsys):
+        write_ledger(ledger, "Follow-up: decide X")
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
+        assert "- decide X" in follow_up
+        assert "- Follow-up" not in follow_up
+
+    def test_a_parked_line_without_a_ruling_stays_in_follow_up(self, ledger, capsys):
+        write_ledger(ledger, "Task 2: parked — reviewer nit")
+        assert "- Task 2 parked without a ruling: reviewer nit" in run_report(ledger, capsys)
+
+    def test_deferred_minors_are_listed_inline_by_task(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: minor (deferred): a", "Task 1: minor (deferred): b",
+                     "Task final: minor (deferred): c")
+        follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
+        assert "- Task 1 deferred minors: a · b" in follow_up
+        assert "- Task final deferred minor: c" in follow_up
+
+
+
+class TestReportOnTheSmokeLedgers:
+    """Ledgers from the v0.1.0 clean-room runs, with local paths scrubbed."""
+
+    def render(self, name, ledger, capsys):
+        ledger.write_text((FIXTURES / name).read_text(encoding="utf-8"), encoding="utf-8")
+        return run_report(ledger, capsys, "--plan", "/nonexistent/plan.md")
+
+    def test_a_well_formed_run_raises_no_ruling_warning(self, ledger, capsys):
+        out = self.render("ledger-orko-sdd-run2.md", ledger, capsys)
+        assert "Decided #" not in section(out, "Follow-up", "Verified")
+        assert "| 10 | parked: `python3 -m textkit --help` shows prog as `__main__.py`" in out
+
+    def test_each_parked_finding_and_skip_appears_once(self, ledger, capsys):
+        out = self.render("ledger-orko-sdd-run2.md", ledger, capsys)
+        assert out.count("non-UTF-8 stdin raises UnicodeDecodeError") == 1
+        assert section(out, "Follow-up", "Verified").count("skipped") == 1
+
+    def test_run_3s_malformed_ruling_and_reversals_are_flagged(self, ledger, capsys):
+        out = self.render("ledger-orko-sdd-run3.md", ledger, capsys)
+        warnings = [line for line in section(out, "Follow-up", "Verified").splitlines()
+                    if line.startswith("- Decided #")]
+        assert [w.split(":", 1)[0] for w in warnings] == ["- Decided #2", "- Decided #5, #6"]
+        assert "reads as reversing" in warnings[1]
+
+    def test_run_1s_plain_reversals_are_flagged(self, ledger, capsys):
+        out = self.render("ledger-orko-sdd-run1.md", ledger, capsys)
+        assert "- Decided #4, #6: reads as reversing an earlier ruling" in out
+        assert "| 16 | parked: __main__.py:13 devnull fd never closed |" in out
 
 
 class TestSkillMd:
