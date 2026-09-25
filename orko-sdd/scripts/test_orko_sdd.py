@@ -374,7 +374,7 @@ class TestReportOnARun:
         headings = [line for line in run_report(ledger, capsys).splitlines() if line.startswith("## ")]
         assert headings == ["## Done", "## Decided", "## Follow-up", "## Verified", "## Recommended"]
 
-    def test_a_final_parked_line_keeps_its_finding_in_decided_only(self, ledger, capsys):
+    def test_a_final_parked_line_names_its_finding_in_decided_only(self, ledger, capsys):
         write_ledger(ledger, "Task final: parked — X — Ruling: Y — cost if wrong: Z")
         out = run_report(ledger, capsys)
         assert "| 1 | parked: X | Y | Z |" in section(out, "Decided", "Follow-up")
