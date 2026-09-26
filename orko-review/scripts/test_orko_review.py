@@ -1,5 +1,7 @@
 """Tests for orko_review.py, the deterministic half of the orko-review skill."""
 import re
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -601,6 +603,19 @@ class TestDecide:
             "verdict": "accept", "why": "added the isolation bullet"}
         assert "| design/F-1 | major |" in (run / "decisions.md").read_text(encoding="utf-8")
         assert "| accept | added the isolation bullet |" in (run / "decisions.md").read_text(encoding="utf-8")
+
+    def test_parallel_decides_all_land(self, project):
+        run = checked(project)
+        index = orko_review.load_manifest(run)["index"]
+        procs = [subprocess.Popen([sys.executable, str(Path(orko_review.__file__)), "decide",
+                                    "--run", str(run), "--finding", e["id"],
+                                    "--verdict", "accept", "--why", "x"])
+                 for e in index]
+        codes = [p.wait() for p in procs]
+        assert codes == [0] * len(index)
+        manifest = orko_review.load_manifest(run)
+        assert manifest is not None
+        assert all(e["id"] in manifest["dispositions"] for e in index)
 
 
 class TestSummary:

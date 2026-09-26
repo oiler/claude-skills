@@ -6,6 +6,8 @@ Standard library only (Python 3.10+). SKILL.md says when each subcommand runs.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -13,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -332,8 +335,31 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def atomic_write(path: Path, text: str) -> None:
+    """Write via a same-directory temp file + os.replace, so a reader never sees a partial file."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.tmp-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp_name, path)
+    except BaseException:
+        os.unlink(tmp_name)
+        raise
+
+
+@contextlib.contextmanager
+def run_lock(run: Path):
+    """Exclusive lock over a run directory, so concurrent `decide` calls serialize load-modify-write."""
+    with open(run / ".lock", "a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def write_manifest(run: Path, manifest: dict) -> None:
-    (run / "run.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    atomic_write(run / "run.json", json.dumps(manifest, indent=2) + "\n")
 
 
 def load_manifest(run: Path) -> dict | None:
@@ -608,26 +634,35 @@ def render_decisions(manifest: dict) -> str:
 
 
 def cmd_decide(args: argparse.Namespace) -> int:
-    run, manifest = open_run(args.run)
-    if manifest is None:
+    run = Path(args.run).expanduser().resolve()
+    if not run.is_dir():
+        print(f"problem: no readable run.json in {run}")
         return 2
-    # The stored index, never a re-check: the session edits the doc between decide calls.
-    problem = None
-    why = one_line(args.why)
-    if manifest.get("index") is None:
-        problem = "no findings index; run check first"
-    elif manifest["mode"] != "apply":
-        problem = "this is a file-only run; apply it with /orko-review --run <run-dir> --apply"
-    elif args.finding not in {e["id"] for e in manifest["index"]}:
-        problem = f"{args.finding} is not in the findings index"
-    elif not why:
-        problem = "--why is empty"
-    if problem:
-        print(f"problem: {problem}")
-        return 2
-    manifest["dispositions"][args.finding] = {"verdict": args.verdict, "why": why}
-    write_manifest(run, manifest)
-    (run / "decisions.md").write_text(render_decisions(manifest), encoding="utf-8")
+    # Locked for the whole load -> validate -> modify -> write sequence: SKILL.md dispatches one
+    # decide per finding, often as parallel Bash calls, and a non-atomic read-modify-write would
+    # drop dispositions or corrupt run.json under concurrent writers.
+    with run_lock(run):
+        manifest = load_manifest(run)
+        if manifest is None:
+            print(f"problem: no readable run.json in {run}")
+            return 2
+        # The stored index, never a re-check: the session edits the doc between decide calls.
+        problem = None
+        why = one_line(args.why)
+        if manifest.get("index") is None:
+            problem = "no findings index; run check first"
+        elif manifest["mode"] != "apply":
+            problem = "this is a file-only run; apply it with /orko-review --run <run-dir> --apply"
+        elif args.finding not in {e["id"] for e in manifest["index"]}:
+            problem = f"{args.finding} is not in the findings index"
+        elif not why:
+            problem = "--why is empty"
+        if problem:
+            print(f"problem: {problem}")
+            return 2
+        manifest["dispositions"][args.finding] = {"verdict": args.verdict, "why": why}
+        write_manifest(run, manifest)
+        atomic_write(run / "decisions.md", render_decisions(manifest))
     print(f"recorded: {args.finding} {args.verdict}")
     return 0
 
