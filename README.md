@@ -8,7 +8,6 @@ A public mirror of the Claude Code skills I use day-to-day. Each folder is a sel
 |---|---|
 | [front-end-engineer](front-end-engineer/) | Authority on HTML markup — semantically correct (MDN) HTML in a consistent personal style, with write + audit modes and routing to sibling front-end skills. |
 | [git-tagging](git-tagging/) | Semantic versioning, annotated git tags, GitHub Releases, and CHANGELOG maintenance. |
-| [guardian-claude-code](guardian-claude-code/) | Audits Claude Code's third-party trust surface (MCP servers, plugins, hooks) for supply-chain risk. |
 | [orko](orko/) | Multi-expert engagements with the project's scaffold `docs/` repository as the record. `/orko <question>` decomposes an analysis, review, or research task into expert seats, verifies their findings, and commits an attributed review; `/orko build <goal> [--executor codex]` runs spec, spec review, plan, plan review, a human acceptance gate, execution by Claude or Codex, code review, and close, one committed record per decision. Replaces the retired `autonom` and `codex-orko` skills. |
 | [orko-sdd](orko-sdd/) | Standing orchestrator overlay for `superpowers:subagent-driven-development`. `/orko-sdd <plan-path> [--release-critical]` runs a written plan under SDD with a model and effort policy per role, evergreen-conflict handling, safety stops, and a script-built final report. Its worker agents need a second symlink: `ln -s <repo>/orko-sdd/agents ~/.claude/agents/orko-sdd`. |
 | [plotly-dash](plotly-dash/) | Expert guidance for self-hosted, open-source Plotly Dash apps — callbacks, DataTable, deployment. |
@@ -26,3 +25,14 @@ cp -R <skill-name> ~/.claude/skills/
 ```
 
 Or upload the matching `<skill-name>.zip` via Claude.ai → Settings → Capabilities → Skills.
+
+## Archived
+
+Archived on 26 Sep 2026. These folders stay in the repo for reference but are no longer maintained.
+
+| Skill | What it does |
+|---|---|
+| [autonom](autonom/) | Retired redirect stub for the unattended spec-and-plan pipeline, which moved into `/orko build`. |
+| [claude-cowork-builder](claude-cowork-builder/) | Builds Claude Cowork plugins — skills, agents, MCP connectors, and custom UI packaged into an installable `.plugin`. |
+| [guardian-claude-code](guardian-claude-code/) | Audits Claude Code's third-party trust surface (MCP servers, plugins, hooks) for supply-chain risk. |
+| [using-opencode](using-opencode/) | On-demand guide for using OpenCode, especially when coming from Claude Code. |
