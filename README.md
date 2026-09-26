@@ -38,5 +38,6 @@ Archived on 26 Sep 2026. These folders stay in the repo for reference but are no
 |---|---|
 | [autonom](autonom/) | Retired redirect stub for the unattended spec-and-plan pipeline, which moved into `/orko build`. |
 | [claude-cowork-builder](claude-cowork-builder/) | Builds Claude Cowork plugins — skills, agents, MCP connectors, and custom UI packaged into an installable `.plugin`. |
+| [codex-orko](codex-orko/) | Retired redirect stub for the Claude-plans, Codex-executes stance, which moved into `/orko build --executor codex`. |
 | [guardian-claude-code](guardian-claude-code/) | Audits Claude Code's third-party trust surface (MCP servers, plugins, hooks) for supply-chain risk. |
 | [using-opencode](using-opencode/) | On-demand guide for using OpenCode, especially when coming from Claude Code. |
