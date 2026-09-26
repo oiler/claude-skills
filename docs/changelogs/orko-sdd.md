@@ -1,6 +1,6 @@
 # orko-sdd — Changelog
 
-## v0.1.2 — <release date>
+## v0.1.2 — 2026-09-25
 
 The role table follows oiler's 2026-09-25 effort policy, and the orchestrator's own effort is checked.
 
