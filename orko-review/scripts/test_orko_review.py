@@ -713,3 +713,38 @@ class TestResume:
         lines = pre(["--effort", "medium", "--run", str(run), "--apply"], home, project)
         assert "hint: run /effort high, then rerun" in lines
         assert orko_review.load_manifest(run)["mode"] == "file-only"
+
+
+class TestSkillFiles:
+    @pytest.fixture
+    def skill(self):
+        return (orko_review.SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    def frontmatter(self, skill):
+        return skill.split("---", 2)[1]
+
+    def test_allowed_tools_grant_exactly_the_five_subcommands(self, skill):
+        grants = re.findall(r"Bash\(([^)]*)\)", self.frontmatter(skill).split("allowed-tools:", 1)[1])
+        assert grants == [f"python3 ${{CLAUDE_SKILL_DIR}}/scripts/orko_review.py {s} *"
+                          for s in orko_review.SUBCOMMANDS]
+
+    def test_slash_only(self, skill):
+        assert "\ndisable-model-invocation: true\n" in self.frontmatter(skill)
+
+    def test_preflight_injection_passes_the_session_effort(self, skill):
+        assert ("!`python3 ${CLAUDE_SKILL_DIR}/scripts/orko_review.py preflight "
+                "--effort '${CLAUDE_EFFORT}' $ARGUMENTS`") in skill
+
+    def test_dispatch_names_the_agent_and_model(self, skill):
+        assert f"`subagent_type: {orko_review.AGENT_NAME}`" in skill
+        assert "`model: opus`" in skill
+
+    def test_skill_body_stays_under_150_lines(self, skill):
+        assert len(skill.splitlines()) < 150
+
+    def test_agent_pins_high_effort_and_no_subagents(self):
+        agent = (orko_review.SKILL_DIR / "agents" / "orko-review-reviewer.md").read_text(encoding="utf-8")
+        fields = dict(orko_review.FIELD_RE.findall(agent.split("---", 2)[1]))
+        assert fields["name"] == orko_review.AGENT_NAME
+        assert fields["effort"] == "high"
+        assert fields["disallowedTools"] == "Agent"
