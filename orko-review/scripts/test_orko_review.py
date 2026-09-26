@@ -184,9 +184,36 @@ class TestPreflight:
         lines = pre(["--effort", "high", SPEC_REL], tmp_path / "emptyhome", project)
         assert "agent: orko-review-reviewer" in lines
 
-    def test_symlink_loop_in_agents_directory_terminates(self, project, home):
-        (home / ".claude" / "agents" / "loop").symlink_to(home / ".claude" / "agents")
-        assert pre(["--effort", "high", SPEC_REL], home, project)[-1] == "STATUS: ok"
+    def test_project_level_agent_shadows_a_user_level_one(self, project, home):
+        """Claude Code prefers the definition closest to the working directory."""
+        write(project / ".claude" / "agents" / "r.md",
+              "---\nname: orko-review-reviewer\neffort: medium\n---\nx\n")
+        lines = pre(["--effort", "high", SPEC_REL], home, project)
+        assert "problem: orko-review-reviewer must pin effort: high" in lines
+
+    def test_symlink_loop_in_agents_directory_terminates(self, monkeypatch, project, tmp_path):
+        """A fan-out of self-links (not just a single cycle) must not make the walk unbounded."""
+        empty_home = tmp_path / "emptyhome"
+        agents = empty_home / ".claude" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "a").symlink_to(agents)
+        (agents / "b").symlink_to(agents)
+
+        real_walk = orko_review.os.walk
+        cap = 20
+        count = 0
+
+        def counting_walk(*args, **kwargs):
+            nonlocal count
+            for item in real_walk(*args, **kwargs):
+                count += 1
+                if count > cap:
+                    raise AssertionError(f"os.walk exceeded {cap} directories; loop guard did not terminate it")
+                yield item
+
+        monkeypatch.setattr(orko_review.os, "walk", counting_walk)
+        lines = pre(["--effort", "high", SPEC_REL], empty_home, project)
+        assert "agent: missing" in lines
 
     def test_spec_flag_pointing_at_a_missing_file_blocks(self, project, home):
         lines = pre(["--effort", "high", PLAN_REL, "--spec", "docs/nope.md"], home, project)

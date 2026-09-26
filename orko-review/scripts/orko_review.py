@@ -207,15 +207,19 @@ def effort_lines(value: str | None, mode: str) -> tuple[list[str], list[str], li
 
 
 def agent_dirs(home: Path, cwd: Path) -> list[Path]:
-    """~/.claude/agents, then each .claude/agents from the cwd up to the cwd's repository root."""
+    """Each .claude/agents from the cwd up to the cwd's repository root (closest first), then ~/.claude/agents.
+
+    Matches Claude Code's precedence: project-level definitions shadow user-level ones.
+    """
     start = cwd.resolve()
     top = git_out(start, "rev-parse", "--show-toplevel")
     stop = Path(top).resolve() if top else start
-    dirs = [home / ".claude" / "agents"]
+    dirs: list[Path] = []
     for directory in (start, *start.parents):
         dirs.append(directory / ".claude" / "agents")
         if directory == stop:
             break
+    dirs.append(home / ".claude" / "agents")
     return dirs
 
 
