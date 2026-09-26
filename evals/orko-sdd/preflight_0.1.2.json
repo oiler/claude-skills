@@ -1,0 +1,93 @@
+{
+  "skill": "orko-sdd",
+  "repo": "/Users/jrf1039/files/repo/claude-skills/.worktrees/orko-sdd-v0.1.2",
+  "profile": "claude-code",
+  "change_class": "behavioral",
+  "candidate_version": "0.1.2",
+  "skill_content_hash": "530bc6c5cf2360a80fc458c1fae5ec26e92ce651580ec1e471fa47aec9cedd12",
+  "repo_commit": "c7a917cec639a882042d83d5f3d23aba52061b9f",
+  "preflight_version": "1.1.0",
+  "timestamp": "2026-09-26T00:21:30+00:00",
+  "argv": [
+    "orko-sdd",
+    "--change-class",
+    "behavioral",
+    "--candidate-version",
+    "0.1.2",
+    "--out",
+    "/Users/jrf1039/files/repo/claude-skills/.worktrees/orko-sdd-v0.1.2/evals/orko-sdd/preflight_0.1.2.json"
+  ],
+  "checks": [
+    {
+      "id": "structure",
+      "status": "pass",
+      "detail": "SKILL.md present, name matches, kebab-case"
+    },
+    {
+      "id": "profile",
+      "status": "pass",
+      "detail": "combined description budget 331/1,536"
+    },
+    {
+      "id": "frontmatter-parse",
+      "status": "pass",
+      "detail": "claude plugin validate passed"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "invocation: live-engagement report smoke-2026-09-25b.md"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "behavior: behavior report report.md"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report smoke-2026-09-25b.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report report.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "orko-sdd/ is committed"
+    },
+    {
+      "id": "script-tests",
+      "status": "pass",
+      "detail": "scripts suite passed"
+    },
+    {
+      "id": "script-surface",
+      "status": "advisory",
+      "detail": "review by hand: conftest.py:3 import subprocess; conftest.py:12 proc = subprocess.run(; conftest.py:20 path.write_text(json.dumps({\"version\": 2, \"plugins\": {; conftest.py:27 \"\"\"Claude Code sets CLAUDE_EFFORT in every Bash subprocess; pin it so ; conftest.py:36 path.write_text(\"# SDD ledger \u2014 plan: docs/plan.md\\n\", encoding=\"utf-8; conftest.py:56 (root / \"docs\" / \"plan.md\").write_text(\"### Task 1: Alpha\\n\", encoding; orko_sdd.py:15 import subprocess; orko_sdd.py:76 with resolved.open(encoding=\"utf-8\", errors=\"replace\") as fh: (+26 more)"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "changelog entry for v0.1.2 present"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "tag orko-sdd-v0.1.2 is free"
+    },
+    {
+      "id": "drift",
+      "status": "advisory",
+      "detail": "upstream unchanged since 690f15c"
+    },
+    {
+      "id": "library-status",
+      "status": "advisory",
+      "detail": "docs/library-status.md drifted \u2014 regenerate (PYTHONPATH=\"$HOME/files/projects/001-claude-skills-creator/tools/skill-evals\" python3 -m scripts.library_status)"
+    }
+  ],
+  "overall": "pass"
+}
