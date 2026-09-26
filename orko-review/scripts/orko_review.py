@@ -187,6 +187,9 @@ def parse_preflight_args(argv: list[str]) -> tuple[dict[str, str | None], list[s
     while i < len(argv):
         arg = argv[i]
         if arg in VALUE_OPTIONS:
+            # SKILL.md passes the session's --effort first; a second one would come from the user.
+            if arg == "--effort" and opts["effort"] is not None:
+                problems.append("--effort is set by the skill")
             if i + 1 < len(argv):
                 opts[arg[2:]] = argv[i + 1]
             else:
@@ -434,6 +437,9 @@ def cmd_start(argv: list[str], cwd: Path | None = None, now: datetime | None = N
         res, r_problems, hints = resolve(opts["doc"], opts["spec"], cwd)
         problems += r_problems + validate_extras(extras)
     run = None
+    if not problems and res.doc.stem in ("", ".", ".."):
+        # "...md" has the stem "..", which would put the run outside the reviews directory.
+        problems.append(f"{res.doc.name} has no usable name for its run directory")
     if not problems:
         run = res.reviews / res.doc.stem / (now or datetime.now()).strftime(RUN_STAMP)
         if run.exists():
@@ -605,10 +611,12 @@ def cmd_check(args: argparse.Namespace) -> int:
             retries.append(f"retry: {lens} — {manifest['failures'][lens]}")
     failed = [lens for lens in lenses if manifest["status"][lens] == "failed"]
     if retries:
+        manifest["index"] = None
         write_manifest(run, manifest)
         print("\n".join(retries))
         return 2
     if len(failed) == len(lenses):
+        manifest["index"] = None
         write_manifest(run, manifest)
         print("problem: no valid reports\nSTATUS: blocked")
         return 3
@@ -722,7 +730,10 @@ def resume(run: Path, problems: list[str]) -> list[str]:
         return []
     manifest["mode"] = "apply"
     write_manifest(run, manifest)
-    return [f"doc: {doc}", f"resume: {run}", *index_table(manifest["index"])]
+    spec = [f"spec: {manifest['spec']}"] if manifest["spec"] else []
+    return [f"doc: {doc}", f"type: {manifest['type']}", *spec,
+            f"evergreen: {', '.join(manifest['evergreen']) or 'none'}",
+            f"resume: {run}", *index_table(manifest["index"])]
 
 
 def build_parser() -> argparse.ArgumentParser:

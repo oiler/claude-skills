@@ -263,6 +263,11 @@ class TestPreflight:
     def test_both_mode_flags_block(self, project, home):
         assert blocked(pre(["--effort", "high", SPEC_REL, "--apply", "--file-only"], home, project))
 
+    def test_a_second_effort_flag_blocks(self, project, home):
+        lines = pre(["--effort", "medium", SPEC_REL, "--effort", "high"], home, project)
+        assert blocked(lines)
+        assert "problem: --effort is set by the skill" in lines
+
     def test_apply_below_high_blocks_with_effort_hint(self, project, home):
         lines = pre(["--effort", "medium", SPEC_REL], home, project)
         assert blocked(lines)
@@ -360,6 +365,11 @@ class TestStart:
         text = (run / "briefs" / "security.md").read_text(encoding="utf-8")
         assert (orko_review.LENS_DIR / "extra-security.md").read_text(encoding="utf-8") in text
 
+    def test_two_specialists_pass(self, project):
+        assert start(project, "--extra", "security", "--why", "a", "--extra", "data", "--why", "b") == 0
+        assert orko_review.load_manifest(run_dir(project))["lenses"] == [
+            "accuracy", "completeness", "design", "security", "data"]
+
     @pytest.mark.parametrize("extra", [
         ["--extra", "ux", "--why", "x"],
         ["--extra", "data", "--why", "a", "--extra", "security", "--why", "b", "--extra", "frontend", "--why", "c"],
@@ -391,6 +401,13 @@ class TestStart:
         write(project / PLAN_REL, "# Widget Implementation Plan\n\n**Spec:** `docs/nope.md`\n")
         assert start(project, doc=PLAN_REL) == 2
         assert "hint: pass --spec <path>" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("name", ["...md", "..md"])
+    def test_dot_stem_doc_refuses_without_creating_a_run(self, project, capsys, name):
+        write(project / name, "# x\n")
+        assert start(project, doc=name) == 2
+        assert f"problem: {name} has no usable name for its run directory" in capsys.readouterr().out
+        assert not (project / "reviews").exists()
 
 
 def mutate(pattern, repl, count=1, flags=re.M):
@@ -515,6 +532,15 @@ class TestCheck:
         manifest = orko_review.load_manifest(run)
         assert manifest["attempts"] == {"design": 1}
         assert manifest["index"] is None
+
+    def test_retry_after_a_passing_check_clears_the_stored_index(self, project):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        assert check(run) == 0
+        write(run / "design.md", "not a report\n")
+        assert check(run) == 2
+        assert orko_review.load_manifest(run)["index"] is None
 
     def test_second_failure_marks_the_lens_failed_for_the_run(self, project, capsys):
         run = started(project)
@@ -675,6 +701,10 @@ class TestResume:
         lines = pre(["--effort", "high", "--run", str(run), "--apply"], home, project)
         assert lines[-1] == "STATUS: ok"
         assert f"resume: {run}" in lines
+        assert "type: spec" in lines
+        assert f"evergreen: {project / 'CLAUDE.md'}" in lines
+        assert not any(l.startswith("spec: ") for l in lines)
+        assert lines.index("type: spec") < lines.index(f"resume: {run}")
         assert "| ID | Severity | Title |" in lines
         assert orko_review.load_manifest(run)["mode"] == "apply"
 
