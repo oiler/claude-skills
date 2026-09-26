@@ -552,3 +552,149 @@ class TestCheck:
     def test_missing_run_manifest_refuses(self, tmp_path, capsys):
         assert check(tmp_path) == 2
         assert f"problem: no readable run.json in {tmp_path.resolve()}" in capsys.readouterr().out
+
+
+def checked(project, mode="apply", *extra):
+    run = started(project, *extra, mode=mode)
+    for lens, source in (("accuracy", "accuracy"), ("completeness", "completeness"), ("design", "design")):
+        put_report(run, lens, source)
+    assert check(run) == 0
+    return run
+
+
+def decide(run, finding, verdict="accept", why="done"):
+    return orko_review.main(["decide", "--run", str(run), "--finding", finding, "--verdict", verdict, "--why", why])
+
+
+def summary(run):
+    return orko_review.main(["summary", "--run", str(run)])
+
+
+def decide_all(run, verdict="accept"):
+    for e in orko_review.load_manifest(run)["index"]:
+        assert decide(run, e["id"], verdict, f"why {e['id']}") == 0
+
+
+class TestDecide:
+    def test_refuses_before_check_has_stored_an_index(self, project):
+        assert decide(started(project), "design/F-1") == 2
+
+    def test_refuses_a_file_only_run(self, project):
+        assert decide(checked(project, "file-only"), "design/F-1") == 2
+
+    def test_refuses_an_unknown_id(self, project):
+        assert decide(checked(project), "design/F-99") == 2
+
+    def test_refuses_an_empty_why(self, project):
+        assert decide(checked(project), "design/F-1", why="  ") == 2
+
+    def test_why_is_stored_as_one_line(self, project):
+        run = checked(project)
+        assert decide(run, "design/F-2", "reject", "a\nb") == 0
+        assert orko_review.load_manifest(run)["dispositions"]["design/F-2"]["why"] == "a b"
+
+    def test_records_replaces_and_renders_decisions(self, project):
+        run = checked(project)
+        assert decide(run, "design/F-1", "reject", "evidence\ndoesn't hold") == 0
+        assert decide(run, "design/F-1", "accept", "added the isolation bullet") == 0
+        assert orko_review.load_manifest(run)["dispositions"]["design/F-1"] == {
+            "verdict": "accept", "why": "added the isolation bullet"}
+        assert "| design/F-1 | major |" in (run / "decisions.md").read_text(encoding="utf-8")
+        assert "| accept | added the isolation bullet |" in (run / "decisions.md").read_text(encoding="utf-8")
+
+
+class TestSummary:
+    def test_refuses_before_check(self, project):
+        assert summary(started(project)) == 2
+
+    def test_apply_refuses_while_findings_are_undecided(self, project, capsys):
+        run = checked(project)
+        assert decide(run, "design/F-1") == 0
+        capsys.readouterr()
+        assert summary(run) == 2
+        assert "problem: undecided: " in capsys.readouterr().out
+
+    def test_apply_renders_sections_in_order_with_recommended_last(self, project, capsys):
+        run = started(project, "--extra", "security", "--why", "auth section")
+        for lens, source in (("accuracy", "accuracy"), ("completeness", "completeness"), ("design", "design")):
+            put_report(run, lens, source)
+        assert check(run) == 2  # security never reported
+        assert check(run) == 0  # its second failure drops it for the run
+        index = orko_review.load_manifest(run)["index"]
+        for e in index:
+            verdict = "defer" if e["id"] == "design/F-8" else "reject" if e["id"] == "design/F-2" else "accept"
+            assert decide(run, e["id"], verdict, f"why {e['id']}") == 0
+        capsys.readouterr()
+        assert summary(run) == 0
+        out = capsys.readouterr().out
+        heads = [line for line in out.splitlines() if line.startswith("## ")]
+        assert heads == ["## Reviewed", "## Accepted", "## Rejected", "## Needs you", "## Recommended"]
+        assert out.rstrip().endswith(orko_review.RECOMMENDED_SLOT)
+        assert "| ID | Severity | Title | Change |" in out
+        assert "| why design/F-1 |" in out
+        assert "Specialist: security — auth section" in out
+        assert "| design/F-8 | minor |" in out.split("\n## Needs you\n")[1]
+        assert "| security/— | — | lens failed twice | report missing |" in out
+
+    def test_empty_tables_print_none(self, project, capsys):
+        run = checked(project)
+        decide_all(run, "accept")
+        capsys.readouterr()
+        assert summary(run) == 0
+        out = capsys.readouterr().out
+        assert out.split("\n## Rejected\n")[1].startswith("None.\n")
+
+    def test_file_only_prints_the_index_and_the_resume_command(self, project, capsys):
+        run = checked(project, "file-only")
+        capsys.readouterr()
+        assert summary(run) == 0
+        out = capsys.readouterr().out
+        assert "## Recommended" not in out
+        assert "| ID | Severity | Title |" in out
+        assert out.rstrip().endswith(f"Apply later: /orko-review --run {run} --apply")
+
+
+class TestResume:
+    def test_resume_flips_a_file_only_run_to_apply(self, project, home):
+        run = checked(project, "file-only")
+        lines = pre(["--effort", "high", "--run", str(run), "--apply"], home, project)
+        assert lines[-1] == "STATUS: ok"
+        assert f"resume: {run}" in lines
+        assert "| ID | Severity | Title |" in lines
+        assert orko_review.load_manifest(run)["mode"] == "apply"
+
+    def test_resume_refuses_an_apply_run(self, project, home):
+        run = checked(project, "apply")
+        lines = pre(["--effort", "high", "--run", str(run), "--apply"], home, project)
+        assert "problem: run is in apply mode; only a file-only run can be applied later" in lines
+
+    def test_resume_refuses_a_run_without_an_index(self, project, home):
+        run = started(project, mode="file-only")
+        lines = pre(["--effort", "high", "--run", str(run), "--apply"], home, project)
+        assert "problem: run has no stored findings index; its check never passed" in lines
+
+    def test_resume_needs_apply(self, project, home):
+        run = checked(project, "file-only")
+        lines = pre(["--effort", "high", "--run", str(run)], home, project)
+        assert any(l.startswith("problem: --run needs --apply") for l in lines)
+        assert orko_review.load_manifest(run)["mode"] == "file-only"
+
+    def test_resume_refuses_a_changed_doc(self, project, home):
+        run = checked(project, "file-only")
+        write(project / SPEC_REL, "# changed\n")
+        lines = pre(["--effort", "high", "--run", str(run), "--apply"], home, project)
+        assert any(l.startswith("problem: doc changed since the run started") for l in lines)
+        assert orko_review.load_manifest(run)["mode"] == "file-only"
+
+    def test_resume_refuses_file_only_and_a_doc_path(self, project, home):
+        run = checked(project, "file-only")
+        lines = pre(["--effort", "high", "--run", str(run), "--file-only"], home, project)
+        assert any("can't be combined with --file-only" in l for l in lines)
+        lines = pre(["--effort", "high", "--run", str(run), "--apply", SPEC_REL], home, project)
+        assert any(l.startswith("problem: --run takes no doc path") for l in lines)
+
+    def test_resume_below_high_blocks_without_flipping(self, project, home):
+        run = checked(project, "file-only")
+        lines = pre(["--effort", "medium", "--run", str(run), "--apply"], home, project)
+        assert "hint: run /effort high, then rerun" in lines
+        assert orko_review.load_manifest(run)["mode"] == "file-only"

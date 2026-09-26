@@ -276,6 +276,17 @@ def preflight_lines(argv: list[str], home: Path, cwd: Path) -> list[str]:
     problems += e_problems
     hints += e_hints
 
+    if opts["run"] is not None:
+        if "--apply" not in flags:
+            problems.append(f"--run needs --apply; {USAGE}")
+        if positionals:
+            problems.append(f"--run takes no doc path; {USAGE}")
+        if "--file-only" in flags:
+            problems.append("--run applies an earlier file-only run; it can't be combined with --file-only")
+        if not problems:
+            out += resume((cwd / Path(opts["run"]).expanduser()).resolve(), problems)
+        return finish(out, problems, hints)
+
     if len(positionals) != 1:
         problems.append(f"expected one doc path, got {len(positionals)} "
                         f"(wrap a path with spaces in quotes); {USAGE}")
@@ -585,12 +596,115 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 0
 
 
+VERDICT_CHOICES = ("accept", "reject", "defer")
+RECOMMENDED_SLOT = "<!-- orchestrator: at most 3 items, only ones that change what oiler does next -->"
+
+
+def render_decisions(manifest: dict) -> str:
+    rows = [f"| {e['id']} | {e['severity']} | {cell(e['title'])} | {d['verdict']} | {cell(d['why'])} |"
+            for e in manifest["index"] if (d := manifest["dispositions"].get(e["id"]))]
+    return "\n".join([f"# Decisions — {Path(manifest['doc']).name}", "",
+                      *table("| ID | Severity | Title | Verdict | Why |", rows)]) + "\n"
+
+
+def cmd_decide(args: argparse.Namespace) -> int:
+    run, manifest = open_run(args.run)
+    if manifest is None:
+        return 2
+    # The stored index, never a re-check: the session edits the doc between decide calls.
+    problem = None
+    why = one_line(args.why)
+    if manifest.get("index") is None:
+        problem = "no findings index; run check first"
+    elif manifest["mode"] != "apply":
+        problem = "this is a file-only run; apply it with /orko-review --run <run-dir> --apply"
+    elif args.finding not in {e["id"] for e in manifest["index"]}:
+        problem = f"{args.finding} is not in the findings index"
+    elif not why:
+        problem = "--why is empty"
+    if problem:
+        print(f"problem: {problem}")
+        return 2
+    manifest["dispositions"][args.finding] = {"verdict": args.verdict, "why": why}
+    write_manifest(run, manifest)
+    (run / "decisions.md").write_text(render_decisions(manifest), encoding="utf-8")
+    print(f"recorded: {args.finding} {args.verdict}")
+    return 0
+
+
+def cmd_summary(args: argparse.Namespace) -> int:
+    run, manifest = open_run(args.run)
+    if manifest is None:
+        return 2
+    index = manifest.get("index")
+    if index is None:
+        print("problem: no findings index; run check first")
+        return 2
+    decided = manifest["dispositions"]
+    if manifest["mode"] == "apply":
+        missing = [e["id"] for e in index if e["id"] not in decided]
+        if missing:
+            print(f"problem: undecided: {', '.join(missing)}")
+            return 2
+    lenses = manifest["lenses"]
+    failed = [lens for lens in lenses if manifest["status"][lens] == "failed"]
+    out = ["## Reviewed",
+           f"{manifest['doc']} — {manifest['type']} — {len(lenses)} lenses ({', '.join(lenses)}) — run {run}",
+           *(f"Specialist: {name} — {why}" for name, why in manifest["extras"].items())]
+    if manifest["mode"] == "file-only":
+        out += ["## Findings", *index_table(index)]
+        if failed:
+            out.append(f"failed-lenses: {', '.join(failed)}")
+        out.append(f"Apply later: /orko-review --run {run} --apply")
+    else:
+        def rows(verdict: str) -> list[str]:
+            return [f"| {e['id']} | {e['severity']} | {cell(e['title'])} | {cell(decided[e['id']]['why'])} |"
+                    for e in index if decided[e["id"]]["verdict"] == verdict]
+        needs = rows("defer") + [f"| {lens}/— | — | lens failed twice | {cell(manifest['failures'].get(lens, ''))} |"
+                                 for lens in failed]
+        out += ["## Accepted", *table("| ID | Severity | Title | Change |", rows("accept")),
+                "## Rejected", *table("| ID | Severity | Title | Why |", rows("reject")),
+                "## Needs you", *table("| ID | Severity | Title | Why |", needs),
+                "## Recommended", RECOMMENDED_SLOT]
+    print("\n".join(out))
+    return 0
+
+
+def resume(run: Path, problems: list[str]) -> list[str]:
+    """Flip an earlier file-only run to apply, so the session can enter at the apply step."""
+    manifest = load_manifest(run)
+    if manifest is None:
+        problems.append(f"no readable run.json in {run}")
+        return []
+    if manifest["mode"] != "file-only":
+        problems.append(f"run is in {manifest['mode']} mode; only a file-only run can be applied later")
+    if manifest.get("index") is None:
+        problems.append("run has no stored findings index; its check never passed")
+    doc = Path(manifest["doc"])
+    if not doc.is_file() or sha256(doc) != manifest["doc_sha256"]:
+        problems.append(f"doc changed since the run started (original: {run / 'doc.orig.md'})")
+    if problems:
+        return []
+    manifest["mode"] = "apply"
+    write_manifest(run, manifest)
+    return [f"doc: {doc}", f"resume: {run}", *index_table(manifest["index"])]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orko_review.py", description="orko-review helper")
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("check", help="validate every report and store the findings index")
     check.add_argument("--run", required=True)
     check.set_defaults(func=cmd_check)
+    decide = sub.add_parser("decide", help="record one finding's disposition")
+    decide.add_argument("--run", required=True)
+    decide.add_argument("--finding", required=True, help="<lens>/F-<n>")
+    decide.add_argument("--verdict", required=True, choices=VERDICT_CHOICES)
+    decide.add_argument("--why", required=True)
+    decide.set_defaults(func=cmd_decide)
+    summary = sub.add_parser("summary", help="render the run's summary")
+    summary.add_argument("--run", required=True)
+    summary.set_defaults(func=cmd_summary)
     return parser
 
 
