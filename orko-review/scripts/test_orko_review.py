@@ -150,3 +150,121 @@ class TestEvergreenAndLenses:
     def test_specialist_names_never_equal_core_names(self):
         core = {lens for lenses in orko_review.CORE_LENSES.values() for lens in lenses}
         assert not core & set(orko_review.EXTRA_LENSES)
+
+
+def pre(argv, home, cwd):
+    return orko_review.preflight_lines(argv, home, cwd)
+
+
+def blocked(lines):
+    return lines[-1] == "STATUS: blocked"
+
+
+class TestPreflight:
+    def test_spec_doc_reports_its_resolution(self, project, home):
+        lines = pre(["--effort", "high", SPEC_REL], home, project)
+        assert lines[-1] == "STATUS: ok"
+        assert "mode: apply" in lines
+        assert "effort: high" in lines
+        assert f"doc: {project / SPEC_REL}" in lines
+        assert "type: spec (parent directory specs/)" in lines
+        assert "lenses: accuracy, completeness, design" in lines
+        assert "extras-available: security, frontend, data, performance, operations" in lines
+        assert f"evergreen: {project / 'CLAUDE.md'}" in lines
+        assert f"reviews-dir: {project / 'docs/superpowers/reviews'}" in lines
+        assert "agent: orko-review-reviewer" in lines
+
+    @pytest.mark.parametrize("level", ["high", "xhigh", "max"])
+    def test_high_and_above_pass_the_effort_gate(self, project, home, level):
+        assert pre(["--effort", level, SPEC_REL], home, project)[-1] == "STATUS: ok"
+
+    def test_project_level_agent_link_is_found(self, project, tmp_path):
+        (project / ".claude" / "agents").mkdir(parents=True)
+        (project / ".claude" / "agents" / "orko-review").symlink_to(orko_review.SKILL_DIR / "agents")
+        lines = pre(["--effort", "high", SPEC_REL], tmp_path / "emptyhome", project)
+        assert "agent: orko-review-reviewer" in lines
+
+    def test_symlink_loop_in_agents_directory_terminates(self, project, home):
+        (home / ".claude" / "agents" / "loop").symlink_to(home / ".claude" / "agents")
+        assert pre(["--effort", "high", SPEC_REL], home, project)[-1] == "STATUS: ok"
+
+    def test_spec_flag_pointing_at_a_missing_file_blocks(self, project, home):
+        lines = pre(["--effort", "high", PLAN_REL, "--spec", "docs/nope.md"], home, project)
+        assert any(l.startswith("problem: spec not found") for l in lines)
+
+    def test_relative_doc_path_resolves_against_the_cwd(self, project, home):
+        lines = pre(["--effort", "high", "specs/2026-09-25-widget-design.md"], home, project / "docs/superpowers")
+        assert f"doc: {project / SPEC_REL}" in lines
+
+    def test_plan_reports_its_spec(self, project, home):
+        lines = pre(["--effort", "high", PLAN_REL], home, project)
+        assert f"spec: {project / SPEC_REL}" in lines
+        assert "lenses: coverage, executability, verification" in lines
+
+    def test_plan_with_unresolvable_spec_blocks_with_hint(self, project, home):
+        write(project / PLAN_REL, "# Plan\n\n**Spec:** `docs/nope.md`\n")
+        lines = pre(["--effort", "high", PLAN_REL], home, project)
+        assert blocked(lines)
+        assert "hint: pass --spec <path>" in lines
+
+    def test_spec_flag_overrides_the_plan_header(self, project, home):
+        other = write(project / "other-design.md", "# o\n")
+        lines = pre(["--effort", "high", PLAN_REL, "--spec", "other-design.md"], home, project)
+        assert f"spec: {other}" in lines
+
+    def test_spec_flag_on_a_spec_blocks(self, project, home):
+        lines = pre(["--effort", "high", SPEC_REL, "--spec", PLAN_REL], home, project)
+        assert "problem: --spec applies only to plans" in lines
+
+    def test_missing_doc_blocks(self, project, home):
+        assert blocked(pre(["--effort", "high", "docs/nope.md"], home, project))
+
+    def test_non_markdown_doc_blocks(self, project, home):
+        write(project / "notes.txt", "x\n")
+        lines = pre(["--effort", "high", "notes.txt"], home, project)
+        assert any(l.startswith("problem: not a Markdown doc") for l in lines)
+
+    def test_two_positionals_block_and_suggest_quoting(self, project, home):
+        lines = pre(["--effort", "high", "my", "spec.md"], home, project)
+        assert any("wrap a path with spaces in quotes" in l for l in lines)
+
+    def test_unknown_flag_blocks(self, project, home):
+        assert blocked(pre(["--effort", "high", SPEC_REL, "--fast"], home, project))
+
+    def test_both_mode_flags_block(self, project, home):
+        assert blocked(pre(["--effort", "high", SPEC_REL, "--apply", "--file-only"], home, project))
+
+    def test_apply_below_high_blocks_with_effort_hint(self, project, home):
+        lines = pre(["--effort", "medium", SPEC_REL], home, project)
+        assert blocked(lines)
+        assert "hint: run /effort high, then rerun" in lines
+
+    def test_file_only_below_high_warns_and_continues(self, project, home):
+        lines = pre(["--effort", "medium", SPEC_REL, "--file-only"], home, project)
+        assert lines[-1] == "STATUS: ok"
+        assert "mode: file-only" in lines
+        assert any(l.startswith("warning: session effort is medium") for l in lines)
+
+    @pytest.mark.parametrize("value", ["", "${CLAUDE_EFFORT}"])
+    def test_unknown_effort_warns_and_does_not_block(self, project, home, value):
+        lines = pre(["--effort", value, SPEC_REL], home, project)
+        assert "effort: unknown" in lines
+        assert lines[-1] == "STATUS: ok"
+
+    def test_missing_agent_blocks_with_install_hint(self, project, tmp_path):
+        lines = pre(["--effort", "high", SPEC_REL], tmp_path / "emptyhome", project)
+        assert "agent: missing" in lines
+        assert f"hint: install with: {orko_review.AGENT_INSTALL}" in lines
+
+    def test_agent_without_high_effort_blocks(self, project, tmp_path):
+        agents = tmp_path / "h2" / ".claude" / "agents"
+        write(agents / "r.md", "---\nname: orko-review-reviewer\neffort: medium\n---\nx\n")
+        lines = pre(["--effort", "high", SPEC_REL], tmp_path / "h2", project)
+        assert "problem: orko-review-reviewer must pin effort: high" in lines
+
+    def test_crash_still_exits_zero(self, monkeypatch, capsys):
+        def boom(*_):
+            raise RuntimeError("x")
+        monkeypatch.setattr(orko_review, "preflight_lines", boom)
+        assert orko_review.main(["preflight", "a.md"]) == 0
+        assert capsys.readouterr().out.strip().endswith("STATUS: blocked")
