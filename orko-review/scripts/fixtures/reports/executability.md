@@ -56,7 +56,7 @@ not ready
 ### F-7 [minor] The fixture scrub's expected output is wrong, and it leaves the username in slugs
 
 - Where: Task 4 Step 1 (lines 999-1009)
-- Evidence: I ran the step's commands into a scratch copy. `grep -c "/Users/" "$DST"/*.md` printed `accuracy.md:1`, `completeness.md:0`, `design.md:0`, not 0 for each. The hit is the literal `` (`/Users/…`) `` at accuracy.md:33. `grep -n USER` still finds line 17 of accuracy.md, with `-Users-USER-files-projects-ajp-llmtfn/…`, `-Users-USER-files-repo-local-bt1-2026-07/…`, and `-Users-USER-files-projects-afactory-rfs-campsight-lite-v1/…`, because the sed patterns match only `~`.
+- Evidence: I ran the step's commands into a scratch copy. `grep -c "/Users/" "$DST"/*.md` printed `accuracy.md:1`, `completeness.md:0`, `design.md:0`, not 0 for each. The hit is the literal `` (`/Users/…`) `` at accuracy.md:33. `grep -n USER` still finds line 17 of accuracy.md, with `-Users-USER-files-projects-proj-a/…`, `-Users-USER-files-repo-proj-b/…`, and `-Users-USER-files-projects-proj-c/…`, because the sed patterns match only `~`.
 - Problem: An implementer who trusts "expect 0 for each" either stops or edits the fixture beyond the one recorded scrub. The public repo also gets the username and names of private project directories, against the intent of the Global Constraint at line 27.
 - Fix: Add a third expression, `-e 's#-Users-USER-#-Users-USER-#g'`, change the check to `grep -c "USER" "$DST"/*.md   # expect 0 for each`, and add to the commit message: "and `-Users-USER-` project slugs replaced by `-Users-USER-`." The `(/Users/…)` literal stays. Confirm afterwards that `test_real_reports_pass` still counts 8, 23, and 15.
 

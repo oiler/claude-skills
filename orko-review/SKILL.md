@@ -73,7 +73,7 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/orko_review.py decide --run <run-dir> --find
 
 For `accept`, `--why` states the change you made. Findings from different lenses that describe the same problem get the same verdict and a `--why` that names the other ID. Edit only the document under review.
 
-Single-quote each `--why` and write `'\''` for a literal single quote: double quotes let `$` and backticks run.
+Single-quote each `--why` and write `'\''` for a literal single quote: double quotes let `$` and backticks run. Single-quote every path argument the same way: the doc, the spec, and the run directory.
 
 ## 8. Summary
 
