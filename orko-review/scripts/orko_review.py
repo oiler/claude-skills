@@ -5,6 +5,7 @@ Standard library only (Python 3.10+). SKILL.md says when each subcommand runs.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -422,14 +423,185 @@ def cmd_start(argv: list[str], cwd: Path | None = None, now: datetime | None = N
     return 0
 
 
+SEVERITIES = ("blocker", "major", "minor", "nit")
+VERDICTS = ("ready", "ready with changes", "not ready")
+BULLETS = ("Where", "Evidence", "Problem", "Fix")
+SECTIONS = ("## Verdict", "## Findings", "## Checked and sound")
+FRONT_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+FINDING_RE = re.compile(r"^### F-(\d+) \[([^\]]*)\] (\S.*)$")
+BULLET_RE = re.compile(r"^- (Where|Evidence|Problem|Fix):(.*)$")
+
+
+def parse_findings(block: list[str]) -> tuple[list[dict], list[str]]:
+    content = [line for line in block if line.strip()]
+    if not any(line.startswith("### ") for line in content):
+        if [line.strip() for line in content] == ["None."]:
+            return [], []
+        return [], ["'## Findings' must hold 'None.' or at least one '### F-<n> [<severity>] <title>'"]
+    if any(line.strip() == "None." for line in content):
+        return [], ["'None.' can't sit alongside findings"]
+    findings: list[dict] = []
+    errors: list[str] = []
+    current: dict | None = None
+    for line in content:
+        if line.startswith("### "):
+            match = FINDING_RE.match(line.rstrip())
+            if not match:
+                errors.append(f"malformed finding heading: {line.strip()!r}")
+                current = None
+                continue
+            current = {"n": int(match.group(1)), "severity": match.group(2),
+                       "title": match.group(3).strip(), "bullets": []}
+            findings.append(current)
+        elif current is not None:
+            bullet = BULLET_RE.match(line)
+            if bullet:
+                current["bullets"].append((bullet.group(1), bullet.group(2).strip()))
+    for position, finding in enumerate(findings, 1):
+        tag = f"F-{finding['n']}"
+        if finding["n"] != position:
+            errors.append(f"finding IDs must run F-1 to F-{len(findings)} without gaps; "
+                          f"found {tag} at position {position}")
+        if finding["severity"] not in SEVERITIES:
+            errors.append(f"{tag} severity {finding['severity']!r} is not one of {', '.join(SEVERITIES)}")
+        labels = [label for label, _ in finding["bullets"]]
+        if labels != list(BULLETS):
+            errors.append(f"{tag} needs the bullets Where, Evidence, Problem, Fix in that order; "
+                          f"found {', '.join(labels) or 'none'}")
+        elif not all(value for _, value in finding["bullets"]):
+            errors.append(f"{tag} has an empty bullet")
+    return [{k: f[k] for k in ("n", "severity", "title")} for f in findings], errors
+
+
+def parse_report(text: str, lens: str, doc: str) -> tuple[list[dict], list[str]]:
+    """(findings, errors) for one report; the findings mean something only when errors is empty."""
+    text = text.replace("\r\n", "\n")
+    front = FRONT_RE.match(text)
+    if not front:
+        return [], ["front matter missing: the report must open with a --- block holding lens and doc"]
+    errors: list[str] = []
+    fields = dict(FIELD_RE.findall(front.group(1)))
+    if sorted(fields) != ["doc", "lens"]:
+        errors.append(f"front matter keys are {sorted(fields)}, expected exactly doc and lens")
+    if fields.get("lens") != lens:
+        errors.append(f"lens is {fields.get('lens')!r}, expected {lens!r}")
+    if fields.get("doc") != doc:
+        errors.append(f"doc is {fields.get('doc')!r}, expected {doc!r}")
+    lines = text[front.end():].splitlines()
+    starts: list[int] = []
+    for heading in SECTIONS:
+        hits = [i for i, line in enumerate(lines) if line.rstrip() == heading]
+        if len(hits) != 1:
+            errors.append(f"{heading!r} appears {len(hits)} times, expected once")
+        starts.append(hits[0] if len(hits) == 1 else -1)
+    if -1 in starts:
+        return [], errors
+    if not starts[0] < starts[1] < starts[2]:
+        return [], errors + ["sections must be in the order Verdict, Findings, Checked and sound"]
+    verdict = next((line.strip() for line in lines[starts[0] + 1:starts[1]] if line.strip()), "")
+    if verdict not in VERDICTS:
+        errors.append(f"verdict {verdict!r} is not one of {', '.join(VERDICTS)}")
+    findings, finding_errors = parse_findings(lines[starts[1] + 1:starts[2]])
+    errors += finding_errors
+    if not any(line.startswith("- ") for line in lines[starts[2] + 1:]):
+        errors.append("'## Checked and sound' needs at least one bullet")
+    return findings, errors
+
+
+def cell(text: str) -> str:
+    return one_line(text).replace("|", r"\|")
+
+
+def table(header: str, rows: list[str]) -> list[str]:
+    if not rows:
+        return ["None."]
+    return [header, "|" + "---|" * (header.count("|") - 1), *rows]
+
+
+def index_table(index: list[dict]) -> list[str]:
+    return table("| ID | Severity | Title |",
+                 [f"| {e['id']} | {e['severity']} | {cell(e['title'])} |" for e in index])
+
+
+def open_run(run_arg: str) -> tuple[Path, dict | None]:
+    run = Path(run_arg).expanduser().resolve()
+    manifest = load_manifest(run)
+    if manifest is None:
+        print(f"problem: no readable run.json in {run}")
+    return run, manifest
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    run, manifest = open_run(args.run)
+    if manifest is None:
+        return 2
+    doc = Path(manifest["doc"])
+    if not doc.is_file() or sha256(doc) != manifest["doc_sha256"]:
+        # The reviews may describe a different text, so nothing else runs.
+        print(f"problem: doc changed since start (original: {run / 'doc.orig.md'})\nSTATUS: blocked")
+        return 3
+    lenses = manifest["lenses"]
+    retries: list[str] = []
+    entries: list[dict] = []
+    for lens in lenses:
+        if manifest["status"][lens] == "failed":
+            continue
+        report = run / f"{lens}.md"
+        if report.is_file():
+            findings, errors = parse_report(read_text(report), lens, manifest["doc"])
+        else:
+            findings, errors = [], ["report missing"]
+        if not errors:
+            manifest["status"][lens] = "valid"
+            entries += [{"id": f"{lens}/F-{f['n']}", "lens": lens, **f} for f in findings]
+            continue
+        attempts = manifest["attempts"].get(lens, 0) + 1
+        manifest["attempts"][lens] = attempts
+        manifest["failures"][lens] = "; ".join(errors)
+        if report.is_file():
+            # A retry starts from an empty path, so the new reviewer can't read its predecessor.
+            report.rename(run / f"{lens}.invalid-{attempts}.md")
+        if attempts >= 2:
+            manifest["status"][lens] = "failed"
+        else:
+            manifest["status"][lens] = "retry"
+            retries.append(f"retry: {lens} — {manifest['failures'][lens]}")
+    failed = [lens for lens in lenses if manifest["status"][lens] == "failed"]
+    if retries:
+        write_manifest(run, manifest)
+        print("\n".join(retries))
+        return 2
+    if len(failed) == len(lenses):
+        write_manifest(run, manifest)
+        print("problem: no valid reports\nSTATUS: blocked")
+        return 3
+    entries.sort(key=lambda e: (SEVERITIES.index(e["severity"]), lenses.index(e["lens"]), e["n"]))
+    manifest["index"] = entries
+    write_manifest(run, manifest)
+    lines = index_table(entries)
+    if failed:
+        lines.append(f"failed-lenses: {', '.join(failed)}")
+    print("\n".join(lines))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="orko_review.py", description="orko-review helper")
+    sub = parser.add_subparsers(dest="command", required=True)
+    check = sub.add_parser("check", help="validate every report and store the findings index")
+    check.add_argument("--run", required=True)
+    check.set_defaults(func=cmd_check)
+    return parser
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["preflight"]:
         return cmd_preflight(argv[1:])
     if argv[:1] == ["start"]:
         return cmd_start(argv[1:])
-    print(f"usage: orko_review.py {{{','.join(SUBCOMMANDS)}}} ...", file=sys.stderr)
-    return 2
+    args = build_parser().parse_args(argv)
+    return args.func(args)
 
 
 if __name__ == "__main__":

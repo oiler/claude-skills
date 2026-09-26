@@ -389,3 +389,166 @@ class TestStart:
         write(project / PLAN_REL, "# Widget Implementation Plan\n\n**Spec:** `docs/nope.md`\n")
         assert start(project, doc=PLAN_REL) == 2
         assert "hint: pass --spec <path>" in capsys.readouterr().out
+
+
+def mutate(pattern, repl, count=1, flags=re.M):
+    return lambda t: re.sub(pattern, repl, t, count=count, flags=flags)
+
+
+DOTALL = re.M | re.S
+
+
+MUTATIONS = {
+    "no front matter": (mutate(r"\A---\n.*?\n---\n", "", 1, DOTALL), "front matter missing"),
+    "extra front matter key": (mutate(r"^lens: ", "model: opus\nlens: "), "exactly doc and lens"),
+    "lens mismatch": (mutate(r"^lens: design$", "lens: other"), "lens is"),
+    "doc mismatch": (mutate(r"^doc: .*$", "doc: /elsewhere.md"), "doc is"),
+    "missing section": (mutate(r"^## Verdict\n", ""), "'## Verdict' appears 0 times"),
+    "duplicate section": (lambda t: t + "\n## Findings\n", "'## Findings' appears 2 times"),
+    "sections out of order": (lambda t: re.sub(r"^## Verdict\n\nready with changes\n\n", "", t, flags=re.M)
+                              + "\n## Verdict\n\nready with changes\n", "order"),
+    "bad verdict": (mutate(r"^ready with changes$", "mostly ready"), "verdict"),
+    "empty findings": (mutate(r"(^## Findings\n).*?(?=^## Checked and sound)", r"\1\n", 1, DOTALL), "must hold"),
+    "id gap": (mutate(r"^### F-15 ", "### F-16 "), "without gaps"),
+    "bad severity": (mutate(r"^### F-1 \[major\]", "### F-1 [critical]"), "severity"),
+    "malformed heading": (mutate(r"^### F-2 \[[a-z]+\] ", "### Finding 2 "), "malformed finding heading"),
+    "empty title": (mutate(r"^(### F-1 \[major\]) .*$", r"\1 "), "malformed finding heading"),
+    "missing bullet": (mutate(r"^- Fix: .*\n", ""), "needs the bullets"),
+    "bullets out of order": (mutate(r"^(- Where: .*)\n(- Evidence: .*)$", r"\2\n\1"), "needs the bullets"),
+    "empty bullet": (mutate(r"^- Problem: .*$", "- Problem:"), "empty bullet"),
+    "none beside findings": (mutate(r"^## Findings\n", "## Findings\n\nNone.\n"), "alongside"),
+    "no checked bullets": (mutate(r"(^## Checked and sound\n).*\Z", r"\1", 1, DOTALL), "at least one bullet"),
+}
+
+
+def check_errors(text, lens="design", doc=FIXTURE_DOC):
+    return orko_review.parse_report(text, lens, doc)[1]
+
+
+class TestParseReport:
+    @pytest.mark.parametrize("lens,count,doc", [
+        ("accuracy", 8, FIXTURE_DOC), ("completeness", 23, FIXTURE_DOC), ("design", 15, FIXTURE_DOC),
+        ("coverage", 15, FIXTURE_PLAN), ("executability", 14, FIXTURE_PLAN), ("verification", 12, FIXTURE_PLAN)])
+    def test_real_reports_pass(self, lens, count, doc):
+        text = (FIXTURES / "reports" / f"{lens}.md").read_text(encoding="utf-8")
+        findings, errors = orko_review.parse_report(text, lens, doc)
+        assert errors == []
+        assert [f["n"] for f in findings] == list(range(1, count + 1))
+
+    @pytest.mark.parametrize("name", MUTATIONS)
+    def test_each_broken_rule_is_rejected(self, name):
+        change, message = MUTATIONS[name]
+        text = (FIXTURES / "reports" / "design.md").read_text(encoding="utf-8")
+        errors = check_errors(change(text))
+        assert any(message in e for e in errors), errors
+
+    def test_none_findings_is_valid(self):
+        text = mutate(r"(^## Findings\n).*?(?=^## Checked and sound)", r"\1\nNone.\n\n", 1, DOTALL)(
+            (FIXTURES / "reports" / "design.md").read_text(encoding="utf-8"))
+        assert orko_review.parse_report(text, "design", FIXTURE_DOC) == ([], [])
+
+    def test_windows_line_endings_validate(self):
+        text = (FIXTURES / "reports" / "design.md").read_text(encoding="utf-8").replace("\n", "\r\n")
+        assert check_errors(text) == []
+
+    def test_trailing_whitespace_on_headings_is_tolerated(self):
+        text = (FIXTURES / "reports" / "design.md").read_text(encoding="utf-8").replace(
+            "## Findings\n", "## Findings  \n")
+        assert check_errors(text) == []
+
+
+def started(project, *extra, doc=SPEC_REL, mode="apply"):
+    assert start(project, *extra, doc=doc, mode=mode) == 0
+    return run_dir(project, stem=Path(doc).stem)
+
+
+def put_report(run, lens, source="design", text=None):
+    manifest = orko_review.load_manifest(run)
+    body = text if text is not None else report_text(lens, manifest["doc"], source)
+    write(run / f"{lens}.md", body)
+
+
+def check(run):
+    return orko_review.main(["check", "--run", str(run)])
+
+
+class TestCheck:
+    def test_valid_reports_store_and_print_a_sorted_index(self, project, capsys):
+        run = started(project)
+        for lens, source in (("accuracy", "accuracy"), ("completeness", "completeness"), ("design", "design")):
+            put_report(run, lens, source)
+        capsys.readouterr()
+        assert check(run) == 0
+        manifest = orko_review.load_manifest(run)
+        index = manifest["index"]
+        assert len(index) == 8 + 23 + 15
+        keys = [(orko_review.SEVERITIES.index(e["severity"]), manifest["lenses"].index(e["lens"]), e["n"])
+                for e in index]
+        assert keys == sorted(keys)
+        assert index[0]["id"] == f"{index[0]['lens']}/F-{index[0]['n']}"
+        out = capsys.readouterr().out
+        assert out.startswith("| ID | Severity | Title |\n|---|---|---|\n")
+        assert manifest["status"] == {"accuracy": "valid", "completeness": "valid", "design": "valid"}
+
+    def test_pipe_in_title_is_escaped(self, project, capsys):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        design = (run / "design.md").read_text(encoding="utf-8")
+        write(run / "design.md", re.sub(r"^### F-1 \[major\] ", "### F-1 [major] a | b ", design, flags=re.M))
+        capsys.readouterr()
+        assert check(run) == 0
+        assert r"a \| b" in capsys.readouterr().out
+
+    def test_first_failure_asks_for_a_retry_and_moves_the_invalid_report_aside(self, project, capsys):
+        run = started(project)
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        write(run / "design.md", "not a report\n")
+        capsys.readouterr()
+        assert check(run) == 2
+        assert "retry: design — front matter missing" in capsys.readouterr().out
+        assert not (run / "design.md").exists()
+        assert (run / "design.invalid-1.md").read_text(encoding="utf-8") == "not a report\n"
+        manifest = orko_review.load_manifest(run)
+        assert manifest["attempts"] == {"design": 1}
+        assert manifest["index"] is None
+
+    def test_second_failure_marks_the_lens_failed_for_the_run(self, project, capsys):
+        run = started(project)
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        assert check(run) == 2
+        capsys.readouterr()
+        assert check(run) == 0
+        out = capsys.readouterr().out
+        assert "failed-lenses: design" in out
+        put_report(run, "design")
+        assert check(run) == 0
+        manifest = orko_review.load_manifest(run)
+        assert manifest["status"]["design"] == "failed"
+        assert all(e["lens"] != "design" for e in manifest["index"])
+
+    def test_every_lens_failed_blocks(self, project, capsys):
+        run = started(project)
+        assert check(run) == 2
+        capsys.readouterr()
+        assert check(run) == 3
+        out = capsys.readouterr().out
+        assert "problem: no valid reports" in out
+        assert out.rstrip().endswith("STATUS: blocked")
+
+    def test_changed_doc_blocks_before_anything_else(self, project, capsys):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        write(project / SPEC_REL, "# Edited by someone\n")
+        capsys.readouterr()
+        assert check(run) == 3
+        out = capsys.readouterr().out
+        assert f"problem: doc changed since start (original: {run / 'doc.orig.md'})" in out
+        assert orko_review.load_manifest(run)["status"]["design"] == "pending"
+
+    def test_missing_run_manifest_refuses(self, tmp_path, capsys):
+        assert check(tmp_path) == 2
+        assert f"problem: no readable run.json in {tmp_path.resolve()}" in capsys.readouterr().out
