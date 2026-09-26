@@ -390,9 +390,10 @@ def validate_extras(extras: list[tuple[str, str]]) -> list[str]:
 def cmd_start(argv: list[str], cwd: Path | None = None, now: datetime | None = None) -> int:
     cwd = cwd or Path.cwd()
     opts, extras, problems = parse_start_args(argv)
+    hints: list[str] = []
     res = None
     if not problems:
-        res, r_problems, _hints = resolve(opts["doc"], opts["spec"], cwd)
+        res, r_problems, hints = resolve(opts["doc"], opts["spec"], cwd)
         problems += r_problems + validate_extras(extras)
     run = None
     if not problems:
@@ -400,7 +401,7 @@ def cmd_start(argv: list[str], cwd: Path | None = None, now: datetime | None = N
         if run.exists():
             problems.append(f"run directory already exists: {run}")
     if problems:
-        print("\n".join(f"problem: {p}" for p in problems))
+        print("\n".join([f"problem: {p}" for p in problems] + [f"hint: {h}" for h in hints]))
         return 2
     (run / "briefs").mkdir(parents=True)
     shutil.copyfile(res.doc, run / "doc.orig.md")

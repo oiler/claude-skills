@@ -384,3 +384,8 @@ class TestStart:
     def test_blocked_resolution_refuses(self, project):
         write(project / "notes.txt", "x\n")
         assert start(project, doc="notes.txt") == 2
+
+    def test_unresolvable_plan_spec_prints_the_hint(self, project, capsys):
+        write(project / PLAN_REL, "# Widget Implementation Plan\n\n**Spec:** `docs/nope.md`\n")
+        assert start(project, doc=PLAN_REL) == 2
+        assert "hint: pass --spec <path>" in capsys.readouterr().out
