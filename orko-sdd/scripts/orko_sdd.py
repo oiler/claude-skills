@@ -27,13 +27,15 @@ RELEASE_CRITICAL_MARKER = "orko-sdd: release-critical"
 
 # Role -> allowed (model, effort) pairs, from ~/.claude/MODELS.md phases 5-6.
 ROLE_TABLE: dict[str, tuple[tuple[str, str], ...]] = {
-    "implementer-scoped": (("sonnet", "high"),),
+    "implementer-scoped": (("sonnet", "medium"),),
     "implementer-gap": (("opus", "low"),),
     "implementer-multifile": (("opus", "medium"), ("opus", "high")),
     "implementer-ui": (("sonnet", "high"),),
     "implementer-ui-replication": (("opus", "medium"),),
-    "reviewer": (("opus", "low"),),
-    "re-reviewer": (("opus", "low"),),
+    "reviewer": (("opus", "medium"),),
+    "reviewer-security": (("opus", "high"),),
+    "re-reviewer": (("opus", "medium"),),
+    "re-reviewer-security": (("opus", "high"),),
     "fix-incomplete": (),  # resolved from the ledger in allowed_combos
     "fix-wrong-diagnosis": (("fable", "high"),),
     "fix-tier-up": (("opus", "medium"), ("opus", "high")),  # filtered in allowed_combos
@@ -49,7 +51,9 @@ ROLE_SOURCE = {
     "implementer-ui": "Implementer: frontend/UI from clear art direction",
     "implementer-ui-replication": "Implementer: high-fidelity UI replication or difficult visual debugging",
     "reviewer": "Per-task code reviewer",
-    "re-reviewer": "Scoped re-review (CLAUDE.md: opus for scoped re-reviews)",
+    "reviewer-security": "Per-task code reviewer: high for auth, input handling or other security-sensitive diffs",
+    "re-reviewer": "Scoped re-review (CLAUDE.md: opus for scoped re-reviews), at the per-task reviewer's effort",
+    "re-reviewer-security": "Scoped re-review of security-sensitive code, at the per-task reviewer's high",
     "fix-incomplete": ("Fix failure caused by skipped files, incomplete execution or missing verification"
                        " (xhigh is reserved, so a high-effort failure goes to fix-tier-up)"),
     "fix-wrong-diagnosis": "Fix failure after thorough investigation produced a confident but wrong diagnosis",
@@ -129,6 +133,18 @@ def render_role_table() -> str:
     rows = ["| Role | Model/effort | MODELS.md row |", "|---|---|---|"]
     rows += [f"| `{role}` | {combos_text(role)} | {ROLE_SOURCE[role]} |" for role in ROLE_TABLE]
     return "\n".join(rows)
+
+
+# MODELS.md runs the orchestrator at high; xhigh and max are above it. `/effort high` typed as a command
+# saves high as oiler's default, so the fix names the session-only path.
+ORCHESTRATOR_EFFORTS = ("high", "xhigh", "max")
+EFFORT_FIX = ("open `/effort`, choose high, and press `s` to apply it to this session only "
+              "(or relaunch with `claude --effort high`)")
+
+
+def orchestrator_effort() -> str:
+    """The effort in effect for this Bash subprocess: Claude Code sets CLAUDE_EFFORT when the model supports it."""
+    return os.environ.get("CLAUDE_EFFORT", "").strip() or "not set"
 
 
 FLAGS = ("--release-critical",)
@@ -239,6 +255,12 @@ def preflight_lines(argv: list[str], home: Path, cwd: Path) -> list[str]:
     else:
         problems.append(f"no master or main branch in {cwd} (is it a git repository?)")
 
+    effort = orchestrator_effort()
+    out.append(f"orchestrator-effort: {effort}")
+    if effort not in ORCHESTRATOR_EFFORTS:
+        problems.append(f"orchestrator effort is {effort}; MODELS.md runs the orchestrator at high. "
+                        f"To fix, {EFFORT_FIX}, then re-invoke")
+
     out.append(f"final-review: {'fable/high' if '--release-critical' in known else 'opus/high'}")
     out += [f"problem: {p}" for p in problems]
     out.append("STATUS: blocked" if problems else "STATUS: ok")
@@ -318,7 +340,8 @@ ENTRY_RE = re.compile(r"^(?:#|\||Ruling\b|orko-sdd:|[A-Z][\w,-]*(?: [\w#,-]+){0,
 LIST_ITEM_RE = re.compile(r"^(?:[-*+] |\d+[.)] )")
 PARKED_COUNT_RE = re.compile(r"(\d+) parked")
 CELL_PIPE_RE = re.compile(r"(?<!\\)\|")
-ROLE_LABELS = {"reviewer": "rev", "re-reviewer": "re-rev", "final-reviewer": "rev", "final-fixer": "fix"}
+ROLE_LABELS = {"reviewer": "rev", "reviewer-security": "rev", "re-reviewer": "re-rev",
+               "re-reviewer-security": "re-rev", "final-reviewer": "rev", "final-fixer": "fix"}
 RULING_SHAPE = "`Ruling: <what> — <why> — cost if wrong: <cost>`"
 SUPERSEDES_SHAPE = '`Ruling (supersedes "<words>"): …`'
 SKIP_DECISION_SHAPE = "`Task <N>: skip decision — <options>`"
@@ -727,6 +750,11 @@ def cmd_log(args: argparse.Namespace) -> int:
     line = f"Task {args.task}: dispatch {args.role} {args.model}/{args.effort} — {why}{suffix}"
     append_line(ledger, line)
     print(f"{line}\nsubagent_type: orko-sdd-{args.effort}\nmodel: {args.model}")
+    # The level can drop mid-run: oiler shifts /effort by phase, and a resume after a
+    # background-task notification runs at the session level. Warn, but don't refuse the dispatch.
+    if (effort := orchestrator_effort()) not in ORCHESTRATOR_EFFORTS:
+        print(f"warning: orchestrator effort is {effort}; MODELS.md runs the orchestrator at high. "
+              f"Tell oiler to {EFFORT_FIX}", file=sys.stderr)
     return 0
 
 

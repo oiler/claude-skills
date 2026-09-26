@@ -1,5 +1,17 @@
 # orko-sdd — Changelog
 
+## v0.1.2 — <release date>
+
+The role table follows oiler's 2026-09-25 effort policy, and the orchestrator's own effort is checked.
+
+### Changed
+
+- `implementer-scoped` runs at sonnet/medium instead of sonnet/high. A stalled scoped implementer now steps up to `fix-incomplete` at sonnet/high.
+- The per-task review splits into `reviewer` (opus/medium) and `reviewer-security` (opus/high), and the scoped re-review into `re-reviewer` (opus/medium) and `re-reviewer-security` (opus/high). A review whose dispatch gets the web-security line takes the security role, so `log` refuses a medium review of a security diff, and the Speed rule no longer trades that level away. Both security roles keep the `rev` and `re-rev` labels in the report.
+- `preflight` reads `CLAUDE_EFFORT`, prints `orchestrator-effort:`, and blocks below high, including when it isn't set. Its fix names the session-only path (`/effort`, choose high, press `s`, or `claude --effort high`), because a level typed after `/effort` becomes oiler's default. xhigh and max pass.
+- `log` warns on stderr, without refusing the dispatch, when the orchestrator's effort has dropped below high mid-run. SKILL.md has the orchestrator relay the fix to oiler and record the warning once as a `Follow-up:` line.
+- SKILL.md draws the line between `implementer-gap` and `implementer-multifile` by whether the files have to agree with each other, not by file count, and records each open point of a gap task as a `Ruling:` line.
+
 ## v0.1.1 — 2026-09-25
 
 Report fidelity and instruction gaps, from the v0.1.0 clean-room runs.
