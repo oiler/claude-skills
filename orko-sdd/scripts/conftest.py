@@ -22,6 +22,12 @@ def write_plugins(home: Path, version: str) -> None:
         encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def orchestrator_at_high(monkeypatch):
+    """Claude Code sets CLAUDE_EFFORT in every Bash subprocess; pin it so the host session's level can't leak in."""
+    monkeypatch.setenv("CLAUDE_EFFORT", "high")
+
+
 @pytest.fixture
 def ledger(tmp_path: Path) -> Path:
     """An SDD plan ledger at the path shape the script accepts."""

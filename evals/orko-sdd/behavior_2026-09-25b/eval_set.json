@@ -1,0 +1,150 @@
+{
+  "instrument": "policy scorecard (log + preflight), v0.1.1 vs v0.1.2",
+  "policy": "~/.claude/MODELS.md as of 2026-09-25 (session default medium; implementer-scoped sonnet/medium; per-task reviewer opus/medium, high for security-sensitive diffs; orchestrator opus/high)",
+  "scripts": {
+    "old": {
+      "source": "master:orko-sdd/scripts/orko_sdd.py (v0.1.1, 5d95114)",
+      "sha256": "f4a2e745ad317a5a3600e6321042a412b7d25d960f9ffddbf95ec4da09cfea44"
+    },
+    "new": {
+      "source": "orko-sdd/scripts/orko_sdd.py (v0.1.2 candidate, 0242af6)",
+      "sha256": "d852462f4cdc838dbd8f7d527381d763a4c991ec8579983ec7ded81b78735b9f"
+    }
+  },
+  "comparison_script_sha256": "169486ac88be6ed5993129403464be4ea65a518b8689530996cd0068500e7992",
+  "scorecard_sha256": "ec96a3d283222f48a2ad6c61bb4cbaba8357038b791239b8e6cdbb3fdafc77c2",
+  "results": [
+    {
+      "case": "scoped implementer, new policy",
+      "role": "implementer-scoped",
+      "combo": "sonnet/medium",
+      "policy": true,
+      "old": false,
+      "new": true
+    },
+    {
+      "case": "scoped implementer, old policy",
+      "role": "implementer-scoped",
+      "combo": "sonnet/high",
+      "policy": false,
+      "old": true,
+      "new": false
+    },
+    {
+      "case": "ordinary review, new policy",
+      "role": "reviewer",
+      "combo": "opus/medium",
+      "policy": true,
+      "old": false,
+      "new": true
+    },
+    {
+      "case": "ordinary review, old policy",
+      "role": "reviewer",
+      "combo": "opus/low",
+      "policy": false,
+      "old": true,
+      "new": false
+    },
+    {
+      "case": "security review, new policy",
+      "role": "reviewer-security",
+      "combo": "opus/high",
+      "policy": true,
+      "old": false,
+      "new": true
+    },
+    {
+      "case": "security review at medium",
+      "role": "reviewer-security",
+      "combo": "opus/medium",
+      "policy": false,
+      "old": false,
+      "new": false
+    },
+    {
+      "case": "ordinary re-review, mirrors reviewer",
+      "role": "re-reviewer",
+      "combo": "opus/medium",
+      "policy": true,
+      "old": false,
+      "new": true
+    },
+    {
+      "case": "security re-review, mirrors reviewer",
+      "role": "re-reviewer-security",
+      "combo": "opus/high",
+      "policy": true,
+      "old": false,
+      "new": true
+    },
+    {
+      "case": "gap implementer, unchanged",
+      "role": "implementer-gap",
+      "combo": "opus/low",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "multifile implementer, unchanged",
+      "role": "implementer-multifile",
+      "combo": "opus/medium",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "final reviewer, unchanged",
+      "role": "final-reviewer",
+      "combo": "opus/high",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "final fixer, unchanged",
+      "role": "final-fixer",
+      "combo": "opus/medium",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "effort": "low",
+      "old_preflight": "ok",
+      "new_preflight": "blocked",
+      "new_log_warns": true
+    },
+    {
+      "effort": "medium",
+      "old_preflight": "ok",
+      "new_preflight": "blocked",
+      "new_log_warns": true
+    },
+    {
+      "effort": "high",
+      "old_preflight": "ok",
+      "new_preflight": "ok",
+      "new_log_warns": false
+    },
+    {
+      "effort": "xhigh",
+      "old_preflight": "ok",
+      "new_preflight": "ok",
+      "new_log_warns": false
+    },
+    {
+      "effort": "max",
+      "old_preflight": "ok",
+      "new_preflight": "ok",
+      "new_log_warns": false
+    },
+    {
+      "effort": null,
+      "old_preflight": "ok",
+      "new_preflight": "blocked",
+      "new_log_warns": true
+    }
+  ]
+}

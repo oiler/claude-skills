@@ -10,7 +10,7 @@ import orko_sdd
 
 
 def run_log(ledger, *extra, task="1", role="implementer-scoped", model="sonnet",
-            effort="high", why="plan has the code"):
+            effort="medium", why="plan has the code"):
     return orko_sdd.main(["log", "--ledger", str(ledger), "--task", task, "--role", role,
                           "--model", model, "--effort", effort, "--why", why, *extra])
 
@@ -22,21 +22,21 @@ def last_line(ledger):
 class TestLog:
     def test_on_table_dispatch_appends_line_and_prints_dispatch_params(self, ledger, capsys):
         assert run_log(ledger) == 0
-        assert last_line(ledger) == "Task 1: dispatch implementer-scoped sonnet/high — plan has the code"
+        assert last_line(ledger) == "Task 1: dispatch implementer-scoped sonnet/medium — plan has the code"
         out = capsys.readouterr().out
-        assert "subagent_type: orko-sdd-high" in out
+        assert "subagent_type: orko-sdd-medium" in out
         assert "model: sonnet" in out
 
     def test_off_table_dispatch_is_rejected_and_not_logged(self, ledger, capsys):
         before = ledger.read_text(encoding="utf-8")
         assert run_log(ledger, model="opus") == 2
         assert ledger.read_text(encoding="utf-8") == before
-        assert "implementer-scoped allows sonnet/high" in capsys.readouterr().err
+        assert "implementer-scoped allows sonnet/medium" in capsys.readouterr().err
 
     def test_override_logs_off_table_dispatch_with_marker(self, ledger):
         assert run_log(ledger, "--override", model="opus", why="spec gap needs judgment") == 0
         assert last_line(ledger) == (
-            "Task 1: dispatch implementer-scoped opus/high — spec gap needs judgment [override]")
+            "Task 1: dispatch implementer-scoped opus/medium — spec gap needs judgment [override]")
 
     def test_why_newlines_collapse_to_one_line(self, ledger):
         assert run_log(ledger, why="first\nsecond") == 0
@@ -65,7 +65,7 @@ class TestLog:
 
     def test_a_batch_logs_one_line_for_its_tasks(self, ledger):
         assert run_log(ledger, task="3,4,5") == 0
-        assert last_line(ledger) == "Task 3,4,5: dispatch implementer-scoped sonnet/high — plan has the code"
+        assert last_line(ledger) == "Task 3,4,5: dispatch implementer-scoped sonnet/medium — plan has the code"
 
     def test_fix_incomplete_takes_same_model_at_next_effort(self, ledger):
         assert run_log(ledger, role="implementer-multifile", model="opus", effort="medium", why="w") == 0
@@ -73,9 +73,44 @@ class TestLog:
         assert run_log(ledger, role="fix-incomplete", model="opus", effort="high", why="w") == 0
 
     def test_fix_incomplete_rejected_after_a_high_effort_dispatch(self, ledger, capsys):
-        assert run_log(ledger) == 0
+        assert run_log(ledger, role="implementer-ui", effort="high") == 0
         assert run_log(ledger, role="fix-incomplete", model="sonnet", effort="high", why="w") == 2
         assert "nothing after this task's last implementer dispatch" in capsys.readouterr().err
+
+    def test_a_stalled_scoped_implementer_gets_fix_incomplete_at_sonnet_high(self, ledger):
+        assert run_log(ledger) == 0
+        assert run_log(ledger, role="fix-incomplete", model="sonnet", effort="high", why="w") == 0
+
+    def test_reviewer_runs_at_opus_medium(self, ledger):
+        assert run_log(ledger, role="reviewer", model="opus", effort="medium", why="w") == 0
+        assert run_log(ledger, role="reviewer", model="opus", effort="high", why="w") == 2
+
+    def test_reviewer_security_runs_at_opus_high(self, ledger):
+        assert run_log(ledger, role="reviewer-security", model="opus", effort="high", why="w") == 0
+        assert run_log(ledger, role="reviewer-security", model="opus", effort="medium", why="w") == 2
+
+    def test_re_reviewer_roles_mirror_the_reviewer_roles(self, ledger):
+        assert run_log(ledger, role="re-reviewer", model="opus", effort="medium", why="w") == 0
+        assert run_log(ledger, role="re-reviewer", model="opus", effort="low", why="w") == 2
+        assert run_log(ledger, role="re-reviewer-security", model="opus", effort="high", why="w") == 0
+        assert run_log(ledger, role="re-reviewer-security", model="opus", effort="medium", why="w") == 2
+
+    def test_a_dispatch_below_high_orchestrator_effort_logs_with_a_warning(self, ledger, capsys, monkeypatch):
+        monkeypatch.setenv("CLAUDE_EFFORT", "medium")
+        assert run_log(ledger) == 0
+        assert last_line(ledger).startswith("Task 1: dispatch implementer-scoped")
+        err = capsys.readouterr().err
+        assert "warning: orchestrator effort is medium" in err
+        assert "press `s`" in err
+
+    def test_a_dispatch_at_high_orchestrator_effort_prints_no_warning(self, ledger, capsys):
+        assert run_log(ledger) == 0
+        assert "warning" not in capsys.readouterr().err
+
+    def test_a_dispatch_with_no_effort_set_warns(self, ledger, capsys, monkeypatch):
+        monkeypatch.delenv("CLAUDE_EFFORT")
+        assert run_log(ledger) == 0
+        assert "warning: orchestrator effort is not set" in capsys.readouterr().err
 
     def test_fix_tier_up_must_rank_above_the_stuck_implementer(self, ledger):
         assert run_log(ledger, role="implementer-multifile", model="opus", effort="medium", why="w") == 0
@@ -187,6 +222,30 @@ class TestPreflight:
         assert "flags: --release-critical" in out
         assert "final-review: fable/high" in out
         assert out[-1] == "STATUS: ok"
+
+    def test_the_orchestrator_effort_is_reported(self, fake_home, repo):
+        out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
+        assert "orchestrator-effort: high" in out
+        assert out[-1] == "STATUS: ok"
+
+    def test_effort_below_high_blocks_with_a_session_only_fix(self, fake_home, repo, monkeypatch):
+        monkeypatch.setenv("CLAUDE_EFFORT", "medium")
+        out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
+        problem = next(line for line in out if line.startswith("problem: orchestrator effort"))
+        assert "press `s`" in problem
+        assert "claude --effort high" in problem
+        assert out[-1] == "STATUS: blocked"
+
+    def test_unset_effort_blocks(self, fake_home, repo, monkeypatch):
+        monkeypatch.delenv("CLAUDE_EFFORT")
+        out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
+        assert "orchestrator-effort: not set" in out
+        assert out[-1] == "STATUS: blocked"
+
+    @pytest.mark.parametrize("level", ["xhigh", "max"])
+    def test_effort_above_high_passes(self, fake_home, repo, monkeypatch, level):
+        monkeypatch.setenv("CLAUDE_EFFORT", level)
+        assert orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)[-1] == "STATUS: ok"
 
     def test_no_arguments_block_with_usage(self, fake_home, repo):
         out = orko_sdd.preflight_lines([], fake_home, repo)
@@ -457,6 +516,11 @@ class TestReportOnARun:
         assert "| 1 | in progress | — | fix opus/high |" in out
         assert "| 2 | in progress | — | scout opus/low |" in out
         assert "| final review | dispatched | — | rev opus/high · fix opus/medium · re-rev opus/low |" in out
+
+    def test_security_review_roles_share_the_review_labels(self, ledger, capsys):
+        write_ledger(ledger, "Task 1: dispatch reviewer-security opus/high — w",
+                     "Task 1: dispatch re-reviewer-security opus/high — w")
+        assert "| 1 | in progress | — | rev opus/high · re-rev opus/high |" in run_report(ledger, capsys)
 
     def test_a_batch_dispatch_reaches_each_task(self, ledger, capsys):
         write_ledger(ledger, "Task 3,4: dispatch implementer-scoped sonnet/high — same-shape batch")

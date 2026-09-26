@@ -51,15 +51,19 @@ Single-quote the `--why` text here and the command after `--` in Finish's `verif
 
 On success, the script prints `subagent_type` and `model`: dispatch with exactly those. SDD's templates say `general-purpose`; use the printed `subagent_type` instead. Exit 2 means the combination is off-policy or the call was refused; stderr says which. For an off-policy combination, choose again, or rerun with `--override` and put the reason in `--why`.
 
+If `log` also prints `warning: orchestrator effort is …` on stderr, the dispatch still went through. MODELS.md runs the orchestrator at high, and only oiler can change `/effort`, so keep going, pass the warning's fix to oiler in your next message, and append it once to the ledger as `Follow-up: <warning>`.
+
 | Role | Model/effort | MODELS.md row |
 |---|---|---|
-| `implementer-scoped` | sonnet/high | Implementer: tightly scoped task from the approved plan |
+| `implementer-scoped` | sonnet/medium | Implementer: tightly scoped task from the approved plan |
 | `implementer-gap` | opus/low | Implementer: minor local gap with one conventional reading |
 | `implementer-multifile` | opus/medium, opus/high | Implementer: multi-file feature or substantial refactor |
 | `implementer-ui` | sonnet/high | Implementer: frontend/UI from clear art direction |
 | `implementer-ui-replication` | opus/medium | Implementer: high-fidelity UI replication or difficult visual debugging |
-| `reviewer` | opus/low | Per-task code reviewer |
-| `re-reviewer` | opus/low | Scoped re-review (CLAUDE.md: opus for scoped re-reviews) |
+| `reviewer` | opus/medium | Per-task code reviewer |
+| `reviewer-security` | opus/high | Per-task code reviewer: high for auth, input handling or other security-sensitive diffs |
+| `re-reviewer` | opus/medium | Scoped re-review (CLAUDE.md: opus for scoped re-reviews), at the per-task reviewer's effort |
+| `re-reviewer-security` | opus/high | Scoped re-review of security-sensitive code, at the per-task reviewer's high |
 | `fix-incomplete` | same model as the task's last implementer or fix dispatch, next effort up (low → medium → high) | Fix failure caused by skipped files, incomplete execution or missing verification (xhigh is reserved, so a high-effort failure goes to fix-tier-up) |
 | `fix-wrong-diagnosis` | fable/high | Fix failure after thorough investigation produced a confident but wrong diagnosis |
 | `fix-tier-up` | opus/medium, opus/high; only above the task's last implementer or fix dispatch | SDD fix rounds 4-5: at least one step above the stuck implementer |
@@ -69,12 +73,13 @@ On success, the script prints `subagent_type` and `model`: dispatch with exactly
 Choosing a role:
 
 - The task's plan text contains the complete code: `implementer-scoped`.
-- One small local gap with one conventional reading: `implementer-gap`. Record the assumption in the ledger.
-- Several files with integration concerns: `implementer-multifile`, at opus/high only when the task is unusually difficult.
+- A prose task with a few small open points, each with one conventional reading, whose files don't have to agree with each other beyond what the plan states: `implementer-gap`, even when it touches several files. Rule on each open point before dispatch and record it as a `Ruling:` line, because Decided reads only ruling lines.
+- Changes across files that have to agree with each other, such as a shared interface or a data flow the plan leaves open: `implementer-multifile`, at opus/high only when the task is unusually difficult.
 - Downgrade on a fresh re-dispatch (NEEDS_CONTEXT, or a fix round 1-3 when the implementer can't be resumed) when the work left is transcription from the plan or a single-file mechanical fix: log it as `implementer-scoped`, whatever the task's first role was.
 - A batch of small same-shape tasks (SDD's batching rule) is one dispatch: log it with `--task 3,4,5`. Record its completion as one `Task <N>: complete (…)` line per task, because SDD's resume check reads per-task lines.
 - SDD's BLOCKED re-dispatch "with a more capable model": `fix-tier-up`. Any other fresh re-dispatch (NEEDS_CONTEXT, or a fix round 1-3 when the implementer can't be resumed) logs again under the task's original role, unless the downgrade rule applies.
-- Scoped re-reviews log as `re-reviewer`. The final whole-branch review logs as `--task final --role final-reviewer`; for an unusually large branch, `--override` to fable/high with the reason. Its single fix dispatch logs as `--task final --role final-fixer`.
+- A task review logs as `reviewer-security` (opus/high) when its dispatch gets the web-security line, and as `reviewer` (opus/medium) otherwise. A scoped re-review follows the same rule with `re-reviewer-security` and `re-reviewer`. MODELS.md puts security-sensitive review at high because that's where extra effort pays off most, and a separate role lets `log` refuse a medium review of a security diff.
+- The final whole-branch review logs as `--task final --role final-reviewer`; for an unusually large branch, `--override` to fable/high with the reason. Its single fix dispatch logs as `--task final --role final-fixer`.
 
 ## Fix loop
 
@@ -117,7 +122,7 @@ Inside a worktree entered this way, the harness has refused (observed in Claude 
 
 ## Speed
 
-Time matters: the earlier a correct result lands, the better. The levers are SDD's: batch small same-shape tasks into one dispatch, pick the cheapest role the table allows, hand artifacts over as files, and never ask a reviewer to re-run tests the implementer already ran.
+Time matters: the earlier a correct result lands, the better. The levers are SDD's: batch small same-shape tasks into one dispatch, pick the cheapest role the table allows (a review that gets the web-security line stays `reviewer-security` or `re-reviewer-security`), hand artifacts over as files, and never ask a reviewer to re-run tests the implementer already ran.
 
 ## Stops
 
