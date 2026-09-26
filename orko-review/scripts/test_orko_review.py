@@ -97,6 +97,10 @@ class TestSpecResolution:
         plan = write(project / "p.md", "**Spec:** `docs/nope.md`\n")
         assert orko_review.resolve_spec(plan, project) is None
 
+    def test_unexpandable_tilde_value_is_unresolvable(self, project):
+        plan = write(project / "p.md", "**Spec:** `~nosuchuser_zz/x.md`\n")
+        assert orko_review.resolve_spec(plan, project) is None
+
 
 class TestRepoRootAndReviewsDir:
     def test_repo_root_is_the_docs_repository(self, project):

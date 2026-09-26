@@ -87,11 +87,14 @@ def resolve_spec(plan: Path, root: Path) -> Path | None:
     token = spec_token(value) if value is not None else None
     if token is None:
         return None
-    path = Path(token).expanduser()
-    candidates = [path] if path.is_absolute() else [root / path, plan.parent / path]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
+    try:
+        path = Path(token).expanduser()
+        candidates = [path] if path.is_absolute() else [root / path, plan.parent / path]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate.resolve()
+    except (RuntimeError, OSError):
+        return None
     return None
 
 
