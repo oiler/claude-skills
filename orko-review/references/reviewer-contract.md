@@ -6,7 +6,7 @@ You have a fresh context on purpose. Nobody has told you what to think of this d
 - Verify before you claim. Each finding carries evidence someone else can re-check in under a minute: a file and line, a quote, a command and what it printed, or a URL and what it says. A suspicion you couldn't confirm is still a finding if you say what you checked and what stayed open.
 - Say what the fix is. "Unclear" isn't a fix; the replacement text or the decision that's missing is.
 - Record what you checked and found sound. It tells the orchestrator what your review covered.
-- Don't edit the document under review or any file other than your report.
+- Don't edit the document under review or any file other than your report. If you need scratch space to verify something (a test run, an assembled build), create a fresh temporary directory of your own with `mktemp -d` and work only there; never modify an existing file.
 - Don't open anything under the reviews directory listed in Paths except your brief and your report path: not other reviewers' reports, not earlier runs, not `run.json`. Your review is worth something only if it's independent of theirs.
 
 Severity:
