@@ -295,3 +295,92 @@ class TestPreflight:
         monkeypatch.setattr(orko_review, "preflight_lines", boom)
         assert orko_review.main(["preflight", "a.md"]) == 0
         assert capsys.readouterr().out.strip().endswith("STATUS: blocked")
+
+
+NOW = datetime(2026, 9, 25, 12, 0, 0)
+
+
+def start(project, *extra, doc=SPEC_REL, mode="apply", now=NOW):
+    return orko_review.cmd_start(["--doc", doc, "--mode", mode, *extra], cwd=project, now=now)
+
+
+def run_dir(project, stem="2026-09-25-widget-design", stamp="2026-09-25-120000"):
+    return project / "docs/superpowers/reviews" / stem / stamp
+
+
+class TestStart:
+    def test_creates_run_directory_manifest_copy_and_briefs(self, project, capsys):
+        assert start(project) == 0
+        run = run_dir(project)
+        manifest = orko_review.load_manifest(run)
+        assert manifest["doc"] == str(project / SPEC_REL)
+        assert manifest["doc_sha256"] == orko_review.sha256(project / SPEC_REL)
+        assert manifest["type"] == "spec"
+        assert manifest["mode"] == "apply"
+        assert manifest["lenses"] == ["accuracy", "completeness", "design"]
+        assert manifest["status"] == {"accuracy": "pending", "completeness": "pending", "design": "pending"}
+        assert manifest["index"] is None
+        assert (run / "doc.orig.md").read_bytes() == (project / SPEC_REL).read_bytes()
+        assert sorted(p.name for p in (run / "briefs").iterdir()) == ["accuracy.md", "completeness.md", "design.md"]
+
+    def test_prints_the_run_and_one_exact_dispatch_prompt_per_lens(self, project, capsys):
+        start(project)
+        run = run_dir(project)
+        assert capsys.readouterr().out.splitlines() == [
+            f"run: {run}",
+            *(f"{lens}: Read {run / 'briefs' / f'{lens}.md'} and follow it."
+              for lens in ("accuracy", "completeness", "design"))]
+
+    def test_brief_is_the_template_filled_with_lens_and_contract(self, project):
+        start(project)
+        run = run_dir(project)
+        expected = (
+            "# Review brief: design\n\n## Paths\n\n- Lens: design\n"
+            f"- Document under review: {project / SPEC_REL}\n"
+            f"- Evergreen docs: {project / 'CLAUDE.md'}\n"
+            f"- Reviews directory (off limits except your report): {project / 'docs/superpowers/reviews'}\n"
+            f"- Write your report to: {run / 'design.md'}\n\n"
+            + (orko_review.LENS_DIR / "spec-design.md").read_text(encoding="utf-8") + "\n"
+            + orko_review.CONTRACT_PATH.read_text(encoding="utf-8"))
+        assert (run / "briefs" / "design.md").read_text(encoding="utf-8") == expected
+
+    def test_plan_brief_names_the_spec(self, project):
+        assert start(project, doc=PLAN_REL) == 0
+        brief = run_dir(project, stem="2026-09-25-widget") / "briefs" / "coverage.md"
+        assert f"- Spec: {project / SPEC_REL}\n" in brief.read_text(encoding="utf-8")
+
+    def test_specialists_are_appended_with_their_reasons(self, project):
+        assert start(project, "--extra", "security", "--why", "auth\nsection") == 0
+        run = run_dir(project)
+        manifest = orko_review.load_manifest(run)
+        assert manifest["lenses"][-1] == "security"
+        assert manifest["extras"] == {"security": "auth section"}
+        text = (run / "briefs" / "security.md").read_text(encoding="utf-8")
+        assert (orko_review.LENS_DIR / "extra-security.md").read_text(encoding="utf-8") in text
+
+    @pytest.mark.parametrize("extra", [
+        ["--extra", "ux", "--why", "x"],
+        ["--extra", "data", "--why", "a", "--extra", "security", "--why", "b", "--extra", "frontend", "--why", "c"],
+        ["--extra", "data", "--why", "a", "--extra", "data", "--why", "b"],
+        ["--extra", "data"],
+        ["--extra", "data", "--why", "  "],
+    ], ids=["unknown", "three", "duplicate", "no-why", "empty-why"])
+    def test_bad_specialists_refuse_without_creating_a_run(self, project, extra):
+        assert start(project, *extra) == 2
+        assert not (project / "docs/superpowers/reviews").exists()
+
+    def test_existing_run_directory_refuses(self, project):
+        assert start(project) == 0
+        assert start(project) == 2
+
+    def test_second_run_gets_its_own_directory(self, project):
+        start(project)
+        first = run_dir(project) / "run.json"
+        before = first.read_bytes()
+        assert start(project, now=datetime(2026, 9, 25, 12, 5, 0)) == 0
+        assert run_dir(project, stamp="2026-09-25-120500").is_dir()
+        assert first.read_bytes() == before
+
+    def test_blocked_resolution_refuses(self, project):
+        write(project / "notes.txt", "x\n")
+        assert start(project, doc="notes.txt") == 2

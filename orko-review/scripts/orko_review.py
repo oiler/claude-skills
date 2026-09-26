@@ -5,12 +5,16 @@ Standard library only (Python 3.10+). SKILL.md says when each subcommand runs.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -309,10 +313,120 @@ def cmd_preflight(argv: list[str]) -> int:
     return 0
 
 
+RUN_STAMP = "%Y-%m-%d-%H%M%S"
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_manifest(run: Path, manifest: dict) -> None:
+    (run / "run.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
+def load_manifest(run: Path) -> dict | None:
+    try:
+        return json.loads((run / "run.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def render_brief(lens: str, res: Resolution, run: Path) -> str:
+    lines = ["# Review brief: " + lens, "", "## Paths", "",
+             f"- Lens: {lens}", f"- Document under review: {res.doc}"]
+    if res.spec is not None:
+        lines.append(f"- Spec: {res.spec}")
+    lines += [f"- Evergreen docs: {', '.join(map(str, res.evergreen)) or 'none'}",
+              f"- Reviews directory (off limits except your report): {res.reviews}",
+              f"- Write your report to: {run / f'{lens}.md'}", ""]
+    return ("\n".join(lines) + "\n" + read_text(lens_file(res.doc_type, lens)) + "\n"
+            + read_text(CONTRACT_PATH))
+
+
+def dispatch_prompt(brief: Path) -> str:
+    return f"Read {brief} and follow it."
+
+
+def parse_start_args(argv: list[str]) -> tuple[dict[str, str | None], list[tuple[str, str]], list[str]]:
+    """Each --extra must be followed immediately by its --why, so the pairing can't be ambiguous."""
+    opts: dict[str, str | None] = {"doc": None, "mode": None, "spec": None}
+    extras: list[tuple[str, str]] = []
+    problems: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--extra":
+            if i + 3 < len(argv) and argv[i + 2] == "--why":
+                extras.append((argv[i + 1], argv[i + 3]))
+                i += 4
+                continue
+            problems.append("each --extra <lens> must be followed immediately by --why <reason>")
+            break
+        if arg in ("--doc", "--mode", "--spec") and i + 1 < len(argv):
+            opts[arg[2:]] = argv[i + 1]
+            i += 2
+            continue
+        problems.append(f"unexpected argument: {arg}")
+        break
+    if opts["doc"] is None:
+        problems.append("--doc is required")
+    if opts["mode"] not in ("apply", "file-only"):
+        problems.append("--mode must be apply or file-only")
+    return opts, extras, problems
+
+
+def validate_extras(extras: list[tuple[str, str]]) -> list[str]:
+    names = [name for name, _ in extras]
+    problems = [f"unknown specialist lens: {n} (catalog: {', '.join(EXTRA_LENSES)})"
+                for n in names if n not in EXTRA_LENSES]
+    if len(set(names)) != len(names):
+        problems.append("a specialist lens is listed twice")
+    if len(names) > MAX_EXTRAS:
+        problems.append(f"at most {MAX_EXTRAS} specialist lenses")
+    problems += [f"--why for {n} is empty" for n, why in extras if not one_line(why)]
+    return problems
+
+
+def cmd_start(argv: list[str], cwd: Path | None = None, now: datetime | None = None) -> int:
+    cwd = cwd or Path.cwd()
+    opts, extras, problems = parse_start_args(argv)
+    res = None
+    if not problems:
+        res, r_problems, _hints = resolve(opts["doc"], opts["spec"], cwd)
+        problems += r_problems + validate_extras(extras)
+    run = None
+    if not problems:
+        run = res.reviews / res.doc.stem / (now or datetime.now()).strftime(RUN_STAMP)
+        if run.exists():
+            problems.append(f"run directory already exists: {run}")
+    if problems:
+        print("\n".join(f"problem: {p}" for p in problems))
+        return 2
+    (run / "briefs").mkdir(parents=True)
+    shutil.copyfile(res.doc, run / "doc.orig.md")
+    lenses = [*res.lenses, *(name for name, _ in extras)]
+    write_manifest(run, {
+        "doc": str(res.doc), "doc_sha256": sha256(res.doc), "type": res.doc_type,
+        "spec": str(res.spec) if res.spec else None, "mode": opts["mode"], "lenses": lenses,
+        "extras": {name: one_line(why) for name, why in extras},
+        "evergreen": [str(p) for p in res.evergreen], "reviews_dir": str(res.reviews),
+        "status": {lens: "pending" for lens in lenses}, "attempts": {}, "failures": {},
+        "index": None, "dispositions": {},
+    })
+    print(f"run: {run}")
+    for lens in lenses:
+        brief = run / "briefs" / f"{lens}.md"
+        brief.write_text(render_brief(lens, res, run), encoding="utf-8")
+        print(f"{lens}: {dispatch_prompt(brief)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["preflight"]:
         return cmd_preflight(argv[1:])
+    if argv[:1] == ["start"]:
+        return cmd_start(argv[1:])
     print(f"usage: orko_review.py {{{','.join(SUBCOMMANDS)}}} ...", file=sys.stderr)
     return 2
 
