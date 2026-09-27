@@ -1,13 +1,13 @@
 {
   "skill": "orko-review",
-  "repo": "/Users/jrf1039/files/repo/claude-skills/.worktrees/orko-review",
+  "repo": "/Users/jrf1039/files/repo/claude-skills",
   "profile": "claude-code",
   "change_class": "new",
   "candidate_version": "0.1.0",
   "skill_content_hash": "1c5f2b63e25f7f809f2a14c2a860e6f1463f577109364ce80229c2a6ec4c5a6e",
-  "repo_commit": "00b0768bdf3bf175c45b5f6df43338a6de00c249",
+  "repo_commit": "a5cbf189eb3aa181edd68d8ff616172495489c0a",
   "preflight_version": "1.1.0",
-  "timestamp": "2026-09-27T02:35:52+00:00",
+  "timestamp": "2026-09-27T02:44:37+00:00",
   "argv": [
     "orko-review",
     "--change-class",
@@ -15,7 +15,7 @@
     "--candidate-version",
     "0.1.0",
     "--out",
-    "/Users/jrf1039/files/repo/claude-skills/.worktrees/orko-review/evals/orko-review/preflight_0.1.0.json"
+    "/Users/jrf1039/files/repo/claude-skills/evals/orko-review/preflight_0.1.0.json"
   ],
   "checks": [
     {
