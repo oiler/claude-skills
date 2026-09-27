@@ -61,11 +61,13 @@ In `file-only` mode, run `python3 ${CLAUDE_SKILL_DIR}/scripts/orko_review.py sum
 
 For each finding in the index, open the document and the evidence the finding cites (read the full report at `<run-dir>/<lens>.md`), check the claim yourself, and decide:
 
-- `accept`: the finding is correct and its fix improves the document. Make the edit.
+- `accept`: the finding is correct and its fix improves the document. Make the edit. If you apply only part of the fix, `--why` says what you left out and why.
 - `reject`: the evidence doesn't hold, the fix is worse than the current text, or it contradicts another accepted finding. Say which.
-- `defer`: the finding needs oiler. That covers a product decision, a conflict with an evergreen doc (a stop sign, never resolved silently), and a fix that belongs in a file other than the document.
+- `defer`: the finding needs oiler. That covers a product decision (two reasonable readings produce different observable behavior, and neither the document nor an evergreen doc picks one), a conflict with an evergreen doc that the evergreen doc may be the stale side of, and a fix that belongs in a file other than the document.
 
-Record each one:
+When the document contradicts an evergreen doc and the document is the side at fault, bring it into line: that's an `accept` whose `--why` names the evergreen doc and the rule. Either way, a conflict is never resolved silently.
+
+Record each one with its own Bash call, and issue the calls in parallel in one message. Don't batch them into a loop, a script, or a shell function: each call must match the skill's `allowed-tools` pattern.
 
 ```bash
 python3 ${CLAUDE_SKILL_DIR}/scripts/orko_review.py decide --run <run-dir> --finding <lens>/F-<n> --verdict <accept|reject|defer> --why '<one line>'
