@@ -1,6 +1,6 @@
 # orko-review — Changelog
 
-## v0.1.0 — 2026-09-25
+## v0.1.0 — 2026-09-26
 
 First release: oiler's typed "dispatch independent reviewers on the spec/plan" prompt, as a slash-only skill.
 
