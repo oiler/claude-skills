@@ -1,0 +1,93 @@
+{
+  "skill": "orko-review",
+  "repo": "/Users/jrf1039/files/repo/claude-skills/.worktrees/orko-review",
+  "profile": "claude-code",
+  "change_class": "new",
+  "candidate_version": "0.1.0",
+  "skill_content_hash": "1c5f2b63e25f7f809f2a14c2a860e6f1463f577109364ce80229c2a6ec4c5a6e",
+  "repo_commit": "00b0768bdf3bf175c45b5f6df43338a6de00c249",
+  "preflight_version": "1.1.0",
+  "timestamp": "2026-09-27T02:35:52+00:00",
+  "argv": [
+    "orko-review",
+    "--change-class",
+    "new",
+    "--candidate-version",
+    "0.1.0",
+    "--out",
+    "/Users/jrf1039/files/repo/claude-skills/.worktrees/orko-review/evals/orko-review/preflight_0.1.0.json"
+  ],
+  "checks": [
+    {
+      "id": "structure",
+      "status": "pass",
+      "detail": "SKILL.md present, name matches, kebab-case"
+    },
+    {
+      "id": "profile",
+      "status": "pass",
+      "detail": "combined description budget 452/1,536"
+    },
+    {
+      "id": "frontmatter-parse",
+      "status": "pass",
+      "detail": "claude plugin validate passed"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "invocation: live-engagement report smoke-2026-09-26-2.md"
+    },
+    {
+      "id": "presence",
+      "status": "pass",
+      "detail": "clean-room: clean-room report smoke-2026-09-26-2.md"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report smoke-2026-09-26-2.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "report smoke-2026-09-26-2.md bound to current skill hash"
+    },
+    {
+      "id": "binding",
+      "status": "pass",
+      "detail": "orko-review/ is committed"
+    },
+    {
+      "id": "script-tests",
+      "status": "pass",
+      "detail": "scripts suite passed"
+    },
+    {
+      "id": "script-surface",
+      "status": "advisory",
+      "detail": "review by hand: conftest.py:2 import subprocess; conftest.py:15 proc = subprocess.run([\"git\", \"-C\", str(repo), *args], check=True, cap; conftest.py:21 path.write_text(text, encoding=\"utf-8\"); orko_review.py:16 import subprocess; orko_review.py:42 proc = subprocess.run([\"git\", \"-C\", str(cwd), *args], capture_output=T; orko_review.py:345 with os.fdopen(fd, \"w\", encoding=\"utf-8\") as handle:; orko_review.py:356 with open(run / \".lock\", \"a\", encoding=\"utf-8\") as handle:; orko_review.py:464 brief.write_text(render_brief(lens, res, run), encoding=\"utf-8\") (+2 more)"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "changelog entry for v0.1.0 present"
+    },
+    {
+      "id": "release",
+      "status": "pass",
+      "detail": "tag orko-review-v0.1.0 is free"
+    },
+    {
+      "id": "drift",
+      "status": "advisory",
+      "detail": "upstream unchanged since 690f15c"
+    },
+    {
+      "id": "library-status",
+      "status": "advisory",
+      "detail": "docs/library-status.md drifted \u2014 regenerate (PYTHONPATH=\"$HOME/files/projects/001-claude-skills-creator/tools/skill-evals\" python3 -m scripts.library_status)"
+    }
+  ],
+  "overall": "pass"
+}
