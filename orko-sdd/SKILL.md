@@ -51,7 +51,7 @@ Single-quote the `--why` text here and the command after `--` in Finish's `verif
 
 On success, the script prints `subagent_type` and `model`: dispatch with exactly those. SDD's templates say `general-purpose`; use the printed `subagent_type` instead. Exit 2 means the combination is off-policy or the call was refused; stderr says which. For an off-policy combination, choose again, or rerun with `--override` and put the reason in `--why`.
 
-If `log` also prints `warning: orchestrator effort is …` on stderr, the dispatch still went through. MODELS.md runs the orchestrator at high, and only oiler can change `/effort`, so keep going, pass the warning's fix to oiler in your next message, and append it once to the ledger as `Follow-up: <warning>`.
+If `log` also prints `warning: orchestrator effort is …` on stderr, the dispatch still went through. MODELS.md runs the orchestrator at high, and only oiler can change `/effort`, so keep going, pass the warning's fix to oiler in your next message, and append it to the ledger as `Follow-up: <warning>` unless the ledger already has an orchestrator-effort `Follow-up:` line, for example from preflight.
 
 | Role | Model/effort | MODELS.md row |
 |---|---|---|
@@ -60,10 +60,10 @@ If `log` also prints `warning: orchestrator effort is …` on stderr, the dispat
 | `implementer-multifile` | opus/medium, opus/high | Implementer: multi-file feature or substantial refactor |
 | `implementer-ui` | sonnet/high | Implementer: frontend/UI from clear art direction |
 | `implementer-ui-replication` | opus/medium | Implementer: high-fidelity UI replication or difficult visual debugging |
-| `reviewer` | opus/medium | Per-task code reviewer |
-| `reviewer-security` | opus/high | Per-task code reviewer: high for auth, input handling or other security-sensitive diffs |
-| `re-reviewer` | opus/medium | Scoped re-review (CLAUDE.md: opus for scoped re-reviews), at the per-task reviewer's effort |
-| `re-reviewer-security` | opus/high | Scoped re-review of security-sensitive code, at the per-task reviewer's high |
+| `reviewer` | opus/medium | Per-task code reviewer and scoped re-review: diff not security-sensitive |
+| `reviewer-security` | opus/high | Per-task code reviewer and scoped re-review: security-sensitive diff |
+| `re-reviewer` | opus/medium | Per-task code reviewer and scoped re-review: diff not security-sensitive |
+| `re-reviewer-security` | opus/high | Per-task code reviewer and scoped re-review: security-sensitive diff |
 | `fix-incomplete` | same model as the task's last implementer or fix dispatch, next effort up (low → medium → high) | Fix failure caused by skipped files, incomplete execution or missing verification (xhigh is reserved, so a high-effort failure goes to fix-tier-up) |
 | `fix-wrong-diagnosis` | fable/high | Fix failure after thorough investigation produced a confident but wrong diagnosis |
 | `fix-tier-up` | opus/medium, opus/high; only above the task's last implementer or fix dispatch | SDD fix rounds 4-5: at least one step above the stuck implementer |
@@ -99,7 +99,7 @@ At SDD's breaker, add a cost to both of its formats, because the report's Decide
 
 Resuming the implementer before its first review, over its own DONE_WITH_CONCERNS, isn't a fix round, so it needs no ledger line.
 
-Send the final fixer every finding from the final review, as SDD says, including the deferred minors the final review marks must-fix. The one exception is a finding that conflicts with the plan's text: rule on it first, as SDD's plan-mandated rule says, and when the ruling keeps the plan, park the finding instead of sending it. Record each final-review finding you park, before the fix wave or after the re-review, as `Task final: parked — <finding> — Ruling: <why> — cost if wrong: <cost>`; that line is the ruling, so don't write a separate `Ruling:` line for it. `<K>` below counts every `Task final: parked` line, from before the fix wave and after it. Record the final re-review's out-of-scope observations as `Task final: minor (deferred): <one-liner>`. Deferred minors the final review marks drop or can-wait need no new line. After the final re-review, append `Task final: complete (commits <fix-base7>..<head7>, review clean)`, with `<K> parked` in place of `review clean` when you parked any and `<fix-base7>` the commit the final fixer started from; when the final review comes back clean with no fix wave, append `Task final: complete (commits <merge-base7>..<head7>, review clean)`, the branch range that review saw.
+Send the final fixer every finding from the final review, as SDD says, including the deferred minors the final review marks must-fix. There are two exceptions. A finding that conflicts with the plan's text: rule on it first, as SDD's plan-mandated rule says, and when the ruling keeps the plan, park the finding instead of sending it. And a new Minor the final review itself marks drop or can-wait: you may park it instead of sending it, so the single fix wave stays on what the review says must change. Critical and Important findings always go to the fixer unless they conflict with the plan's text. Record each final-review finding you park, before the fix wave or after the re-review, as `Task final: parked — <finding> — Ruling: <why> — cost if wrong: <cost>`; that line is the ruling, so don't write a separate `Ruling:` line for it. `<K>` below counts every `Task final: parked` line, from before the fix wave and after it. Record the final re-review's out-of-scope observations, and any new Minor breakage it finds in the fix diff, as `Task final: minor (deferred): <one-liner>`; SDD's single fix wave leaves no round to fix them. Deferred minors the final review marks drop or can-wait need no new line. After the final re-review, append `Task final: complete (commits <fix-base7>..<head7>, review clean)`, with `<K> parked` in place of `review clean` when you parked any and `<fix-base7>` the commit the final fixer started from; when the final review comes back clean with no fix wave, append `Task final: complete (commits <merge-base7>..<head7>, review clean)`, the branch range that review saw.
 
 ## Dispatch lines
 
@@ -116,7 +116,7 @@ oiler's standing preference, which is the consent SDD and `superpowers:using-git
 2. If `.worktrees/` isn't ignored, add it to `.git/info/exclude`.
 3. Work from that directory: enter it with `EnterWorktree(path=…)`, loading the tool with ToolSearch first if it's deferred. Use absolute paths instead when the tool is unavailable or you decline it, or when the session is already in a worktree, where `EnterWorktree(path=…)` accepts only targets under `.claude/worktrees/`.
 
-Inside a worktree entered this way, the harness has refused (observed in Claude Code 2.1.280–2.1.281) a Bash call that combines `cd` or `git -C` with git work, so split those into separate calls.
+Inside a worktree entered this way, the harness refuses Bash calls it judges too complex to verify (observed in Claude Code 2.1.280–2.1.296): `cd` or `git -C` combined with git work, but also command substitution such as `VAR=$(bash …/sdd-workspace …)`, loops with a computed command name, heredocs chained with `&&`, and `awk -v` pipelines. Run each SDD script and each git command as its own plain call, and write files with the Write tool. Finish's `verify` recipe is accepted as written.
 
 `<plan-slug>` is the plan file's basename without `.md`, and `<worktree>` is the worktree the run uses. Once in the worktree, pass SDD's scripts (`sdd-workspace`, `task-brief`, `review-package`) the plan's path inside the worktree, so the workspace and ledger live there. `<repo-root>` is the repository the plan changes, which the plan names when it isn't the one you started in; when it differs, take `<base-branch>` (`master`, else `main`) and the `.worktrees/` exclusion from `<repo-root>`, not from preflight. When the plan file lives outside that repository, pass SDD's scripts its absolute path and run them from the worktree; the workspace still lands in the worktree.
 

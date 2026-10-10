@@ -50,10 +50,10 @@ ROLE_SOURCE = {
     "implementer-multifile": "Implementer: multi-file feature or substantial refactor",
     "implementer-ui": "Implementer: frontend/UI from clear art direction",
     "implementer-ui-replication": "Implementer: high-fidelity UI replication or difficult visual debugging",
-    "reviewer": "Per-task code reviewer",
-    "reviewer-security": "Per-task code reviewer: high for auth, input handling or other security-sensitive diffs",
-    "re-reviewer": "Scoped re-review (CLAUDE.md: opus for scoped re-reviews), at the per-task reviewer's effort",
-    "re-reviewer-security": "Scoped re-review of security-sensitive code, at the per-task reviewer's high",
+    "reviewer": "Per-task code reviewer and scoped re-review: diff not security-sensitive",
+    "reviewer-security": "Per-task code reviewer and scoped re-review: security-sensitive diff",
+    "re-reviewer": "Per-task code reviewer and scoped re-review: diff not security-sensitive",
+    "re-reviewer-security": "Per-task code reviewer and scoped re-review: security-sensitive diff",
     "fix-incomplete": ("Fix failure caused by skipped files, incomplete execution or missing verification"
                        " (xhigh is reserved, so a high-effort failure goes to fix-tier-up)"),
     "fix-wrong-diagnosis": "Fix failure after thorough investigation produced a confident but wrong diagnosis",
@@ -135,8 +135,9 @@ def render_role_table() -> str:
     return "\n".join(rows)
 
 
-# MODELS.md runs the orchestrator at high; xhigh and max are above it. `/effort high` typed as a command
-# saves high as oiler's default, so the fix names the session-only path.
+# MODELS.md runs the orchestrator at high; xhigh and max are above it. Below high is a warning, not a
+# block: a medium-effort clean-room run passed every check (evals/orko-sdd/smoke-2026-10-10-medium.md).
+# `/effort high` typed as a command saves high as oiler's default, so the fix names the session-only path.
 ORCHESTRATOR_EFFORTS = ("high", "xhigh", "max")
 EFFORT_FIX = ("open `/effort`, choose high, and press `s` to apply it to this session only "
               "(or relaunch with `claude --effort high`)")
@@ -258,8 +259,8 @@ def preflight_lines(argv: list[str], home: Path, cwd: Path) -> list[str]:
     effort = orchestrator_effort()
     out.append(f"orchestrator-effort: {effort}")
     if effort not in ORCHESTRATOR_EFFORTS:
-        problems.append(f"orchestrator effort is {effort}; MODELS.md runs the orchestrator at high. "
-                        f"To fix, {EFFORT_FIX}, then re-invoke")
+        out.append(f"warning: orchestrator effort is {effort}; MODELS.md runs the orchestrator at high. "
+                   f"To raise it, {EFFORT_FIX}")
 
     out.append(f"final-review: {'fable/high' if '--release-critical' in known else 'opus/high'}")
     out += [f"problem: {p}" for p in problems]
