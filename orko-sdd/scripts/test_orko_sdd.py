@@ -228,19 +228,22 @@ class TestPreflight:
         assert "orchestrator-effort: high" in out
         assert out[-1] == "STATUS: ok"
 
-    def test_effort_below_high_blocks_with_a_session_only_fix(self, fake_home, repo, monkeypatch):
-        monkeypatch.setenv("CLAUDE_EFFORT", "medium")
+    @pytest.mark.parametrize("level", ["low", "medium"])
+    def test_effort_below_high_warns_with_a_session_only_fix(self, fake_home, repo, monkeypatch, level):
+        monkeypatch.setenv("CLAUDE_EFFORT", level)
         out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
-        problem = next(line for line in out if line.startswith("problem: orchestrator effort"))
-        assert "press `s`" in problem
-        assert "claude --effort high" in problem
-        assert out[-1] == "STATUS: blocked"
+        warning = next(line for line in out if line.startswith(f"warning: orchestrator effort is {level}"))
+        assert "press `s`" in warning
+        assert "claude --effort high" in warning
+        assert not any(line.startswith("problem:") for line in out)
+        assert out[-1] == "STATUS: ok"
 
-    def test_unset_effort_blocks(self, fake_home, repo, monkeypatch):
+    def test_unset_effort_warns(self, fake_home, repo, monkeypatch):
         monkeypatch.delenv("CLAUDE_EFFORT")
         out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
         assert "orchestrator-effort: not set" in out
-        assert out[-1] == "STATUS: blocked"
+        assert any(line.startswith("warning: orchestrator effort is not set") for line in out)
+        assert out[-1] == "STATUS: ok"
 
     @pytest.mark.parametrize("level", ["xhigh", "max"])
     def test_effort_above_high_passes(self, fake_home, repo, monkeypatch, level):

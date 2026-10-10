@@ -1,0 +1,164 @@
+{
+  "instrument": "policy scorecard (log + preflight), v0.1.2 vs v0.1.3",
+  "policy": "~/.claude/MODELS.md as of 2026-10-10 (per-task reviewer and scoped re-review split: opus/medium, opus/high for security-sensitive diffs; orchestrator opus/high, and since v0.1.3 a lower orchestrator effort runs with a warning)",
+  "scripts": {
+    "old": {
+      "source": "master:orko-sdd/scripts/orko_sdd.py (v0.1.2, 42174c6)",
+      "sha256": "d852462f4cdc838dbd8f7d527381d763a4c991ec8579983ec7ded81b78735b9f"
+    },
+    "new": {
+      "source": "orko-sdd/scripts/orko_sdd.py (v0.1.3 candidate, fd94efe)",
+      "sha256": "42b86cf1767dd0012aa09896d5840b875558ab1965b4b41f6c4bec8edacf634b"
+    }
+  },
+  "comparison_script_sha256": "e15905fcdf26436d93ea5a2385f09fecd7199c5089236f1efc83cfa2f0541089",
+  "scorecard_sha256": "c40f453dc782a09a1c1e4488f2c7a06aabee3b47ed2e6abbca0f17890018d876",
+  "results": [
+    {
+      "case": "scoped implementer",
+      "role": "implementer-scoped",
+      "combo": "sonnet/medium",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "scoped implementer at high",
+      "role": "implementer-scoped",
+      "combo": "sonnet/high",
+      "policy": false,
+      "old": false,
+      "new": false
+    },
+    {
+      "case": "ordinary review",
+      "role": "reviewer",
+      "combo": "opus/medium",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "ordinary review at low",
+      "role": "reviewer",
+      "combo": "opus/low",
+      "policy": false,
+      "old": false,
+      "new": false
+    },
+    {
+      "case": "security review",
+      "role": "reviewer-security",
+      "combo": "opus/high",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "security review at medium",
+      "role": "reviewer-security",
+      "combo": "opus/medium",
+      "policy": false,
+      "old": false,
+      "new": false
+    },
+    {
+      "case": "ordinary re-review",
+      "role": "re-reviewer",
+      "combo": "opus/medium",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "security re-review",
+      "role": "re-reviewer-security",
+      "combo": "opus/high",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "security re-review at medium",
+      "role": "re-reviewer-security",
+      "combo": "opus/medium",
+      "policy": false,
+      "old": false,
+      "new": false
+    },
+    {
+      "case": "gap implementer",
+      "role": "implementer-gap",
+      "combo": "opus/low",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "multifile implementer",
+      "role": "implementer-multifile",
+      "combo": "opus/medium",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "final reviewer",
+      "role": "final-reviewer",
+      "combo": "opus/high",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "case": "final fixer",
+      "role": "final-fixer",
+      "combo": "opus/medium",
+      "policy": true,
+      "old": true,
+      "new": true
+    },
+    {
+      "effort": "low",
+      "old_preflight": "blocked",
+      "new_preflight": "ok",
+      "new_preflight_warns": true,
+      "new_log_warns": true
+    },
+    {
+      "effort": "medium",
+      "old_preflight": "blocked",
+      "new_preflight": "ok",
+      "new_preflight_warns": true,
+      "new_log_warns": true
+    },
+    {
+      "effort": "high",
+      "old_preflight": "ok",
+      "new_preflight": "ok",
+      "new_preflight_warns": false,
+      "new_log_warns": false
+    },
+    {
+      "effort": "xhigh",
+      "old_preflight": "ok",
+      "new_preflight": "ok",
+      "new_preflight_warns": false,
+      "new_log_warns": false
+    },
+    {
+      "effort": "max",
+      "old_preflight": "ok",
+      "new_preflight": "ok",
+      "new_preflight_warns": false,
+      "new_log_warns": false
+    },
+    {
+      "effort": null,
+      "old_preflight": "blocked",
+      "new_preflight": "ok",
+      "new_preflight_warns": true,
+      "new_log_warns": true
+    }
+  ]
+}

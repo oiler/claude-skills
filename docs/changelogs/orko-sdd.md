@@ -1,5 +1,17 @@
 # orko-sdd — Changelog
 
+## v0.1.3 — 2026-10-10
+
+The orchestrator may run below high effort, with a warning, and the final-review wording covers the cases two clean-room runs had to guess at.
+
+### Changed
+
+- `preflight` warns instead of blocking when the orchestrator's effort is below high or isn't set, and keeps `STATUS: ok`. The warning carries the same session-only fix, and SKILL.md already copies preflight warnings into the ledger as `Follow-up:` lines. A medium-effort clean-room run passed all 25 mechanical checks (`evals/orko-sdd/smoke-2026-10-10-medium.md`). `log`'s mid-run warning is unchanged, and SKILL.md records it only when the ledger has no orchestrator-effort `Follow-up:` line yet.
+- The role table cites MODELS.md's split per-task reviewer rows (2026-10-10): opus/medium when the diff isn't security-sensitive, opus/high when it is. The model and effort pairs are unchanged.
+- SKILL.md lets the orchestrator park a new final-review Minor that the review marks drop or can-wait, instead of sending it to the single fix wave. Critical and Important findings still go to the fixer unless they conflict with the plan's text.
+- SKILL.md records new Minor breakage that the final re-review finds in the fix diff as `Task final: minor (deferred)` lines, the same as out-of-scope observations.
+- The worktree note lists everything the harness has refused: command substitution, loops with computed command names, chained heredocs, and `awk -v` pipelines, not only `cd` or `git -C` combined with git. It says to run each SDD script and git command as its own plain call.
+
 ## v0.1.2 — 2026-09-25
 
 The role table follows oiler's 2026-09-25 effort policy, and the orchestrator's own effort is checked.
