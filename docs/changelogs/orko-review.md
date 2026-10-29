@@ -19,7 +19,7 @@ A few malformed findings no longer cost a whole lens. Across 39 recorded invalid
 
 ### Known issues
 
-- Whether a reviewer can run `lint` without a permission prompt depends on the session's permission settings. If it prompts, add `Bash(python3 <path to orko-review>/scripts/orko_review.py lint *)` to your allow list.
+- Whether a reviewer can run `lint` without a permission prompt depends on the session's permission settings. If it prompts, add an allow rule for the `python3 … lint` prefix your brief prints (it uses the resolved script path, not the `~/.claude/skills` symlink).
 
 ## v0.1.0 — 2026-09-26
 

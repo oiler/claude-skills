@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -600,7 +601,9 @@ def parse_lenient(text: str, lens: str, doc: str) -> tuple[list[dict], int]:
     hits = [i for i, line in enumerate(lines) if line.rstrip() == "## Findings"]
     if len(hits) == 1:
         rest = lines[hits[0] + 1:]
-        lines = rest[:next((i for i, line in enumerate(rest) if line.startswith("## ")), len(rest))]
+        # Ends where parse_report ends Findings, so a finding that quotes a `## ` line isn't cut short.
+        lines = rest[:next((i for i, line in enumerate(rest) if line.rstrip() == "## Checked and sound"),
+                           len(rest))]
     findings, bad = scan_findings(lines)
     entries: list[dict] = []
     seen: set[int] = set()
@@ -662,27 +665,53 @@ def open_run(run_arg: str) -> tuple[Path, dict | None]:
     return run, manifest
 
 
-def reset_scratch(manifest: dict, lens: str) -> None:
+def own_scratch(path: str, run: Path, lens: str) -> bool | None:
+    """True for a real scratch folder of ours, None for a missing one we may recreate, else False.
+
+    run.json is plain JSON any process can edit, and both callers delete without a prompt, so a
+    named path is trusted only when it still looks like the folder `start` made for this lens.
+    """
+    if not os.path.isabs(path) or not Path(path).name.startswith(f"orko-review-{run.name}-{lens}-"):
+        return False
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+
+
+def reset_scratch(manifest: dict, run: Path, lens: str) -> None:
     """A fresh retry gets an empty scratch folder, so it can't read its predecessor's notes."""
     path = manifest.get("scratch", {}).get(lens)
     if not path:
         return
-    folder = Path(path)
-    if not folder.is_dir():
+    owned = own_scratch(path, run, lens)
+    if owned is None:
         os.mkdir(path, 0o700)
+        return
+    if not owned:
+        print(f"warning: scratch not touched: {path}")
         return
     # Emptied in place: removing the folder would drop mkdtemp's 0700 mode and open a window for
     # another local user to plant a folder or symlink at the same path.
-    for child in folder.iterdir():
+    for child in Path(path).iterdir():
         if child.is_dir() and not child.is_symlink():
             shutil.rmtree(child, ignore_errors=True)
         else:
             child.unlink(missing_ok=True)
 
 
-def remove_scratch(manifest: dict) -> list[str]:
+def remove_scratch(manifest: dict, run: Path) -> list[str]:
     warnings = []
-    for path in manifest.get("scratch", {}).values():
+    for lens, path in manifest.get("scratch", {}).items():
+        if not path:
+            continue
+        owned = own_scratch(path, run, lens)
+        if owned is None:
+            continue
+        if not owned:
+            warnings.append(f"warning: scratch not touched: {path}")
+            continue
         shutil.rmtree(path, ignore_errors=True)
         if Path(path).exists():
             warnings.append(f"warning: scratch not removed: {path}")
@@ -731,7 +760,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         if report.is_file():
             # A retry starts from an empty path, so the new reviewer can't read its predecessor.
             report.rename(run / f"{lens}.invalid-{attempts}.md")
-        reset_scratch(manifest, lens)
+        reset_scratch(manifest, run, lens)
         manifest["status"][lens] = "retry"
         retries.append(f"retry: {lens} — {manifest['failures'][lens]}")
     failed = [lens for lens in lenses if manifest["status"][lens] == "failed"]
@@ -842,8 +871,9 @@ def cmd_summary(args: argparse.Namespace) -> int:
     if manifest.get("index") is None:
         # No findings index means reviewers may still be retrying in these folders.
         return code
-    # After rendering, on every exit path: the reviewers are done, and they can't delete these themselves.
-    warnings = remove_scratch(manifest)
+    # Once check has stored an index, whether or not the summary rendered: the reviewers are done,
+    # and they can't delete these themselves.
+    warnings = remove_scratch(manifest, run)
     if warnings:
         print("\n".join(warnings))
     return code

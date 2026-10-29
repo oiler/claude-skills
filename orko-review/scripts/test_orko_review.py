@@ -585,6 +585,12 @@ class TestCheck:
         assert [e["n"] for e in entries] == list(range(1, 16))
         assert unparsed == 0
 
+    def test_lenient_scan_reads_past_a_quoted_level_2_heading(self):
+        text = mutate(r"^- Evidence: .*$", "\\g<0>\n## quoted heading")(
+            mutate(r"^ready with changes$", "mostly ready")(fixture_report()))
+        entries, _ = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert len(entries) == 15
+
     def test_lenient_scan_reads_the_whole_body_when_findings_is_not_single(self):
         text = fixture_report() + "\n## Findings\n\n### F-16 [nit] after the second heading\n\n- Where: x\n- Evidence: x\n- Problem: x\n- Fix: x\n"
         entries, _ = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
@@ -783,6 +789,49 @@ class TestCheck:
         assert stat.S_IMODE(design.stat().st_mode) == 0o700
         assert not any(design.iterdir())
         assert outside.exists()
+
+
+    def test_a_retry_leaves_a_tampered_scratch_path_alone(self, project, tmp_path, capsys):
+        run = started(project)
+        victim = write(tmp_path / "victim" / "keep.txt", "keep\n").parent
+        manifest = orko_review.load_manifest(run)
+        manifest["scratch"]["design"] = str(victim)
+        orko_review.write_manifest(run, manifest)
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        write(run / "design.md", "not a report\n")
+        capsys.readouterr()
+        assert check(run) == 2
+        assert (victim / "keep.txt").exists()
+        assert f"warning: scratch not touched: {victim}" in capsys.readouterr().out
+        put_report(run, "design")
+        assert check(run) == 0
+        assert summary(run) == 2  # undecided; scratch cleanup still runs
+        assert (victim / "keep.txt").exists()
+        assert f"warning: scratch not touched: {victim}" in capsys.readouterr().out
+
+    def test_a_retry_spares_the_target_of_a_symlinked_scratch_folder(self, project, tmp_path, capsys):
+        run = started(project)
+        design = Path(orko_review.load_manifest(run)["scratch"]["design"])
+        victim = write(tmp_path / "victim" / "keep.txt", "keep\n").parent
+        design.rmdir()
+        design.symlink_to(victim)
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        write(run / "design.md", "not a report\n")
+        capsys.readouterr()
+        assert check(run) == 2
+        assert (victim / "keep.txt").exists()
+        assert f"warning: scratch not touched: {design}" in capsys.readouterr().out
+
+    def test_an_empty_scratch_path_draws_no_warning(self, project, capsys):
+        run = checked(project, "file-only")
+        manifest = orko_review.load_manifest(run)
+        manifest["scratch"]["design"] = ""
+        orko_review.write_manifest(run, manifest)
+        capsys.readouterr()
+        assert summary(run) == 0
+        assert "warning" not in capsys.readouterr().out
 
 
 def lint(path):
