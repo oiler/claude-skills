@@ -956,6 +956,32 @@ class TestSkillMd:
     def test_role_table_matches_the_script(self, text):
         assert orko_sdd.render_role_table() in text
 
+    @pytest.mark.parametrize("phrase", [
+        'One case overrides SDD\'s "There is no second fix wave".',
+        "`<workspace>/final-fix-rereview.md`",
+        "After the last re-review that ran (the refix re-review when there was a refix), append",
+        "Minor breakage and out-of-scope observations get no fix round.",
+        "the final fixer, the final refixer, and a re-reviewer get it when the code they touch qualifies.",
+        "logs as `--task final --role final-refixer`",
+        "and leaves the bodies to the implementer: also `implementer-scoped`.",
+        "If it can't be resumed, dispatch it fresh: log `final-fixer` again with the reason.",
+        "A ruling may depart from code or signatures the plan prescribes word for word.",
+        "Its scoped re-review, and a refix re-review, log as `--task final --role re-reviewer`",
+        "that no `parked` or `Ruling:` line already carries as a `Follow-up: <item>` ledger line",
+        "The plan's documented test command is the gate for `finishing-a-development-branch`'s Step 1.",
+        "A new Minor is one that has no `minor (deferred)` line yet.",
+        "`Task <N>: checked — <item> — <what you verified>`",
+        "append to the ledger with the Edit tool or a single unchained `cat >> <ledger> <<'EOF'` call",
+        "Copy `<workspace>` to `<repo-root>/.superpowers/sdd/<plan-slug>/` in the main checkout",
+        "Leave the workspace in place; oiler cleans it up.",
+    ])
+    def test_skill_carries_the_v014_rules(self, text, phrase):
+        assert phrase in text
+
+    def test_skill_no_longer_deletes_the_workspace(self, text):
+        assert "rm -rf <workspace>" not in text
+        assert "Hold that deletion" not in text
+
     def test_allowed_tools_grants_exactly_the_four_subcommands(self, text):
         frontmatter = text.split("---", 2)[1]
         grants = re.findall(r"Bash\(([^)]*)\)", frontmatter.split("allowed-tools:", 1)[1])

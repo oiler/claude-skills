@@ -1,5 +1,21 @@
 # orko-sdd — Changelog
 
+## v0.1.4 — 2026-10-29
+
+A regression the final fix wave introduces gets one more fix round, and the skill pins superpowers 7.0.0.
+
+### Added
+
+- `final-refixer` (opus/high): when the fix re-review lists a Critical or Important item under New Breakage in the Fix Diff, the orchestrator writes a superseding ruling if an earlier ruling prescribed the approach that regressed, dispatches one refixer, and runs one refix re-review. This overrides SDD's "There is no second fix wave" for that case only. Two clean-room runs had ended with such a regression parked (`smoke-2026-09-25b.md`, `smoke-2026-10-10.md`).
+- `log` enforces the order and the cap: the refixer needs `--task final`, a `final-fixer` dispatch, and a re-review after it, and only one is allowed per ledger. `--override` doesn't lift these.
+- A role rule for signature-only plans: exact signatures, test code and pinned values, with bodies left to the implementer, route to `implementer-scoped`.
+
+### Changed
+
+- Pinned to superpowers 7.0.0. SDD's own text and templates are unchanged from 6.4.1. writing-plans now writes signature-and-test plans, which the new role rule covers.
+- Finish keeps the workspace, as oiler's global CLAUDE.md asks, and copies it to the main checkout before `finishing-a-development-branch` can remove the worktree.
+- Wording: the final fixer's NEEDS_CONTEXT and BLOCKED paths; rulings that depart from plan code; the final re-review's role; one home for a parked finding; the test-command gate; re-raised versus new minors; a ledger shape for resolved ⚠️ items; appending to the ledger inside a worktree.
+
 ## v0.1.3 — 2026-10-10
 
 The orchestrator may run below high effort, with a warning, and the final-review wording covers the cases two clean-room runs had to guess at.
