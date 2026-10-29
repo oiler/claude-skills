@@ -108,7 +108,7 @@ Send the final fixer every finding from the final review, as SDD says, including
 
 Answer a final fixer's NEEDS_CONTEXT, or resolve its BLOCKED, by resuming it; that needs no log line. If it can't be resumed, dispatch it fresh: log `final-fixer` again with the reason. It is still the single fix wave.
 
-One case overrides SDD's "There is no second fix wave". When the fix re-review, the scoped re-review of the final fix wave, lists a Critical or Important item under New Breakage in the Fix Diff, that regression is the run's own defect, not a residual finding. Findings it marks NOT ADDRESSED don't trigger this: park them as before. Effort buys thoroughness, not a better approach, so if a ruling you wrote before the fix wave prescribed the approach that regressed, write a superseding ruling first, taking the re-review's suggested fix as the default. Then:
+One case overrides SDD's "There is no second fix wave". When the fix re-review, the scoped re-review of the final fix wave, lists a Critical or Important item under New Breakage in the Fix Diff, that regression is the run's own defect, not a residual finding. Findings it marks NOT ADDRESSED don't trigger this: park each one as before, with its own `Task final: parked` line, even when you expect the refix to resolve it; its ruling says so. Effort buys thoroughness, not a better approach, so if a ruling you wrote before the fix wave prescribed the approach that regressed, write a superseding ruling first, taking the re-review's suggested fix as the default. Then:
 
 - Ledger the fix re-review's Minor breakage and out-of-scope observations as `Task final: minor (deferred)` lines.
 - Save the fix re-review's report as `<workspace>/final-fix-rereview.md`.
