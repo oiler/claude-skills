@@ -456,7 +456,7 @@ def cmd_start(argv: list[str], cwd: Path | None = None, now: datetime | None = N
         "extras": {name: one_line(why) for name, why in extras},
         "evergreen": [str(p) for p in res.evergreen], "reviews_dir": str(res.reviews),
         "status": {lens: "pending" for lens in lenses}, "attempts": {}, "failures": {},
-        "index": None, "dispositions": {},
+        "index": None, "dispositions": {}, "lenient": {},
     })
     print(f"run: {run}")
     for lens in lenses:
@@ -582,6 +582,26 @@ def parse_report(text: str, lens: str, doc: str) -> tuple[list[dict], list[str]]
     return findings, errors
 
 
+def parse_lenient(text: str, lens: str, doc: str) -> tuple[list[dict], int]:
+    """Entries for a lens that failed for good: each heading that parses, marked malformed."""
+    text = text.replace("\r\n", "\n")
+    front = FRONT_RE.match(text)
+    prefix = ("lens failed", *front_matter_errors(front, lens, doc)[:1])
+    lines = text[front.end():].splitlines() if front else text.splitlines()
+    hits = [i for i, line in enumerate(lines) if line.rstrip() == "## Findings"]
+    if len(hits) == 1:
+        rest = lines[hits[0] + 1:]
+        lines = rest[:next((i for i, line in enumerate(rest) if line.startswith("## ")), len(rest))]
+    findings, bad = scan_findings(lines)
+    entries: list[dict] = []
+    seen: set[int] = set()
+    for finding in findings:
+        if finding["n"] not in seen:
+            seen.add(finding["n"])
+            entries.append(index_fields(finding, prefix))
+    return entries, len(bad) + len(findings) - len(entries)
+
+
 def cell(text: str) -> str:
     return one_line(text).replace("|", r"\|")
 
@@ -606,6 +626,25 @@ def index_table(index: list[dict]) -> list[str]:
                  [f"| {e['id']} | {cell(e['severity'])} | {shown_title(e)} |" for e in index])
 
 
+def failed_lenses_line(manifest: dict, failed: list[str]) -> str:
+    lenient = manifest.get("lenient", {})
+    return "failed-lenses: " + ", ".join(
+        f"{lens} ({lenient.get(lens, {}).get('report') or 'no report'})" for lens in failed)
+
+
+def failed_row(lens: str, manifest: dict) -> str:
+    info = manifest.get("lenient", {}).get(lens) or {"report": None, "entries": [], "unparsed": 0}
+    if info["entries"]:
+        title = f"lens failed twice; {len(info['entries'])} findings read leniently from {info['report']}"
+        if info["unparsed"]:
+            title += f", {info['unparsed']} headings unparsed"
+    elif info["report"]:
+        title = f"lens failed twice; report unparsed: {info['report']}"
+    else:
+        title = "lens failed twice; no report"
+    return f"| {lens}/— | — | {cell(title)} | {cell(manifest['failures'].get(lens, ''))} |"
+
+
 def open_run(run_arg: str) -> tuple[Path, dict | None]:
     run = Path(run_arg).expanduser().resolve()
     manifest = load_manifest(run)
@@ -624,10 +663,13 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(f"problem: doc changed since start (original: {run / 'doc.orig.md'})\nSTATUS: blocked")
         return 3
     lenses = manifest["lenses"]
+    lenient = manifest.setdefault("lenient", {})
     retries: list[str] = []
     entries: list[dict] = []
     for lens in lenses:
         if manifest["status"][lens] == "failed":
+            entries += [{"id": f"{lens}/F-{e['n']}", "lens": lens, **e}
+                        for e in lenient.get(lens, {}).get("entries", [])]
             continue
         report = run / f"{lens}.md"
         if report.is_file():
@@ -641,21 +683,27 @@ def cmd_check(args: argparse.Namespace) -> int:
         attempts = manifest["attempts"].get(lens, 0) + 1
         manifest["attempts"][lens] = attempts
         manifest["failures"][lens] = "; ".join(errors)
+        if attempts >= 2:
+            # No retry follows, so the report stays where the apply step reads it.
+            manifest["status"][lens] = "failed"
+            found, unparsed = (parse_lenient(read_text(report), lens, manifest["doc"])
+                               if report.is_file() else ([], 0))
+            lenient[lens] = {"report": str(report) if report.is_file() else None,
+                             "entries": found, "unparsed": unparsed}
+            entries += [{"id": f"{lens}/F-{e['n']}", "lens": lens, **e} for e in found]
+            continue
         if report.is_file():
             # A retry starts from an empty path, so the new reviewer can't read its predecessor.
             report.rename(run / f"{lens}.invalid-{attempts}.md")
-        if attempts >= 2:
-            manifest["status"][lens] = "failed"
-        else:
-            manifest["status"][lens] = "retry"
-            retries.append(f"retry: {lens} — {manifest['failures'][lens]}")
+        manifest["status"][lens] = "retry"
+        retries.append(f"retry: {lens} — {manifest['failures'][lens]}")
     failed = [lens for lens in lenses if manifest["status"][lens] == "failed"]
     if retries:
         manifest["index"] = None
         write_manifest(run, manifest)
         print("\n".join(retries))
         return 2
-    if len(failed) == len(lenses):
+    if len(failed) == len(lenses) and not entries:
         manifest["index"] = None
         write_manifest(run, manifest)
         print("problem: no valid reports\nSTATUS: blocked")
@@ -665,7 +713,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     write_manifest(run, manifest)
     lines = index_table(entries)
     if failed:
-        lines.append(f"failed-lenses: {', '.join(failed)}")
+        lines.append(failed_lenses_line(manifest, failed))
     print("\n".join(lines))
     return 0
 
@@ -737,14 +785,13 @@ def cmd_summary(args: argparse.Namespace) -> int:
     if manifest["mode"] == "file-only":
         out += ["## Findings", *index_table(index)]
         if failed:
-            out.append(f"failed-lenses: {', '.join(failed)}")
+            out.append(failed_lenses_line(manifest, failed))
         out.append(f"Apply later: /orko-review --run {run} --apply")
     else:
         def rows(verdict: str) -> list[str]:
             return [f"| {e['id']} | {cell(e['severity'])} | {shown_title(e)} | {cell(decided[e['id']]['why'])} |"
                     for e in index if decided[e["id"]]["verdict"] == verdict]
-        needs = rows("defer") + [f"| {lens}/— | — | lens failed twice | {cell(manifest['failures'].get(lens, ''))} |"
-                                 for lens in failed]
+        needs = rows("defer") + [failed_row(lens, manifest) for lens in failed]
         out += ["## Accepted", *table("| ID | Severity | Title | Change |", rows("accept")),
                 "## Rejected", *table("| ID | Severity | Title | Why |", rows("reject")),
                 "## Needs you", *table("| ID | Severity | Title | Why |", needs),

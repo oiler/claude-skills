@@ -531,7 +531,94 @@ def check(run):
     return orko_review.main(["check", "--run", str(run)])
 
 
+def fail_twice(run, lens, text):
+    """Write `text` as the lens's report before each of two checks, so the lens fails for good."""
+    write(run / f"{lens}.md", text)
+    assert check(run) == 2
+    write(run / f"{lens}.md", text)
+    return check(run)
+
+
 class TestCheck:
+    def test_a_lens_failing_for_good_keeps_its_report_and_is_read_leniently(self, project, capsys):
+        run = started(project)
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        broken = report_text("design", str(project / SPEC_REL)) + "\n## Findings\n"
+        capsys.readouterr()
+        assert fail_twice(run, "design", broken) == 0
+        assert (run / "design.md").read_text(encoding="utf-8") == broken
+        assert not (run / "design.invalid-2.md").exists()
+        manifest = orko_review.load_manifest(run)
+        assert manifest["status"]["design"] == "failed"
+        design = [e for e in manifest["index"] if e["lens"] == "design"]
+        assert len(design) == 15
+        assert all(e["malformed"] == "lens failed" for e in design)
+        assert manifest["lenient"]["design"] == {"report": str(run / "design.md"),
+                                                  "entries": [{k: v for k, v in e.items() if k not in ("id", "lens")}
+                                                              for e in sorted(design, key=lambda e: e["n"])],
+                                                  "unparsed": 0}
+        assert f"failed-lenses: design ({run / 'design.md'})" in capsys.readouterr().out
+
+    def test_lenient_entries_carry_their_own_reasons_and_the_first_front_matter_error(self):
+        text = mutate(r"^lens: design$", "lens: other")(mutate(r"^- Problem: .*\n", "")(fixture_report()))
+        entries, unparsed = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert unparsed == 0
+        assert entries[0]["malformed"] == "lens failed; lens is 'other', expected 'design'; missing Problem"
+        assert entries[1]["malformed"] == "lens failed; lens is 'other', expected 'design'"
+
+    def test_lenient_scan_stays_inside_a_single_findings_section(self):
+        text = mutate(r"^ready with changes$", "mostly ready")(fixture_report()) + "\n### F-99 [nit] stray\n"
+        entries, unparsed = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert [e["n"] for e in entries] == list(range(1, 16))
+        assert unparsed == 0
+
+    def test_lenient_scan_reads_the_whole_body_when_findings_is_not_single(self):
+        text = fixture_report() + "\n## Findings\n\n### F-16 [nit] after the second heading\n\n- Where: x\n- Evidence: x\n- Problem: x\n- Fix: x\n"
+        entries, _ = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert [e["n"] for e in entries] == list(range(1, 17))
+
+    def test_lenient_scan_keeps_the_first_duplicate_and_counts_the_rest_and_bad_headings(self):
+        text = mutate(r"^### F-2 \[[a-z]+\] ", "### Finding 2 ")(mutate(r"^### F-15 ", "### F-14 ")(fixture_report()))
+        entries, unparsed = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert [e["n"] for e in entries] == [1, *range(3, 15)]
+        assert unparsed == 2
+
+    def test_lenient_scan_handles_windows_line_endings(self):
+        text = (fixture_report() + "\n## Findings\n").replace("\n", "\r\n")
+        entries, _ = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert len(entries) == 15
+
+    def test_lenient_entries_are_stored_once(self, project):
+        run = started(project)
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        assert fail_twice(run, "design", report_text("design", str(project / SPEC_REL)) + "\n## Findings\n") == 0
+        put_report(run, "design")  # a valid report arriving later doesn't change a failed lens
+        assert check(run) == 0
+        design = [e for e in orko_review.load_manifest(run)["index"] if e["lens"] == "design"]
+        assert len(design) == 15 and all(e["malformed"] == "lens failed" for e in design)
+
+    def test_every_lens_failed_but_one_parsed_leniently_does_not_block(self, project, capsys):
+        run = started(project)
+        broken = report_text("design", str(project / SPEC_REL)) + "\n## Findings\n"
+        write(run / "design.md", broken)
+        assert check(run) == 2
+        write(run / "design.md", broken)
+        capsys.readouterr()
+        assert check(run) == 0
+        out = capsys.readouterr().out
+        assert "failed-lenses: accuracy (no report), completeness (no report), design (" in out
+
+    def test_a_v010_manifest_without_lenient_still_checks(self, project):
+        run = started(project)
+        manifest = orko_review.load_manifest(run)
+        del manifest["lenient"]
+        orko_review.write_manifest(run, manifest)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        assert check(run) == 0
+
     def test_valid_reports_store_and_print_a_sorted_index(self, project, capsys):
         run = started(project)
         for lens, source in (("accuracy", "accuracy"), ("completeness", "completeness"), ("design", "design")):
@@ -590,7 +677,7 @@ class TestCheck:
         capsys.readouterr()
         assert check(run) == 0
         out = capsys.readouterr().out
-        assert "failed-lenses: design" in out
+        assert "failed-lenses: design (no report)" in out
         put_report(run, "design")
         assert check(run) == 0
         manifest = orko_review.load_manifest(run)
@@ -721,6 +808,35 @@ class TestDecide:
 
 
 class TestSummary:
+    def test_needs_you_rows_for_each_failed_lens_case(self, project, capsys):
+        run = started(project, "--extra", "security", "--why", "a", "--extra", "data", "--why", "b")
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        leniently = report_text("security", str(project / SPEC_REL)) + "\n## Findings\n"
+        unparsed = "no headings here\n"
+        write(run / "security.md", leniently)
+        write(run / "data.md", unparsed)
+        assert check(run) == 2
+        write(run / "security.md", leniently)
+        write(run / "data.md", unparsed)
+        assert check(run) == 0
+        decide_all(run)
+        capsys.readouterr()
+        assert summary(run) == 0
+        needs = capsys.readouterr().out.split("\n## Needs you\n")[1]
+        assert f"| security/— | — | lens failed twice; 15 findings read leniently from {run / 'security.md'} |" in needs
+        assert f"| data/— | — | lens failed twice; report unparsed: {run / 'data.md'} |" in needs
+
+    def test_file_only_summary_names_failed_lenses_with_their_reports(self, project, capsys):
+        run = started(project, mode="file-only")
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        assert check(run) == 2
+        assert check(run) == 0
+        capsys.readouterr()
+        assert summary(run) == 0
+        assert "failed-lenses: design (no report)" in capsys.readouterr().out
+
     def test_refuses_before_check(self, project):
         assert summary(started(project)) == 2
 
@@ -751,7 +867,7 @@ class TestSummary:
         assert "| why design/F-1 |" in out
         assert "Specialist: security — auth section" in out
         assert "| design/F-8 | minor |" in out.split("\n## Needs you\n")[1]
-        assert "| security/— | — | lens failed twice | report missing |" in out
+        assert "| security/— | — | lens failed twice; no report | report missing |" in out
 
     def test_empty_tables_print_none(self, project, capsys):
         run = checked(project)
@@ -788,6 +904,14 @@ class TestSummary:
 
 
 class TestResume:
+    def test_resume_works_on_a_v010_manifest(self, project, home):
+        run = checked(project, "file-only")
+        manifest = orko_review.load_manifest(run)
+        manifest.pop("lenient", None)
+        orko_review.write_manifest(run, manifest)
+        lines = pre(["--effort", "high", "--run", str(run), "--apply"], home, project)
+        assert lines[-1] == "STATUS: ok"
+
     def test_resume_flips_a_file_only_run_to_apply(self, project, home):
         run = checked(project, "file-only")
         lines = pre(["--effort", "high", "--run", str(run), "--apply"], home, project)
