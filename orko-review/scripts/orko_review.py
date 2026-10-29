@@ -475,53 +475,9 @@ FINDING_RE = re.compile(r"^### F-(\d+) \[([^\]]*)\] (\S.*)$")
 BULLET_RE = re.compile(r"^- (Where|Evidence|Problem|Fix):(.*)$")
 
 
-def parse_findings(block: list[str]) -> tuple[list[dict], list[str]]:
-    content = [line for line in block if line.strip()]
-    if not any(line.startswith("### ") for line in content):
-        if [line.strip() for line in content] == ["None."]:
-            return [], []
-        return [], ["'## Findings' must hold 'None.' or at least one '### F-<n> [<severity>] <title>'"]
-    if any(line.strip() == "None." for line in content):
-        return [], ["'None.' can't sit alongside findings"]
-    findings: list[dict] = []
-    errors: list[str] = []
-    current: dict | None = None
-    for line in content:
-        if line.startswith("### "):
-            match = FINDING_RE.match(line.rstrip())
-            if not match:
-                errors.append(f"malformed finding heading: {line.strip()!r}")
-                current = None
-                continue
-            current = {"n": int(match.group(1)), "severity": match.group(2),
-                       "title": match.group(3).strip(), "bullets": []}
-            findings.append(current)
-        elif current is not None:
-            bullet = BULLET_RE.match(line)
-            if bullet:
-                current["bullets"].append((bullet.group(1), bullet.group(2).strip()))
-    for position, finding in enumerate(findings, 1):
-        tag = f"F-{finding['n']}"
-        if finding["n"] != position:
-            errors.append(f"finding IDs must run F-1 to F-{len(findings)} without gaps; "
-                          f"found {tag} at position {position}")
-        if finding["severity"] not in SEVERITIES:
-            errors.append(f"{tag} severity {finding['severity']!r} is not one of {', '.join(SEVERITIES)}")
-        labels = [label for label, _ in finding["bullets"]]
-        if labels != list(BULLETS):
-            errors.append(f"{tag} needs the bullets Where, Evidence, Problem, Fix in that order; "
-                          f"found {', '.join(labels) or 'none'}")
-        elif not all(value for _, value in finding["bullets"]):
-            errors.append(f"{tag} has an empty bullet")
-    return [{k: f[k] for k in ("n", "severity", "title")} for f in findings], errors
-
-
-def parse_report(text: str, lens: str, doc: str) -> tuple[list[dict], list[str]]:
-    """(findings, errors) for one report; the findings mean something only when errors is empty."""
-    text = text.replace("\r\n", "\n")
-    front = FRONT_RE.match(text)
+def front_matter_errors(front: re.Match | None, lens: str, doc: str) -> list[str]:
     if not front:
-        return [], ["front matter missing: the report must open with a --- block holding lens and doc"]
+        return ["front matter missing: the report must open with a --- block holding lens and doc"]
     errors: list[str] = []
     fields = dict(FIELD_RE.findall(front.group(1)))
     if sorted(fields) != ["doc", "lens"]:
@@ -530,6 +486,81 @@ def parse_report(text: str, lens: str, doc: str) -> tuple[list[dict], list[str]]
         errors.append(f"lens is {fields.get('lens')!r}, expected {lens!r}")
     if fields.get("doc") != doc:
         errors.append(f"doc is {fields.get('doc')!r}, expected {doc!r}")
+    return errors
+
+
+def scan_findings(lines: list[str]) -> tuple[list[dict], list[str]]:
+    """Every parsed finding with its bullets, and the raw text of each heading that doesn't parse."""
+    findings: list[dict] = []
+    bad: list[str] = []
+    current: dict | None = None
+    for line in lines:
+        if line.startswith("### "):
+            match = FINDING_RE.match(line.rstrip())
+            if not match:
+                bad.append(line.strip())
+                current = None
+                continue
+            severity = match.group(2).lower() if match.group(2).lower() in SEVERITIES else match.group(2)
+            current = {"n": int(match.group(1)), "severity": severity,
+                       "title": match.group(3).strip(), "bullets": []}
+            findings.append(current)
+        elif current is not None:
+            bullet = BULLET_RE.match(line)
+            if bullet:
+                current["bullets"].append((bullet.group(1), bullet.group(2).strip()))
+    return findings, bad
+
+
+def finding_reasons(finding: dict) -> list[str]:
+    labels = [label for label, _ in finding["bullets"]]
+    reasons: list[str] = []
+    missing = [b for b in BULLETS if b not in labels]
+    if missing:
+        reasons.append("missing " + ", ".join(missing))
+    elif labels != list(BULLETS):
+        reasons.append("bullets out of order: " + ", ".join(labels))
+    reasons += [f"empty {label}" for label, value in finding["bullets"] if not value]
+    if finding["severity"] not in SEVERITIES:
+        reasons.append(f"severity '{finding['severity']}'")
+    return reasons
+
+
+def index_fields(finding: dict, prefix: tuple[str, ...] = ()) -> dict:
+    """A finding as the index stores it; `malformed` is present only when there is a reason."""
+    entry = {k: finding[k] for k in ("n", "severity", "title")}
+    reasons = [*prefix, *finding_reasons(finding)]
+    if reasons:
+        entry["malformed"] = "; ".join(reasons)
+    return entry
+
+
+def parse_findings(block: list[str]) -> tuple[list[dict], list[str]]:
+    content = [line for line in block if line.strip()]
+    if not any(line.startswith("### ") for line in content):
+        if [line.strip() for line in content] == ["None."]:
+            return [], []
+        return [], ["'## Findings' must hold 'None.' or at least one '### F-<n> [<severity>] <title>'"]
+    if any(line.strip() == "None." for line in content):
+        return [], ["'None.' can't sit alongside findings"]
+    findings, bad = scan_findings(content)
+    errors = [f"malformed finding heading: {heading!r}" for heading in bad]
+    seen: set[int] = set()
+    for finding in findings:
+        # decide keys on <lens>/F-<n>, so an ID must be unique; a gap is harmless.
+        if finding["n"] in seen:
+            errors.append(f"duplicate finding ID F-{finding['n']}")
+        seen.add(finding["n"])
+    return [index_fields(f) for f in findings], errors
+
+
+def parse_report(text: str, lens: str, doc: str) -> tuple[list[dict], list[str]]:
+    """(findings, report-level errors). Finding-level problems ride on each finding as `malformed`."""
+    text = text.replace("\r\n", "\n")
+    front = FRONT_RE.match(text)
+    errors = front_matter_errors(front, lens, doc)
+    if not front:
+        return [], errors
     lines = text[front.end():].splitlines()
     starts: list[int] = []
     for heading in SECTIONS:

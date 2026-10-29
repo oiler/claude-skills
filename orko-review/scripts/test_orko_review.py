@@ -417,7 +417,7 @@ def mutate(pattern, repl, count=1, flags=re.M):
 DOTALL = re.M | re.S
 
 
-MUTATIONS = {
+REPORT_MUTATIONS = {
     "no front matter": (mutate(r"\A---\n.*?\n---\n", "", 1, DOTALL), "front matter missing"),
     "extra front matter key": (mutate(r"^lens: ", "model: opus\nlens: "), "exactly doc and lens"),
     "lens mismatch": (mutate(r"^lens: design$", "lens: other"), "lens is"),
@@ -428,16 +428,29 @@ MUTATIONS = {
                               + "\n## Verdict\n\nready with changes\n", "order"),
     "bad verdict": (mutate(r"^ready with changes$", "mostly ready"), "verdict"),
     "empty findings": (mutate(r"(^## Findings\n).*?(?=^## Checked and sound)", r"\1\n", 1, DOTALL), "must hold"),
-    "id gap": (mutate(r"^### F-15 ", "### F-16 "), "without gaps"),
-    "bad severity": (mutate(r"^### F-1 \[major\]", "### F-1 [critical]"), "severity"),
+    "duplicate id": (mutate(r"^### F-15 ", "### F-14 "), "duplicate finding ID F-14"),
     "malformed heading": (mutate(r"^### F-2 \[[a-z]+\] ", "### Finding 2 "), "malformed finding heading"),
     "empty title": (mutate(r"^(### F-1 \[major\]) .*$", r"\1 "), "malformed finding heading"),
-    "missing bullet": (mutate(r"^- Fix: .*\n", ""), "needs the bullets"),
-    "bullets out of order": (mutate(r"^(- Where: .*)\n(- Evidence: .*)$", r"\2\n\1"), "needs the bullets"),
-    "empty bullet": (mutate(r"^- Problem: .*$", "- Problem:"), "empty bullet"),
     "none beside findings": (mutate(r"^## Findings\n", "## Findings\n\nNone.\n"), "alongside"),
     "no checked bullets": (mutate(r"(^## Checked and sound\n).*\Z", r"\1", 1, DOTALL), "at least one bullet"),
 }
+
+# Each mutation hits F-1 only, the first match in the fixture; the value is F-1's exact reason.
+FINDING_MUTATIONS = {
+    "missing bullet": (mutate(r"^- Fix: .*\n", ""), "missing Fix"),
+    "two missing bullets": (mutate(r"^- Evidence: .*\n- Problem: .*\n", ""), "missing Evidence, Problem"),
+    "bullets out of order": (mutate(r"^(- Where: .*)\n(- Evidence: .*)$", r"\2\n\1"),
+                             "bullets out of order: Evidence, Where, Problem, Fix"),
+    "empty bullet": (mutate(r"^- Problem: .*$", "- Problem:"), "empty Problem"),
+    "unknown severity": (mutate(r"^### F-1 \[major\]", "### F-1 [critical]"), "severity 'critical'"),
+    "missing bullet and unknown severity": (
+        lambda t: mutate(r"^### F-1 \[major\]", "### F-1 [critical]")(mutate(r"^- Problem: .*\n", "")(t)),
+        "missing Problem; severity 'critical'"),
+}
+
+
+def fixture_report():
+    return (FIXTURES / "reports" / "design.md").read_text(encoding="utf-8")
 
 
 def check_errors(text, lens="design", doc=FIXTURE_DOC):
@@ -453,13 +466,40 @@ class TestParseReport:
         findings, errors = orko_review.parse_report(text, lens, doc)
         assert errors == []
         assert [f["n"] for f in findings] == list(range(1, count + 1))
+        assert all("malformed" not in f for f in findings)
 
-    @pytest.mark.parametrize("name", MUTATIONS)
-    def test_each_broken_rule_is_rejected(self, name):
-        change, message = MUTATIONS[name]
-        text = (FIXTURES / "reports" / "design.md").read_text(encoding="utf-8")
-        errors = check_errors(change(text))
+    @pytest.mark.parametrize("name", REPORT_MUTATIONS)
+    def test_each_report_level_rule_is_an_error(self, name):
+        change, message = REPORT_MUTATIONS[name]
+        errors = check_errors(change(fixture_report()))
         assert any(message in e for e in errors), errors
+
+    @pytest.mark.parametrize("name", FINDING_MUTATIONS)
+    def test_each_finding_level_rule_marks_only_that_finding(self, name):
+        change, reason = FINDING_MUTATIONS[name]
+        findings, errors = orko_review.parse_report(change(fixture_report()), "design", FIXTURE_DOC)
+        assert errors == []
+        assert len(findings) == 15
+        assert findings[0]["malformed"] == reason
+        assert all("malformed" not in f for f in findings[1:])
+
+    def test_an_id_gap_is_not_an_error(self):
+        findings, errors = orko_review.parse_report(
+            mutate(r"^### F-15 ", "### F-16 ")(fixture_report()), "design", FIXTURE_DOC)
+        assert errors == []
+        assert findings[-1]["n"] == 16
+
+    def test_severity_matches_case_insensitively_and_is_stored_lowercase(self):
+        findings, errors = orko_review.parse_report(
+            mutate(r"^### F-1 \[major\]", "### F-1 [Major]")(fixture_report()), "design", FIXTURE_DOC)
+        assert errors == []
+        assert findings[0]["severity"] == "major"
+        assert "malformed" not in findings[0]
+
+    def test_unknown_severity_is_kept_as_written(self):
+        findings, _ = orko_review.parse_report(
+            mutate(r"^### F-1 \[major\]", "### F-1 [Critical]")(fixture_report()), "design", FIXTURE_DOC)
+        assert findings[0]["severity"] == "Critical"
 
     def test_none_findings_is_valid(self):
         text = mutate(r"(^## Findings\n).*?(?=^## Checked and sound)", r"\1\nNone.\n\n", 1, DOTALL)(
