@@ -3,7 +3,7 @@
 
 Standard library only (Python 3.10+). SKILL.md says when each subcommand runs.
 The ledger is the one superpowers:subagent-driven-development keeps at
-<repo>/.superpowers/sdd/<plan>/progress.md; its line formats are the same in 6.3.0 and 6.4.1.
+<repo>/.superpowers/sdd/<plan>/progress.md; its line formats are the same in 6.3.0, 6.4.1, and 7.0.0.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SDD_PIN = "6.4.1"
+SDD_PIN = "7.0.0"
 EFFORTS = ("low", "medium", "high")
 MODELS = ("haiku", "sonnet", "opus", "fable")
 NEXT_EFFORT = {"low": "medium", "medium": "high"}
@@ -564,7 +564,7 @@ def skip_followups(skipped: dict[str, str], decisions: dict[str, str]) -> list[s
 
 
 def minor_followups(minors: list[tuple[str, str]]) -> list[str]:
-    """Deferred minors inline, one line per task: the workspace holding the ledger is deleted at Finish."""
+    """Deferred minors inline, one line per task: the report is the copy oiler reads first."""
     grouped: dict[str, list[str]] = {}
     for task, text in minors:
         grouped.setdefault(task, []).append(text or "(no text)")
@@ -683,7 +683,7 @@ def render_report(ledger_path: Path, plan_override: str | None, repo: Path) -> s
             what += f" (superseded by {refs(ruling.superseded_by)})"
         decided.append(f"| {n} | {cell(what)} | {cell(detail) or '—'} | {cell(cost) or '—'} |")
 
-    # Follow-up is never truncated: once Finish deletes the workspace, the report is the only copy.
+    # Follow-up is never truncated: the report is the copy oiler reads first.
     followups = list(plan_problems)
     if malformed:
         followups.append(f"- Decided {refs(malformed)}: not in the {RULING_SHAPE} shape")

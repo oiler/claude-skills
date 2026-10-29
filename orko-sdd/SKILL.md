@@ -18,7 +18,7 @@ allowed-tools: >-
 
 Execute the plan with `superpowers:subagent-driven-development` (SDD). You are the orchestrator: you dispatch, review, and decide. You do not implement.
 
-This file changes SDD; it doesn't restate it. Where the two conflict, this file wins, because oiler's instructions outrank plugins. Everything not mentioned here runs as SDD says: the ledger, task briefs, review packages, the single task reviewer, the fix loop and its breaker, and the final review. Written against SDD 6.4.1.
+This file changes SDD; it doesn't restate it. Where the two conflict, this file wins, because oiler's instructions outrank plugins. Everything not mentioned here runs as SDD says: the ledger, task briefs, review packages, the single task reviewer, the fix loop and its breaker, and the final review. Written against SDD 7.0.0.
 
 Below, `<workspace>` is the directory SDD's `sdd-workspace` script prints, and `<ledger>` is the `progress.md` inside it. The `allowed-tools` grant covers the script's four subcommands only until oiler's next message; after that, a call may ask for permission.
 

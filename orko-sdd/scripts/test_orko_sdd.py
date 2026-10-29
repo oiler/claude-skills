@@ -275,7 +275,8 @@ class TestPreflight:
         out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
         assert out[-1] == "STATUS: ok"
         assert f"plan: {(repo / 'docs' / 'plan.md').resolve()}" in out
-        assert "sdd: 6.4.1" in out
+        assert "sdd: 7.0.0" in out
+        assert not any(line.startswith("warning: orko-sdd was written against") for line in out)
         assert "agents: orko-sdd-low, orko-sdd-medium, orko-sdd-high" in out
         assert "base-branch: master" in out
         assert "final-review: opus/high" in out
@@ -335,9 +336,9 @@ class TestPreflight:
         assert out[-1] == "STATUS: blocked"
 
     def test_other_sdd_version_warns_but_passes(self, fake_home, repo):
-        write_plugins(fake_home, "6.5.0")
+        write_plugins(fake_home, "7.1.0")
         out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
-        assert any(line.startswith("warning: orko-sdd was written against SDD 6.4.1; installed 6.5.0")
+        assert any(line.startswith("warning: orko-sdd was written against SDD 7.0.0; installed 7.1.0")
                    for line in out)
         assert out[-1] == "STATUS: ok"
 
@@ -948,6 +949,9 @@ class TestSkillMd:
     @pytest.fixture
     def text(self):
         return (orko_sdd.SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    def test_skill_names_the_pinned_sdd_version(self, text):
+        assert f"Written against SDD {orko_sdd.SDD_PIN}." in text
 
     def test_role_table_matches_the_script(self, text):
         assert orko_sdd.render_role_table() in text
