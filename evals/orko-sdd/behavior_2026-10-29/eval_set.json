@@ -1,0 +1,36 @@
+{
+  "instrument": "decision comparison: the orchestrator's next ledger lines and log command on recorded final-review states, orko-sdd v0.1.3 vs v0.1.4",
+  "skill_sources": {
+    "v0.1.3": "tag orko-sdd-v0.1.3: orko-sdd/SKILL.md",
+    "v0.1.4": "branch feat/2026-10-29-orko-sdd-v0.1.4 at 51e9ed3: orko-sdd/SKILL.md"
+  },
+  "context_both_arms": "superpowers 7.0.0 subagent-driven-development SKILL.md and re-review-prompt.md",
+  "case_source": "v0.1.3 clean-room run 2026-10-10, fix re-review subagent agent-a69307cd3b358f47c; build_cases.py derives the variants",
+  "model": "opus",
+  "effort": "high",
+  "tools": "none",
+  "runs_per_case_per_arm": 3,
+  "cases": {
+    "1-important": {
+      "v0.1.4_expected": "superseding ruling, then `log --task final --role final-refixer --model opus --effort high`",
+      "v0.1.3_expected": "a `Task final: parked` line, no refixer"
+    },
+    "2-minor": {
+      "v0.1.4_expected": "a `Task final: minor (deferred)` line, no refixer",
+      "v0.1.3_expected": "the same"
+    },
+    "3-not-addressed": {
+      "v0.1.4_expected": "a `Task final: parked` line, no refixer",
+      "v0.1.3_expected": "the same"
+    },
+    "4-after-refix": {
+      "v0.1.4_expected": "a `Task final: parked` line, no second refixer",
+      "v0.1.3_expected": "not run (v0.1.3 never refixes)"
+    },
+    "5-mixed": {
+      "v0.1.4_expected": "a refixer sent only the new-breakage item, and a `parked` line for the NOT ADDRESSED finding",
+      "v0.1.3_expected": "two `parked` lines, no refixer"
+    }
+  },
+  "pass_rule": "v0.1.4 3/3 on cases 1, 4, 5 and >=2/3 on 2, 3; v0.1.3 parks case 1 in >=2/3"
+}
