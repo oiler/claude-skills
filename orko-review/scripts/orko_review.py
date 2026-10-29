@@ -374,7 +374,7 @@ def load_manifest(run: Path) -> dict | None:
         return None
 
 
-def render_brief(lens: str, res: Resolution, run: Path) -> str:
+def render_brief(lens: str, res: Resolution, run: Path, scratch: Path) -> str:
     lines = ["# Review brief: " + lens, "", "## Paths", "",
              f"- Lens: {lens}", f"- Document under review: {res.doc}"]
     if res.spec is not None:
@@ -382,6 +382,7 @@ def render_brief(lens: str, res: Resolution, run: Path) -> str:
     lines += [f"- Evergreen docs: {', '.join(map(str, res.evergreen)) or 'none'}",
               f"- Reviews directory (off limits except your report): {res.reviews}",
               f"- Write your report to: {run / f'{lens}.md'}",
+              f"- Scratch directory (yours only): {scratch}",
               f"- Check your report with: python3 {shlex.quote(str(SCRIPT_PATH))} lint "
               f"--report {shlex.quote(str(run / f'{lens}.md'))}", ""]
     return ("\n".join(lines) + "\n" + read_text(lens_file(res.doc_type, lens)) + "\n"
@@ -454,6 +455,9 @@ def cmd_start(argv: list[str], cwd: Path | None = None, now: datetime | None = N
     (run / "briefs").mkdir(parents=True)
     shutil.copyfile(res.doc, run / "doc.orig.md")
     lenses = [*res.lenses, *(name for name, _ in extras)]
+    # Outside the repo: copied project code under the reviews folder would pick up the repo's own
+    # git, uv, and test config, and a reviewer copying the repo would copy the reviews folder into itself.
+    scratch = {lens: tempfile.mkdtemp(prefix=f"orko-review-{run.name}-{lens}-") for lens in lenses}
     write_manifest(run, {
         "doc": str(res.doc), "doc_sha256": sha256(res.doc), "type": res.doc_type,
         "spec": str(res.spec) if res.spec else None, "mode": opts["mode"], "lenses": lenses,
@@ -461,11 +465,12 @@ def cmd_start(argv: list[str], cwd: Path | None = None, now: datetime | None = N
         "evergreen": [str(p) for p in res.evergreen], "reviews_dir": str(res.reviews),
         "status": {lens: "pending" for lens in lenses}, "attempts": {}, "failures": {},
         "index": None, "dispositions": {}, "lenient": {},
+        "scratch": scratch,
     })
     print(f"run: {run}")
     for lens in lenses:
         brief = run / "briefs" / f"{lens}.md"
-        brief.write_text(render_brief(lens, res, run), encoding="utf-8")
+        brief.write_text(render_brief(lens, res, run, Path(scratch[lens])), encoding="utf-8")
         print(f"{lens}: {dispatch_prompt(brief)}")
     return 0
 
@@ -657,6 +662,23 @@ def open_run(run_arg: str) -> tuple[Path, dict | None]:
     return run, manifest
 
 
+def reset_scratch(manifest: dict, lens: str) -> None:
+    """A fresh retry gets an empty scratch folder, so it can't read its predecessor's notes."""
+    path = manifest.get("scratch", {}).get(lens)
+    if path:
+        shutil.rmtree(path, ignore_errors=True)
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def remove_scratch(manifest: dict) -> list[str]:
+    warnings = []
+    for path in manifest.get("scratch", {}).values():
+        shutil.rmtree(path, ignore_errors=True)
+        if Path(path).exists():
+            warnings.append(f"warning: scratch not removed: {path}")
+    return warnings
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     run, manifest = open_run(args.run)
     if manifest is None:
@@ -699,6 +721,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         if report.is_file():
             # A retry starts from an empty path, so the new reviewer can't read its predecessor.
             report.rename(run / f"{lens}.invalid-{attempts}.md")
+        reset_scratch(manifest, lens)
         manifest["status"][lens] = "retry"
         retries.append(f"retry: {lens} — {manifest['failures'][lens]}")
     failed = [lens for lens in lenses if manifest["status"][lens] == "failed"]
@@ -767,10 +790,7 @@ def cmd_decide(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_summary(args: argparse.Namespace) -> int:
-    run, manifest = open_run(args.run)
-    if manifest is None:
-        return 2
+def render_summary(run: Path, manifest: dict) -> int:
     index = manifest.get("index")
     if index is None:
         print("problem: no findings index; run check first")
@@ -802,6 +822,18 @@ def cmd_summary(args: argparse.Namespace) -> int:
                 "## Recommended", RECOMMENDED_SLOT]
     print("\n".join(out))
     return 0
+
+
+def cmd_summary(args: argparse.Namespace) -> int:
+    run, manifest = open_run(args.run)
+    if manifest is None:
+        return 2
+    code = render_summary(run, manifest)
+    # After rendering, on every exit path: the reviewers are done, and they can't delete these themselves.
+    warnings = remove_scratch(manifest)
+    if warnings:
+        print("\n".join(warnings))
+    return code
 
 
 def resume(run: Path, problems: list[str]) -> list[str]:

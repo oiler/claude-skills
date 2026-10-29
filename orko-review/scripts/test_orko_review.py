@@ -347,6 +347,7 @@ class TestStart:
             f"- Evergreen docs: {project / 'CLAUDE.md'}\n"
             f"- Reviews directory (off limits except your report): {project / 'docs/superpowers/reviews'}\n"
             f"- Write your report to: {run / 'design.md'}\n"
+            f"- Scratch directory (yours only): {orko_review.load_manifest(run)['scratch']['design']}\n"
             f"- Check your report with: python3 {orko_review.SCRIPT_PATH} lint --report {run / 'design.md'}\n\n"
             + (orko_review.LENS_DIR / "spec-design.md").read_text(encoding="utf-8") + "\n"
             + orko_review.CONTRACT_PATH.read_text(encoding="utf-8"))
@@ -409,6 +410,15 @@ class TestStart:
         assert start(project, doc=name) == 2
         assert f"problem: {name} has no usable name for its run directory" in capsys.readouterr().out
         assert not (project / "reviews").exists()
+
+    def test_creates_one_scratch_folder_per_lens_outside_the_repo(self, project, temp_root):
+        start(project)
+        scratch = orko_review.load_manifest(run_dir(project))["scratch"]
+        assert sorted(scratch) == ["accuracy", "completeness", "design"]
+        for lens, path in scratch.items():
+            assert Path(path).is_dir()
+            assert Path(path).parent == temp_root
+            assert Path(path).name.startswith(f"orko-review-2026-09-25-120000-{lens}-")
 
 
 def mutate(pattern, repl, count=1, flags=re.M):
@@ -736,6 +746,28 @@ class TestCheck:
         out = capsys.readouterr().out
         assert r"| design/F-1 | minor \| nit | malformed: severity 'minor \| nit' — " in out
 
+    def test_a_retry_empties_that_lens_scratch_and_no_other(self, project):
+        run = started(project)
+        scratch = {k: Path(v) for k, v in orko_review.load_manifest(run)["scratch"].items()}
+        for path in scratch.values():
+            write(path / "notes.txt", "x\n")
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        write(run / "design.md", "not a report\n")
+        assert check(run) == 2
+        assert scratch["design"].is_dir() and not any(scratch["design"].iterdir())
+        assert (scratch["accuracy"] / "notes.txt").exists()
+
+    def test_a_final_failure_leaves_scratch_alone(self, project):
+        run = started(project)
+        design = Path(orko_review.load_manifest(run)["scratch"]["design"])
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        assert check(run) == 2
+        write(design / "notes.txt", "x\n")
+        assert check(run) == 0
+        assert (design / "notes.txt").exists()
+
 
 def lint(path):
     return orko_review.main(["lint", "--report", str(path)])
@@ -962,6 +994,38 @@ class TestSummary:
         assert decide(run, "design/F-1", "accept", "ok") == 0
         assert summary(run) == 0
         assert "| design/F-1 | major | malformed: missing Problem — " in capsys.readouterr().out
+
+    @pytest.mark.parametrize("mode", ["apply", "file-only"])
+    def test_summary_removes_every_scratch_folder(self, project, mode):
+        run = checked(project, mode)
+        if mode == "apply":
+            decide_all(run)
+        scratch = [Path(p) for p in orko_review.load_manifest(run)["scratch"].values()]
+        write(scratch[0] / "copy" / "x.py", "x = 1\n")
+        assert summary(run) == 0
+        assert not any(p.exists() for p in scratch)
+
+    def test_summary_exit_2_still_removes_scratch(self, project):
+        run = checked(project)
+        scratch = [Path(p) for p in orko_review.load_manifest(run)["scratch"].values()]
+        assert summary(run) == 2  # undecided
+        assert not any(p.exists() for p in scratch)
+
+    def test_summary_warns_when_a_folder_survives(self, project, monkeypatch, capsys):
+        run = checked(project, "file-only")
+        monkeypatch.setattr(orko_review.shutil, "rmtree", lambda *a, **k: None)
+        capsys.readouterr()
+        assert summary(run) == 0
+        out = capsys.readouterr().out
+        for path in orko_review.load_manifest(run)["scratch"].values():
+            assert f"warning: scratch not removed: {path}" in out
+
+    def test_summary_on_a_v010_manifest_without_scratch(self, project):
+        run = checked(project, "file-only")
+        manifest = orko_review.load_manifest(run)
+        del manifest["scratch"]
+        orko_review.write_manifest(run, manifest)
+        assert summary(run) == 0
 
 
 class TestResume:
