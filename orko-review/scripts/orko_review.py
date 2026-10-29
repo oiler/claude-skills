@@ -665,9 +665,19 @@ def open_run(run_arg: str) -> tuple[Path, dict | None]:
 def reset_scratch(manifest: dict, lens: str) -> None:
     """A fresh retry gets an empty scratch folder, so it can't read its predecessor's notes."""
     path = manifest.get("scratch", {}).get(lens)
-    if path:
-        shutil.rmtree(path, ignore_errors=True)
-        Path(path).mkdir(parents=True, exist_ok=True)
+    if not path:
+        return
+    folder = Path(path)
+    if not folder.is_dir():
+        os.mkdir(path, 0o700)
+        return
+    # Emptied in place: removing the folder would drop mkdtemp's 0700 mode and open a window for
+    # another local user to plant a folder or symlink at the same path.
+    for child in folder.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
 
 
 def remove_scratch(manifest: dict) -> list[str]:
@@ -829,6 +839,9 @@ def cmd_summary(args: argparse.Namespace) -> int:
     if manifest is None:
         return 2
     code = render_summary(run, manifest)
+    if manifest.get("index") is None:
+        # No findings index means reviewers may still be retrying in these folders.
+        return code
     # After rendering, on every exit path: the reviewers are done, and they can't delete these themselves.
     warnings = remove_scratch(manifest)
     if warnings:

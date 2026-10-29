@@ -1,5 +1,6 @@
 """Tests for orko_review.py, the deterministic half of the orko-review skill."""
 import re
+import stat
 import subprocess
 import sys
 from datetime import datetime
@@ -768,6 +769,21 @@ class TestCheck:
         assert check(run) == 0
         assert (design / "notes.txt").exists()
 
+    def test_a_retry_keeps_the_scratch_folder_private_and_spares_symlink_targets(self, project, tmp_path):
+        run = started(project)
+        design = Path(orko_review.load_manifest(run)["scratch"]["design"])
+        outside = write(tmp_path / "outside" / "keep.txt", "keep\n")
+        (design / "link").symlink_to(outside.parent)
+        (design / "sub").mkdir()
+        write(design / "sub" / "f.txt", "x\n")
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        write(run / "design.md", "not a report\n")
+        assert check(run) == 2
+        assert stat.S_IMODE(design.stat().st_mode) == 0o700
+        assert not any(design.iterdir())
+        assert outside.exists()
+
 
 def lint(path):
     return orko_review.main(["lint", "--report", str(path)])
@@ -1026,6 +1042,12 @@ class TestSummary:
         del manifest["scratch"]
         orko_review.write_manifest(run, manifest)
         assert summary(run) == 0
+
+    def test_summary_before_check_leaves_scratch_alone(self, project):
+        run = started(project)
+        scratch = [Path(p) for p in orko_review.load_manifest(run)["scratch"].values()]
+        assert summary(run) == 2
+        assert all(p.is_dir() for p in scratch)
 
 
 class TestResume:
