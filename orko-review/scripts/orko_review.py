@@ -586,6 +586,15 @@ def cell(text: str) -> str:
     return one_line(text).replace("|", r"\|")
 
 
+def severity_rank(severity: str) -> int:
+    return SEVERITIES.index(severity) if severity in SEVERITIES else len(SEVERITIES)
+
+
+def shown_title(entry: dict) -> str:
+    prefix = f"malformed: {entry['malformed']} — " if entry.get("malformed") else ""
+    return cell(prefix + entry["title"])
+
+
 def table(header: str, rows: list[str]) -> list[str]:
     if not rows:
         return ["None."]
@@ -594,7 +603,7 @@ def table(header: str, rows: list[str]) -> list[str]:
 
 def index_table(index: list[dict]) -> list[str]:
     return table("| ID | Severity | Title |",
-                 [f"| {e['id']} | {e['severity']} | {cell(e['title'])} |" for e in index])
+                 [f"| {e['id']} | {cell(e['severity'])} | {shown_title(e)} |" for e in index])
 
 
 def open_run(run_arg: str) -> tuple[Path, dict | None]:
@@ -651,7 +660,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         write_manifest(run, manifest)
         print("problem: no valid reports\nSTATUS: blocked")
         return 3
-    entries.sort(key=lambda e: (SEVERITIES.index(e["severity"]), lenses.index(e["lens"]), e["n"]))
+    entries.sort(key=lambda e: (severity_rank(e["severity"]), lenses.index(e["lens"]), e["n"]))
     manifest["index"] = entries
     write_manifest(run, manifest)
     lines = index_table(entries)
@@ -666,7 +675,7 @@ RECOMMENDED_SLOT = "<!-- orchestrator: at most 3 items, only ones that change wh
 
 
 def render_decisions(manifest: dict) -> str:
-    rows = [f"| {e['id']} | {e['severity']} | {cell(e['title'])} | {d['verdict']} | {cell(d['why'])} |"
+    rows = [f"| {e['id']} | {cell(e['severity'])} | {shown_title(e)} | {d['verdict']} | {cell(d['why'])} |"
             for e in manifest["index"] if (d := manifest["dispositions"].get(e["id"]))]
     return "\n".join([f"# Decisions — {Path(manifest['doc']).name}", "",
                       *table("| ID | Severity | Title | Verdict | Why |", rows)]) + "\n"
@@ -732,7 +741,7 @@ def cmd_summary(args: argparse.Namespace) -> int:
         out.append(f"Apply later: /orko-review --run {run} --apply")
     else:
         def rows(verdict: str) -> list[str]:
-            return [f"| {e['id']} | {e['severity']} | {cell(e['title'])} | {cell(decided[e['id']]['why'])} |"
+            return [f"| {e['id']} | {cell(e['severity'])} | {shown_title(e)} | {cell(decided[e['id']]['why'])} |"
                     for e in index if decided[e["id"]]["verdict"] == verdict]
         needs = rows("defer") + [f"| {lens}/— | — | lens failed twice | {cell(manifest['failures'].get(lens, ''))} |"
                                  for lens in failed]

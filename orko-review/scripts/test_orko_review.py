@@ -621,6 +621,33 @@ class TestCheck:
         assert check(tmp_path) == 2
         assert f"problem: no readable run.json in {tmp_path.resolve()}" in capsys.readouterr().out
 
+    def test_a_finding_missing_problem_is_indexed_malformed_and_the_lens_stays_valid(self, project, capsys):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        write(run / "design.md", mutate(r"^- Problem: .*\n", "")((run / "design.md").read_text(encoding="utf-8")))
+        capsys.readouterr()
+        assert check(run) == 0
+        manifest = orko_review.load_manifest(run)
+        assert manifest["status"]["design"] == "valid"
+        entry = next(e for e in manifest["index"] if e["id"] == "design/F-1")
+        assert entry["malformed"] == "missing Problem"
+        assert entry["title"] == "Reviewers can read sibling reports and earlier runs, which breaks the independence the skill exists to guarantee"
+        assert "| design/F-1 | major | malformed: missing Problem — Reviewers can read" in capsys.readouterr().out
+
+    def test_unknown_severity_sorts_last_and_is_escaped(self, project, capsys):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        write(run / "design.md", mutate(r"^### F-1 \[major\]", "### F-1 [minor | nit]")(
+            (run / "design.md").read_text(encoding="utf-8")))
+        capsys.readouterr()
+        assert check(run) == 0
+        index = orko_review.load_manifest(run)["index"]
+        assert index[-1]["id"] == "design/F-1"
+        out = capsys.readouterr().out
+        assert r"| design/F-1 | minor \| nit | malformed: severity 'minor \| nit' — " in out
+
 
 def checked(project, mode="apply", *extra):
     run = started(project, *extra, mode=mode)
@@ -683,6 +710,15 @@ class TestDecide:
         assert manifest is not None
         assert all(e["id"] in manifest["dispositions"] for e in index)
 
+    def test_decisions_file_shows_the_malformed_prefix(self, project):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        write(run / "design.md", mutate(r"^- Problem: .*\n", "")((run / "design.md").read_text(encoding="utf-8")))
+        assert check(run) == 0
+        assert decide(run, "design/F-1", "accept", "fixed") == 0
+        assert "| design/F-1 | major | malformed: missing Problem — " in (run / "decisions.md").read_text(encoding="utf-8")
+
 
 class TestSummary:
     def test_refuses_before_check(self, project):
@@ -733,6 +769,22 @@ class TestSummary:
         assert "## Recommended" not in out
         assert "| ID | Severity | Title |" in out
         assert out.rstrip().endswith(f"Apply later: /orko-review --run {run} --apply")
+
+    def test_malformed_findings_need_a_decision_and_show_their_prefix(self, project, capsys):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        write(run / "design.md", mutate(r"^- Problem: .*\n", "")((run / "design.md").read_text(encoding="utf-8")))
+        assert check(run) == 0
+        for e in orko_review.load_manifest(run)["index"]:
+            if e["id"] != "design/F-1":
+                assert decide(run, e["id"], "accept", "ok") == 0
+        capsys.readouterr()
+        assert summary(run) == 2
+        assert "problem: undecided: design/F-1" in capsys.readouterr().out
+        assert decide(run, "design/F-1", "accept", "ok") == 0
+        assert summary(run) == 0
+        assert "| design/F-1 | major | malformed: missing Problem — " in capsys.readouterr().out
 
 
 class TestResume:
