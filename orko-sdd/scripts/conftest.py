@@ -39,7 +39,7 @@ def ledger(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def fake_home(tmp_path: Path) -> Path:
-    """A home with superpowers 6.4.1 installed and the agents linked as a directory symlink."""
+    """A home with superpowers at SDD_PIN installed and the agents linked as a directory symlink."""
     home = tmp_path / "home"
     (home / ".claude" / "plugins").mkdir(parents=True)
     write_plugins(home, orko_sdd.SDD_PIN)

@@ -9,6 +9,7 @@ A regression the final fix wave introduces gets one more fix round, and the skil
 - `final-refixer` (opus/high): when the fix re-review lists a Critical or Important item under New Breakage in the Fix Diff, the orchestrator writes a superseding ruling if an earlier ruling prescribed the approach that regressed, dispatches one refixer, and runs one refix re-review. This overrides SDD's "There is no second fix wave" for that case only. Two clean-room runs had ended with such a regression parked (`smoke-2026-09-25b.md`, `smoke-2026-10-10.md`).
 - `log` enforces the order and the cap: the refixer needs `--task final`, a `final-fixer` dispatch, and a re-review after it, and only one is allowed per ledger. `--override` doesn't lift these.
 - A role rule for signature-only plans: exact signatures, test code and pinned values, with bodies left to the implementer, route to `implementer-scoped`.
+- `report` labels the refixer `refix` on the final review row.
 
 ### Changed
 
