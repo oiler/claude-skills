@@ -1,5 +1,6 @@
 """Shared fixtures for orko_review.py tests."""
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -48,3 +49,12 @@ def report_text(lens: str, doc: str, source: str = "design") -> str:
     text = (FIXTURES / "reports" / f"{source}.md").read_text(encoding="utf-8")
     return (text.replace(f"lens: {source}\n", f"lens: {lens}\n", 1)
                 .replace(f"doc: {FIXTURE_DOC}\n", f"doc: {doc}\n", 1))
+
+
+@pytest.fixture(autouse=True)
+def temp_root(tmp_path: Path, monkeypatch) -> Path:
+    """Scratch folders from `start` land here instead of the real system temp directory."""
+    root = tmp_path / "systmp"
+    root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(root))
+    return root

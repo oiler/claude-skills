@@ -1,5 +1,6 @@
 """Tests for orko_review.py, the deterministic half of the orko-review skill."""
 import re
+import stat
 import subprocess
 import sys
 from datetime import datetime
@@ -346,7 +347,9 @@ class TestStart:
             f"- Document under review: {project / SPEC_REL}\n"
             f"- Evergreen docs: {project / 'CLAUDE.md'}\n"
             f"- Reviews directory (off limits except your report): {project / 'docs/superpowers/reviews'}\n"
-            f"- Write your report to: {run / 'design.md'}\n\n"
+            f"- Write your report to: {run / 'design.md'}\n"
+            f"- Scratch directory (yours only): {orko_review.load_manifest(run)['scratch']['design']}\n"
+            f"- Check your report with: python3 {orko_review.SCRIPT_PATH} lint --report {run / 'design.md'}\n\n"
             + (orko_review.LENS_DIR / "spec-design.md").read_text(encoding="utf-8") + "\n"
             + orko_review.CONTRACT_PATH.read_text(encoding="utf-8"))
         assert (run / "briefs" / "design.md").read_text(encoding="utf-8") == expected
@@ -409,6 +412,15 @@ class TestStart:
         assert f"problem: {name} has no usable name for its run directory" in capsys.readouterr().out
         assert not (project / "reviews").exists()
 
+    def test_creates_one_scratch_folder_per_lens_outside_the_repo(self, project, temp_root):
+        start(project)
+        scratch = orko_review.load_manifest(run_dir(project))["scratch"]
+        assert sorted(scratch) == ["accuracy", "completeness", "design"]
+        for lens, path in scratch.items():
+            assert Path(path).is_dir()
+            assert Path(path).parent == temp_root
+            assert Path(path).name.startswith(f"orko-review-2026-09-25-120000-{lens}-")
+
 
 def mutate(pattern, repl, count=1, flags=re.M):
     return lambda t: re.sub(pattern, repl, t, count=count, flags=flags)
@@ -417,7 +429,7 @@ def mutate(pattern, repl, count=1, flags=re.M):
 DOTALL = re.M | re.S
 
 
-MUTATIONS = {
+REPORT_MUTATIONS = {
     "no front matter": (mutate(r"\A---\n.*?\n---\n", "", 1, DOTALL), "front matter missing"),
     "extra front matter key": (mutate(r"^lens: ", "model: opus\nlens: "), "exactly doc and lens"),
     "lens mismatch": (mutate(r"^lens: design$", "lens: other"), "lens is"),
@@ -428,16 +440,29 @@ MUTATIONS = {
                               + "\n## Verdict\n\nready with changes\n", "order"),
     "bad verdict": (mutate(r"^ready with changes$", "mostly ready"), "verdict"),
     "empty findings": (mutate(r"(^## Findings\n).*?(?=^## Checked and sound)", r"\1\n", 1, DOTALL), "must hold"),
-    "id gap": (mutate(r"^### F-15 ", "### F-16 "), "without gaps"),
-    "bad severity": (mutate(r"^### F-1 \[major\]", "### F-1 [critical]"), "severity"),
+    "duplicate id": (mutate(r"^### F-15 ", "### F-14 "), "duplicate finding ID F-14"),
     "malformed heading": (mutate(r"^### F-2 \[[a-z]+\] ", "### Finding 2 "), "malformed finding heading"),
     "empty title": (mutate(r"^(### F-1 \[major\]) .*$", r"\1 "), "malformed finding heading"),
-    "missing bullet": (mutate(r"^- Fix: .*\n", ""), "needs the bullets"),
-    "bullets out of order": (mutate(r"^(- Where: .*)\n(- Evidence: .*)$", r"\2\n\1"), "needs the bullets"),
-    "empty bullet": (mutate(r"^- Problem: .*$", "- Problem:"), "empty bullet"),
     "none beside findings": (mutate(r"^## Findings\n", "## Findings\n\nNone.\n"), "alongside"),
     "no checked bullets": (mutate(r"(^## Checked and sound\n).*\Z", r"\1", 1, DOTALL), "at least one bullet"),
 }
+
+# Each mutation hits F-1 only, the first match in the fixture; the value is F-1's exact reason.
+FINDING_MUTATIONS = {
+    "missing bullet": (mutate(r"^- Fix: .*\n", ""), "missing Fix"),
+    "two missing bullets": (mutate(r"^- Evidence: .*\n- Problem: .*\n", ""), "missing Evidence, Problem"),
+    "bullets out of order": (mutate(r"^(- Where: .*)\n(- Evidence: .*)$", r"\2\n\1"),
+                             "bullets out of order: Evidence, Where, Problem, Fix"),
+    "empty bullet": (mutate(r"^- Problem: .*$", "- Problem:"), "empty Problem"),
+    "unknown severity": (mutate(r"^### F-1 \[major\]", "### F-1 [critical]"), "severity 'critical'"),
+    "missing bullet and unknown severity": (
+        lambda t: mutate(r"^### F-1 \[major\]", "### F-1 [critical]")(mutate(r"^- Problem: .*\n", "")(t)),
+        "missing Problem; severity 'critical'"),
+}
+
+
+def fixture_report():
+    return (FIXTURES / "reports" / "design.md").read_text(encoding="utf-8")
 
 
 def check_errors(text, lens="design", doc=FIXTURE_DOC):
@@ -453,13 +478,40 @@ class TestParseReport:
         findings, errors = orko_review.parse_report(text, lens, doc)
         assert errors == []
         assert [f["n"] for f in findings] == list(range(1, count + 1))
+        assert all("malformed" not in f for f in findings)
 
-    @pytest.mark.parametrize("name", MUTATIONS)
-    def test_each_broken_rule_is_rejected(self, name):
-        change, message = MUTATIONS[name]
-        text = (FIXTURES / "reports" / "design.md").read_text(encoding="utf-8")
-        errors = check_errors(change(text))
+    @pytest.mark.parametrize("name", REPORT_MUTATIONS)
+    def test_each_report_level_rule_is_an_error(self, name):
+        change, message = REPORT_MUTATIONS[name]
+        errors = check_errors(change(fixture_report()))
         assert any(message in e for e in errors), errors
+
+    @pytest.mark.parametrize("name", FINDING_MUTATIONS)
+    def test_each_finding_level_rule_marks_only_that_finding(self, name):
+        change, reason = FINDING_MUTATIONS[name]
+        findings, errors = orko_review.parse_report(change(fixture_report()), "design", FIXTURE_DOC)
+        assert errors == []
+        assert len(findings) == 15
+        assert findings[0]["malformed"] == reason
+        assert all("malformed" not in f for f in findings[1:])
+
+    def test_an_id_gap_is_not_an_error(self):
+        findings, errors = orko_review.parse_report(
+            mutate(r"^### F-15 ", "### F-16 ")(fixture_report()), "design", FIXTURE_DOC)
+        assert errors == []
+        assert findings[-1]["n"] == 16
+
+    def test_severity_matches_case_insensitively_and_is_stored_lowercase(self):
+        findings, errors = orko_review.parse_report(
+            mutate(r"^### F-1 \[major\]", "### F-1 [Major]")(fixture_report()), "design", FIXTURE_DOC)
+        assert errors == []
+        assert findings[0]["severity"] == "major"
+        assert "malformed" not in findings[0]
+
+    def test_unknown_severity_is_kept_as_written(self):
+        findings, _ = orko_review.parse_report(
+            mutate(r"^### F-1 \[major\]", "### F-1 [Critical]")(fixture_report()), "design", FIXTURE_DOC)
+        assert findings[0]["severity"] == "Critical"
 
     def test_none_findings_is_valid(self):
         text = mutate(r"(^## Findings\n).*?(?=^## Checked and sound)", r"\1\nNone.\n\n", 1, DOTALL)(
@@ -491,7 +543,100 @@ def check(run):
     return orko_review.main(["check", "--run", str(run)])
 
 
+def fail_twice(run, lens, text):
+    """Write `text` as the lens's report before each of two checks, so the lens fails for good."""
+    write(run / f"{lens}.md", text)
+    assert check(run) == 2
+    write(run / f"{lens}.md", text)
+    return check(run)
+
+
 class TestCheck:
+    def test_a_lens_failing_for_good_keeps_its_report_and_is_read_leniently(self, project, capsys):
+        run = started(project)
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        broken = report_text("design", str(project / SPEC_REL)) + "\n## Findings\n"
+        capsys.readouterr()
+        assert fail_twice(run, "design", broken) == 0
+        assert (run / "design.md").read_text(encoding="utf-8") == broken
+        assert not (run / "design.invalid-2.md").exists()
+        manifest = orko_review.load_manifest(run)
+        assert manifest["status"]["design"] == "failed"
+        design = [e for e in manifest["index"] if e["lens"] == "design"]
+        assert len(design) == 15
+        assert all(e["malformed"] == "lens failed" for e in design)
+        assert manifest["lenient"]["design"] == {"report": str(run / "design.md"),
+                                                  "entries": [{k: v for k, v in e.items() if k not in ("id", "lens")}
+                                                              for e in sorted(design, key=lambda e: e["n"])],
+                                                  "unparsed": 0}
+        assert f"failed-lenses: design ({run / 'design.md'})" in capsys.readouterr().out
+
+    def test_lenient_entries_carry_their_own_reasons_and_the_first_front_matter_error(self):
+        text = mutate(r"^lens: design$", "lens: other")(mutate(r"^- Problem: .*\n", "")(fixture_report()))
+        entries, unparsed = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert unparsed == 0
+        assert entries[0]["malformed"] == "lens failed; lens is 'other', expected 'design'; missing Problem"
+        assert entries[1]["malformed"] == "lens failed; lens is 'other', expected 'design'"
+
+    def test_lenient_scan_stays_inside_a_single_findings_section(self):
+        text = mutate(r"^ready with changes$", "mostly ready")(fixture_report()) + "\n### F-99 [nit] stray\n"
+        entries, unparsed = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert [e["n"] for e in entries] == list(range(1, 16))
+        assert unparsed == 0
+
+    def test_lenient_scan_reads_past_a_quoted_level_2_heading(self):
+        text = mutate(r"^- Evidence: .*$", "\\g<0>\n## quoted heading")(
+            mutate(r"^ready with changes$", "mostly ready")(fixture_report()))
+        entries, _ = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert len(entries) == 15
+
+    def test_lenient_scan_reads_the_whole_body_when_findings_is_not_single(self):
+        text = fixture_report() + "\n## Findings\n\n### F-16 [nit] after the second heading\n\n- Where: x\n- Evidence: x\n- Problem: x\n- Fix: x\n"
+        entries, _ = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert [e["n"] for e in entries] == list(range(1, 17))
+
+    def test_lenient_scan_keeps_the_first_duplicate_and_counts_the_rest_and_bad_headings(self):
+        text = mutate(r"^### F-2 \[[a-z]+\] ", "### Finding 2 ")(mutate(r"^### F-15 ", "### F-14 ")(fixture_report()))
+        entries, unparsed = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert [e["n"] for e in entries] == [1, *range(3, 15)]
+        assert unparsed == 2
+
+    def test_lenient_scan_handles_windows_line_endings(self):
+        text = (fixture_report() + "\n## Findings\n").replace("\n", "\r\n")
+        entries, _ = orko_review.parse_lenient(text, "design", FIXTURE_DOC)
+        assert len(entries) == 15
+
+    def test_lenient_entries_are_stored_once(self, project):
+        run = started(project)
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        assert fail_twice(run, "design", report_text("design", str(project / SPEC_REL)) + "\n## Findings\n") == 0
+        put_report(run, "design")  # a valid report arriving later doesn't change a failed lens
+        assert check(run) == 0
+        design = [e for e in orko_review.load_manifest(run)["index"] if e["lens"] == "design"]
+        assert len(design) == 15 and all(e["malformed"] == "lens failed" for e in design)
+
+    def test_every_lens_failed_but_one_parsed_leniently_does_not_block(self, project, capsys):
+        run = started(project)
+        broken = report_text("design", str(project / SPEC_REL)) + "\n## Findings\n"
+        write(run / "design.md", broken)
+        assert check(run) == 2
+        write(run / "design.md", broken)
+        capsys.readouterr()
+        assert check(run) == 0
+        out = capsys.readouterr().out
+        assert "failed-lenses: accuracy (no report), completeness (no report), design (" in out
+
+    def test_a_v010_manifest_without_lenient_still_checks(self, project):
+        run = started(project)
+        manifest = orko_review.load_manifest(run)
+        del manifest["lenient"]
+        orko_review.write_manifest(run, manifest)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        assert check(run) == 0
+
     def test_valid_reports_store_and_print_a_sorted_index(self, project, capsys):
         run = started(project)
         for lens, source in (("accuracy", "accuracy"), ("completeness", "completeness"), ("design", "design")):
@@ -550,7 +695,7 @@ class TestCheck:
         capsys.readouterr()
         assert check(run) == 0
         out = capsys.readouterr().out
-        assert "failed-lenses: design" in out
+        assert "failed-lenses: design (no report)" in out
         put_report(run, "design")
         assert check(run) == 0
         manifest = orko_review.load_manifest(run)
@@ -580,6 +725,173 @@ class TestCheck:
     def test_missing_run_manifest_refuses(self, tmp_path, capsys):
         assert check(tmp_path) == 2
         assert f"problem: no readable run.json in {tmp_path.resolve()}" in capsys.readouterr().out
+
+    def test_a_finding_missing_problem_is_indexed_malformed_and_the_lens_stays_valid(self, project, capsys):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        write(run / "design.md", mutate(r"^- Problem: .*\n", "")((run / "design.md").read_text(encoding="utf-8")))
+        capsys.readouterr()
+        assert check(run) == 0
+        manifest = orko_review.load_manifest(run)
+        assert manifest["status"]["design"] == "valid"
+        entry = next(e for e in manifest["index"] if e["id"] == "design/F-1")
+        assert entry["malformed"] == "missing Problem"
+        assert entry["title"] == "Reviewers can read sibling reports and earlier runs, which breaks the independence the skill exists to guarantee"
+        assert "| design/F-1 | major | malformed: missing Problem — Reviewers can read" in capsys.readouterr().out
+
+    def test_unknown_severity_sorts_last_and_is_escaped(self, project, capsys):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        write(run / "design.md", mutate(r"^### F-1 \[major\]", "### F-1 [minor | nit]")(
+            (run / "design.md").read_text(encoding="utf-8")))
+        capsys.readouterr()
+        assert check(run) == 0
+        index = orko_review.load_manifest(run)["index"]
+        assert index[-1]["id"] == "design/F-1"
+        out = capsys.readouterr().out
+        assert r"| design/F-1 | minor \| nit | malformed: severity 'minor \| nit' — " in out
+
+    def test_a_retry_empties_that_lens_scratch_and_no_other(self, project):
+        run = started(project)
+        scratch = {k: Path(v) for k, v in orko_review.load_manifest(run)["scratch"].items()}
+        for path in scratch.values():
+            write(path / "notes.txt", "x\n")
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        write(run / "design.md", "not a report\n")
+        assert check(run) == 2
+        assert scratch["design"].is_dir() and not any(scratch["design"].iterdir())
+        assert (scratch["accuracy"] / "notes.txt").exists()
+
+    def test_a_final_failure_leaves_scratch_alone(self, project):
+        run = started(project)
+        design = Path(orko_review.load_manifest(run)["scratch"]["design"])
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        assert check(run) == 2
+        write(design / "notes.txt", "x\n")
+        assert check(run) == 0
+        assert (design / "notes.txt").exists()
+
+    def test_a_retry_keeps_the_scratch_folder_private_and_spares_symlink_targets(self, project, tmp_path):
+        run = started(project)
+        design = Path(orko_review.load_manifest(run)["scratch"]["design"])
+        outside = write(tmp_path / "outside" / "keep.txt", "keep\n")
+        (design / "link").symlink_to(outside.parent)
+        (design / "sub").mkdir()
+        write(design / "sub" / "f.txt", "x\n")
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        write(run / "design.md", "not a report\n")
+        assert check(run) == 2
+        assert stat.S_IMODE(design.stat().st_mode) == 0o700
+        assert not any(design.iterdir())
+        assert outside.exists()
+
+
+    def test_a_retry_leaves_a_tampered_scratch_path_alone(self, project, tmp_path, capsys):
+        run = started(project)
+        victim = write(tmp_path / "victim" / "keep.txt", "keep\n").parent
+        manifest = orko_review.load_manifest(run)
+        manifest["scratch"]["design"] = str(victim)
+        orko_review.write_manifest(run, manifest)
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        write(run / "design.md", "not a report\n")
+        capsys.readouterr()
+        assert check(run) == 2
+        assert (victim / "keep.txt").exists()
+        assert f"warning: scratch not touched: {victim}" in capsys.readouterr().out
+        put_report(run, "design")
+        assert check(run) == 0
+        assert summary(run) == 2  # undecided; scratch cleanup still runs
+        assert (victim / "keep.txt").exists()
+        assert f"warning: scratch not touched: {victim}" in capsys.readouterr().out
+
+    def test_a_retry_spares_the_target_of_a_symlinked_scratch_folder(self, project, tmp_path, capsys):
+        run = started(project)
+        design = Path(orko_review.load_manifest(run)["scratch"]["design"])
+        victim = write(tmp_path / "victim" / "keep.txt", "keep\n").parent
+        design.rmdir()
+        design.symlink_to(victim)
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        write(run / "design.md", "not a report\n")
+        capsys.readouterr()
+        assert check(run) == 2
+        assert (victim / "keep.txt").exists()
+        assert f"warning: scratch not touched: {design}" in capsys.readouterr().out
+
+    def test_an_empty_scratch_path_draws_no_warning(self, project, capsys):
+        run = checked(project, "file-only")
+        manifest = orko_review.load_manifest(run)
+        manifest["scratch"]["design"] = ""
+        orko_review.write_manifest(run, manifest)
+        capsys.readouterr()
+        assert summary(run) == 0
+        assert "warning" not in capsys.readouterr().out
+
+
+def lint(path):
+    return orko_review.main(["lint", "--report", str(path)])
+
+
+def run_files(run):
+    return {p.relative_to(run): p.read_bytes() for p in sorted(run.rglob("*")) if p.is_file()}
+
+
+class TestLint:
+    def test_valid_report_prints_ok(self, project, capsys):
+        run = started(project)
+        put_report(run, "design")
+        capsys.readouterr()
+        assert lint(run / "design.md") == 0
+        assert capsys.readouterr().out == "ok\n"
+
+    def test_finding_and_report_errors_print_error_lines(self, project, capsys):
+        run = started(project)
+        put_report(run, "design")
+        text = mutate(r"^ready with changes$", "mostly ready")(
+            mutate(r"^- Problem: .*\n", "")((run / "design.md").read_text(encoding="utf-8")))
+        write(run / "design.md", text)
+        capsys.readouterr()
+        assert lint(run / "design.md") == 1
+        assert capsys.readouterr().out.splitlines() == [
+            "error: verdict 'mostly ready' is not one of ready, ready with changes, not ready",
+            "error: F-1: missing Problem"]
+
+    def test_lint_never_writes(self, project):
+        run = started(project)
+        put_report(run, "design")
+        write(run / "design.md", mutate(r"^- Problem: .*\n", "")((run / "design.md").read_text(encoding="utf-8")))
+        before = run_files(run)
+        assert lint(run / "design.md") == 1
+        assert run_files(run) == before
+
+    @pytest.mark.parametrize("case", ["no run", "invalid name", "missing report"])
+    def test_bad_inputs_print_a_problem_and_exit_2(self, project, tmp_path, capsys, case):
+        run = started(project)
+        path = {"no run": write(tmp_path / "loose" / "design.md", "x\n"),
+                "invalid name": write(run / "design.invalid-1.md", "x\n"),
+                "missing report": run / "design.md"}[case]
+        capsys.readouterr()
+        assert lint(path) == 2
+        assert capsys.readouterr().out.startswith("problem: ")
+
+    def test_the_brief_command_runs_from_a_shell_on_a_path_with_a_space(self, tmp_path):
+        root = tmp_path / "my proj"
+        write(root / "CLAUDE.md", "# proj\n")
+        write(root / SPEC_REL, "# Widget design\n")
+        git(root, "init", "-q")
+        assert start(root.resolve()) == 0
+        run = run_dir(root.resolve())
+        write(run / "design.md", report_text("design", str(root.resolve() / SPEC_REL)))
+        brief = (run / "briefs" / "design.md").read_text(encoding="utf-8")
+        command = next(l for l in brief.splitlines() if l.startswith("- Check your report with: "))
+        proc = subprocess.run(command.split(": ", 1)[1], shell=True, capture_output=True, text=True)
+        assert (proc.returncode, proc.stdout) == (0, "ok\n")
 
 
 def checked(project, mode="apply", *extra):
@@ -643,8 +955,46 @@ class TestDecide:
         assert manifest is not None
         assert all(e["id"] in manifest["dispositions"] for e in index)
 
+    def test_decisions_file_shows_the_malformed_prefix(self, project):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        write(run / "design.md", mutate(r"^- Problem: .*\n", "")((run / "design.md").read_text(encoding="utf-8")))
+        assert check(run) == 0
+        assert decide(run, "design/F-1", "accept", "fixed") == 0
+        assert "| design/F-1 | major | malformed: missing Problem — " in (run / "decisions.md").read_text(encoding="utf-8")
+
 
 class TestSummary:
+    def test_needs_you_rows_for_each_failed_lens_case(self, project, capsys):
+        run = started(project, "--extra", "security", "--why", "a", "--extra", "data", "--why", "b")
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        leniently = report_text("security", str(project / SPEC_REL)) + "\n## Findings\n"
+        unparsed = "no headings here\n"
+        write(run / "security.md", leniently)
+        write(run / "data.md", unparsed)
+        assert check(run) == 2
+        write(run / "security.md", leniently)
+        write(run / "data.md", unparsed)
+        assert check(run) == 0
+        decide_all(run)
+        capsys.readouterr()
+        assert summary(run) == 0
+        needs = capsys.readouterr().out.split("\n## Needs you\n")[1]
+        assert f"| security/— | — | lens failed twice; 15 findings read leniently from {run / 'security.md'} |" in needs
+        assert f"| data/— | — | lens failed twice; report unparsed: {run / 'data.md'} |" in needs
+
+    def test_file_only_summary_names_failed_lenses_with_their_reports(self, project, capsys):
+        run = started(project, mode="file-only")
+        put_report(run, "accuracy")
+        put_report(run, "completeness")
+        assert check(run) == 2
+        assert check(run) == 0
+        capsys.readouterr()
+        assert summary(run) == 0
+        assert "failed-lenses: design (no report)" in capsys.readouterr().out
+
     def test_refuses_before_check(self, project):
         assert summary(started(project)) == 2
 
@@ -675,7 +1025,7 @@ class TestSummary:
         assert "| why design/F-1 |" in out
         assert "Specialist: security — auth section" in out
         assert "| design/F-8 | minor |" in out.split("\n## Needs you\n")[1]
-        assert "| security/— | — | lens failed twice | report missing |" in out
+        assert "| security/— | — | lens failed twice; no report | report missing |" in out
 
     def test_empty_tables_print_none(self, project, capsys):
         run = checked(project)
@@ -694,8 +1044,70 @@ class TestSummary:
         assert "| ID | Severity | Title |" in out
         assert out.rstrip().endswith(f"Apply later: /orko-review --run {run} --apply")
 
+    def test_malformed_findings_need_a_decision_and_show_their_prefix(self, project, capsys):
+        run = started(project)
+        for lens in ("accuracy", "completeness", "design"):
+            put_report(run, lens)
+        write(run / "design.md", mutate(r"^- Problem: .*\n", "")((run / "design.md").read_text(encoding="utf-8")))
+        assert check(run) == 0
+        for e in orko_review.load_manifest(run)["index"]:
+            if e["id"] != "design/F-1":
+                assert decide(run, e["id"], "accept", "ok") == 0
+        capsys.readouterr()
+        assert summary(run) == 2
+        assert "problem: undecided: design/F-1" in capsys.readouterr().out
+        assert decide(run, "design/F-1", "accept", "ok") == 0
+        assert summary(run) == 0
+        assert "| design/F-1 | major | malformed: missing Problem — " in capsys.readouterr().out
+
+    @pytest.mark.parametrize("mode", ["apply", "file-only"])
+    def test_summary_removes_every_scratch_folder(self, project, mode):
+        run = checked(project, mode)
+        if mode == "apply":
+            decide_all(run)
+        scratch = [Path(p) for p in orko_review.load_manifest(run)["scratch"].values()]
+        write(scratch[0] / "copy" / "x.py", "x = 1\n")
+        assert summary(run) == 0
+        assert not any(p.exists() for p in scratch)
+
+    def test_summary_exit_2_still_removes_scratch(self, project):
+        run = checked(project)
+        scratch = [Path(p) for p in orko_review.load_manifest(run)["scratch"].values()]
+        assert summary(run) == 2  # undecided
+        assert not any(p.exists() for p in scratch)
+
+    def test_summary_warns_when_a_folder_survives(self, project, monkeypatch, capsys):
+        run = checked(project, "file-only")
+        monkeypatch.setattr(orko_review.shutil, "rmtree", lambda *a, **k: None)
+        capsys.readouterr()
+        assert summary(run) == 0
+        out = capsys.readouterr().out
+        for path in orko_review.load_manifest(run)["scratch"].values():
+            assert f"warning: scratch not removed: {path}" in out
+
+    def test_summary_on_a_v010_manifest_without_scratch(self, project):
+        run = checked(project, "file-only")
+        manifest = orko_review.load_manifest(run)
+        del manifest["scratch"]
+        orko_review.write_manifest(run, manifest)
+        assert summary(run) == 0
+
+    def test_summary_before_check_leaves_scratch_alone(self, project):
+        run = started(project)
+        scratch = [Path(p) for p in orko_review.load_manifest(run)["scratch"].values()]
+        assert summary(run) == 2
+        assert all(p.is_dir() for p in scratch)
+
 
 class TestResume:
+    def test_resume_works_on_a_v010_manifest(self, project, home):
+        run = checked(project, "file-only")
+        manifest = orko_review.load_manifest(run)
+        manifest.pop("lenient", None)
+        orko_review.write_manifest(run, manifest)
+        lines = pre(["--effort", "high", "--run", str(run), "--apply"], home, project)
+        assert lines[-1] == "STATUS: ok"
+
     def test_resume_flips_a_file_only_run_to_apply(self, project, home):
         run = checked(project, "file-only")
         lines = pre(["--effort", "high", "--run", str(run), "--apply"], home, project)
@@ -752,6 +1164,24 @@ class TestSkillFiles:
 
     def frontmatter(self, skill):
         return skill.split("---", 2)[1]
+
+    def test_contract_carries_the_v011_rules(self):
+        contract = orko_review.CONTRACT_PATH.read_text(encoding="utf-8")
+        assert ("Every finding, nits included, has all four bullets. "
+                "If the title already says the problem, still write one sentence.") in contract
+        assert "use the scratch directory listed in Paths" in contract
+        assert "mktemp" not in contract
+        assert "run the lint command from your brief and fix the report until it prints `ok`" in contract
+        assert "read it back once" not in contract
+
+    def test_skill_reads_failed_lenses_leniently_and_decides_malformed_findings(self, skill):
+        assert "A lens that fails twice is read leniently" in skill
+        assert "dropped for the run" not in skill
+        assert "A finding whose title starts with `malformed:` is decided like any other" in skill
+
+    def test_lint_is_not_an_orchestrator_grant(self, skill):
+        assert "lint" not in orko_review.SUBCOMMANDS
+        assert "orko_review.py lint" not in self.frontmatter(skill)
 
     def test_allowed_tools_grant_exactly_the_five_subcommands(self, skill):
         grants = re.findall(r"Bash\(([^)]*)\)", self.frontmatter(skill).split("allowed-tools:", 1)[1])

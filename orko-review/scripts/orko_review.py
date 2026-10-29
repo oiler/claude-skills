@@ -12,7 +12,9 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
+SCRIPT_PATH = Path(__file__).resolve()
 LENS_DIR = SKILL_DIR / "references" / "lenses"
 CONTRACT_PATH = SKILL_DIR / "references" / "reviewer-contract.md"
 SUBCOMMANDS = ("preflight", "start", "check", "decide", "summary")
@@ -372,14 +375,17 @@ def load_manifest(run: Path) -> dict | None:
         return None
 
 
-def render_brief(lens: str, res: Resolution, run: Path) -> str:
+def render_brief(lens: str, res: Resolution, run: Path, scratch: Path) -> str:
     lines = ["# Review brief: " + lens, "", "## Paths", "",
              f"- Lens: {lens}", f"- Document under review: {res.doc}"]
     if res.spec is not None:
         lines.append(f"- Spec: {res.spec}")
     lines += [f"- Evergreen docs: {', '.join(map(str, res.evergreen)) or 'none'}",
               f"- Reviews directory (off limits except your report): {res.reviews}",
-              f"- Write your report to: {run / f'{lens}.md'}", ""]
+              f"- Write your report to: {run / f'{lens}.md'}",
+              f"- Scratch directory (yours only): {scratch}",
+              f"- Check your report with: python3 {shlex.quote(str(SCRIPT_PATH))} lint "
+              f"--report {shlex.quote(str(run / f'{lens}.md'))}", ""]
     return ("\n".join(lines) + "\n" + read_text(lens_file(res.doc_type, lens)) + "\n"
             + read_text(CONTRACT_PATH))
 
@@ -450,18 +456,22 @@ def cmd_start(argv: list[str], cwd: Path | None = None, now: datetime | None = N
     (run / "briefs").mkdir(parents=True)
     shutil.copyfile(res.doc, run / "doc.orig.md")
     lenses = [*res.lenses, *(name for name, _ in extras)]
+    # Outside the repo: copied project code under the reviews folder would pick up the repo's own
+    # git, uv, and test config, and a reviewer copying the repo would copy the reviews folder into itself.
+    scratch = {lens: tempfile.mkdtemp(prefix=f"orko-review-{run.name}-{lens}-") for lens in lenses}
     write_manifest(run, {
         "doc": str(res.doc), "doc_sha256": sha256(res.doc), "type": res.doc_type,
         "spec": str(res.spec) if res.spec else None, "mode": opts["mode"], "lenses": lenses,
         "extras": {name: one_line(why) for name, why in extras},
         "evergreen": [str(p) for p in res.evergreen], "reviews_dir": str(res.reviews),
         "status": {lens: "pending" for lens in lenses}, "attempts": {}, "failures": {},
-        "index": None, "dispositions": {},
+        "index": None, "dispositions": {}, "lenient": {},
+        "scratch": scratch,
     })
     print(f"run: {run}")
     for lens in lenses:
         brief = run / "briefs" / f"{lens}.md"
-        brief.write_text(render_brief(lens, res, run), encoding="utf-8")
+        brief.write_text(render_brief(lens, res, run, Path(scratch[lens])), encoding="utf-8")
         print(f"{lens}: {dispatch_prompt(brief)}")
     return 0
 
@@ -475,53 +485,9 @@ FINDING_RE = re.compile(r"^### F-(\d+) \[([^\]]*)\] (\S.*)$")
 BULLET_RE = re.compile(r"^- (Where|Evidence|Problem|Fix):(.*)$")
 
 
-def parse_findings(block: list[str]) -> tuple[list[dict], list[str]]:
-    content = [line for line in block if line.strip()]
-    if not any(line.startswith("### ") for line in content):
-        if [line.strip() for line in content] == ["None."]:
-            return [], []
-        return [], ["'## Findings' must hold 'None.' or at least one '### F-<n> [<severity>] <title>'"]
-    if any(line.strip() == "None." for line in content):
-        return [], ["'None.' can't sit alongside findings"]
-    findings: list[dict] = []
-    errors: list[str] = []
-    current: dict | None = None
-    for line in content:
-        if line.startswith("### "):
-            match = FINDING_RE.match(line.rstrip())
-            if not match:
-                errors.append(f"malformed finding heading: {line.strip()!r}")
-                current = None
-                continue
-            current = {"n": int(match.group(1)), "severity": match.group(2),
-                       "title": match.group(3).strip(), "bullets": []}
-            findings.append(current)
-        elif current is not None:
-            bullet = BULLET_RE.match(line)
-            if bullet:
-                current["bullets"].append((bullet.group(1), bullet.group(2).strip()))
-    for position, finding in enumerate(findings, 1):
-        tag = f"F-{finding['n']}"
-        if finding["n"] != position:
-            errors.append(f"finding IDs must run F-1 to F-{len(findings)} without gaps; "
-                          f"found {tag} at position {position}")
-        if finding["severity"] not in SEVERITIES:
-            errors.append(f"{tag} severity {finding['severity']!r} is not one of {', '.join(SEVERITIES)}")
-        labels = [label for label, _ in finding["bullets"]]
-        if labels != list(BULLETS):
-            errors.append(f"{tag} needs the bullets Where, Evidence, Problem, Fix in that order; "
-                          f"found {', '.join(labels) or 'none'}")
-        elif not all(value for _, value in finding["bullets"]):
-            errors.append(f"{tag} has an empty bullet")
-    return [{k: f[k] for k in ("n", "severity", "title")} for f in findings], errors
-
-
-def parse_report(text: str, lens: str, doc: str) -> tuple[list[dict], list[str]]:
-    """(findings, errors) for one report; the findings mean something only when errors is empty."""
-    text = text.replace("\r\n", "\n")
-    front = FRONT_RE.match(text)
+def front_matter_errors(front: re.Match | None, lens: str, doc: str) -> list[str]:
     if not front:
-        return [], ["front matter missing: the report must open with a --- block holding lens and doc"]
+        return ["front matter missing: the report must open with a --- block holding lens and doc"]
     errors: list[str] = []
     fields = dict(FIELD_RE.findall(front.group(1)))
     if sorted(fields) != ["doc", "lens"]:
@@ -530,6 +496,81 @@ def parse_report(text: str, lens: str, doc: str) -> tuple[list[dict], list[str]]
         errors.append(f"lens is {fields.get('lens')!r}, expected {lens!r}")
     if fields.get("doc") != doc:
         errors.append(f"doc is {fields.get('doc')!r}, expected {doc!r}")
+    return errors
+
+
+def scan_findings(lines: list[str]) -> tuple[list[dict], list[str]]:
+    """Every parsed finding with its bullets, and the raw text of each heading that doesn't parse."""
+    findings: list[dict] = []
+    bad: list[str] = []
+    current: dict | None = None
+    for line in lines:
+        if line.startswith("### "):
+            match = FINDING_RE.match(line.rstrip())
+            if not match:
+                bad.append(line.strip())
+                current = None
+                continue
+            severity = match.group(2).lower() if match.group(2).lower() in SEVERITIES else match.group(2)
+            current = {"n": int(match.group(1)), "severity": severity,
+                       "title": match.group(3).strip(), "bullets": []}
+            findings.append(current)
+        elif current is not None:
+            bullet = BULLET_RE.match(line)
+            if bullet:
+                current["bullets"].append((bullet.group(1), bullet.group(2).strip()))
+    return findings, bad
+
+
+def finding_reasons(finding: dict) -> list[str]:
+    labels = [label for label, _ in finding["bullets"]]
+    reasons: list[str] = []
+    missing = [b for b in BULLETS if b not in labels]
+    if missing:
+        reasons.append("missing " + ", ".join(missing))
+    elif labels != list(BULLETS):
+        reasons.append("bullets out of order: " + ", ".join(labels))
+    reasons += [f"empty {label}" for label, value in finding["bullets"] if not value]
+    if finding["severity"] not in SEVERITIES:
+        reasons.append(f"severity '{finding['severity']}'")
+    return reasons
+
+
+def index_fields(finding: dict, prefix: tuple[str, ...] = ()) -> dict:
+    """A finding as the index stores it; `malformed` is present only when there is a reason."""
+    entry = {k: finding[k] for k in ("n", "severity", "title")}
+    reasons = [*prefix, *finding_reasons(finding)]
+    if reasons:
+        entry["malformed"] = "; ".join(reasons)
+    return entry
+
+
+def parse_findings(block: list[str]) -> tuple[list[dict], list[str]]:
+    content = [line for line in block if line.strip()]
+    if not any(line.startswith("### ") for line in content):
+        if [line.strip() for line in content] == ["None."]:
+            return [], []
+        return [], ["'## Findings' must hold 'None.' or at least one '### F-<n> [<severity>] <title>'"]
+    if any(line.strip() == "None." for line in content):
+        return [], ["'None.' can't sit alongside findings"]
+    findings, bad = scan_findings(content)
+    errors = [f"malformed finding heading: {heading!r}" for heading in bad]
+    seen: set[int] = set()
+    for finding in findings:
+        # decide keys on <lens>/F-<n>, so an ID must be unique; a gap is harmless.
+        if finding["n"] in seen:
+            errors.append(f"duplicate finding ID F-{finding['n']}")
+        seen.add(finding["n"])
+    return [index_fields(f) for f in findings], errors
+
+
+def parse_report(text: str, lens: str, doc: str) -> tuple[list[dict], list[str]]:
+    """(findings, report-level errors). Finding-level problems ride on each finding as `malformed`."""
+    text = text.replace("\r\n", "\n")
+    front = FRONT_RE.match(text)
+    errors = front_matter_errors(front, lens, doc)
+    if not front:
+        return [], errors
     lines = text[front.end():].splitlines()
     starts: list[int] = []
     for heading in SECTIONS:
@@ -551,8 +592,39 @@ def parse_report(text: str, lens: str, doc: str) -> tuple[list[dict], list[str]]
     return findings, errors
 
 
+def parse_lenient(text: str, lens: str, doc: str) -> tuple[list[dict], int]:
+    """Entries for a lens that failed for good: each heading that parses, marked malformed."""
+    text = text.replace("\r\n", "\n")
+    front = FRONT_RE.match(text)
+    prefix = ("lens failed", *front_matter_errors(front, lens, doc)[:1])
+    lines = text[front.end():].splitlines() if front else text.splitlines()
+    hits = [i for i, line in enumerate(lines) if line.rstrip() == "## Findings"]
+    if len(hits) == 1:
+        rest = lines[hits[0] + 1:]
+        # Ends where parse_report ends Findings, so a finding that quotes a `## ` line isn't cut short.
+        lines = rest[:next((i for i, line in enumerate(rest) if line.rstrip() == "## Checked and sound"),
+                           len(rest))]
+    findings, bad = scan_findings(lines)
+    entries: list[dict] = []
+    seen: set[int] = set()
+    for finding in findings:
+        if finding["n"] not in seen:
+            seen.add(finding["n"])
+            entries.append(index_fields(finding, prefix))
+    return entries, len(bad) + len(findings) - len(entries)
+
+
 def cell(text: str) -> str:
     return one_line(text).replace("|", r"\|")
+
+
+def severity_rank(severity: str) -> int:
+    return SEVERITIES.index(severity) if severity in SEVERITIES else len(SEVERITIES)
+
+
+def shown_title(entry: dict) -> str:
+    prefix = f"malformed: {entry['malformed']} — " if entry.get("malformed") else ""
+    return cell(prefix + entry["title"])
 
 
 def table(header: str, rows: list[str]) -> list[str]:
@@ -563,7 +635,26 @@ def table(header: str, rows: list[str]) -> list[str]:
 
 def index_table(index: list[dict]) -> list[str]:
     return table("| ID | Severity | Title |",
-                 [f"| {e['id']} | {e['severity']} | {cell(e['title'])} |" for e in index])
+                 [f"| {e['id']} | {cell(e['severity'])} | {shown_title(e)} |" for e in index])
+
+
+def failed_lenses_line(manifest: dict, failed: list[str]) -> str:
+    lenient = manifest.get("lenient", {})
+    return "failed-lenses: " + ", ".join(
+        f"{lens} ({lenient.get(lens, {}).get('report') or 'no report'})" for lens in failed)
+
+
+def failed_row(lens: str, manifest: dict) -> str:
+    info = manifest.get("lenient", {}).get(lens) or {"report": None, "entries": [], "unparsed": 0}
+    if info["entries"]:
+        title = f"lens failed twice; {len(info['entries'])} findings read leniently from {info['report']}"
+        if info["unparsed"]:
+            title += f", {info['unparsed']} headings unparsed"
+    elif info["report"]:
+        title = f"lens failed twice; report unparsed: {info['report']}"
+    else:
+        title = "lens failed twice; no report"
+    return f"| {lens}/— | — | {cell(title)} | {cell(manifest['failures'].get(lens, ''))} |"
 
 
 def open_run(run_arg: str) -> tuple[Path, dict | None]:
@@ -572,6 +663,59 @@ def open_run(run_arg: str) -> tuple[Path, dict | None]:
     if manifest is None:
         print(f"problem: no readable run.json in {run}")
     return run, manifest
+
+
+def own_scratch(path: str, run: Path, lens: str) -> bool | None:
+    """True for a real scratch folder of ours, None for a missing one we may recreate, else False.
+
+    run.json is plain JSON any process can edit, and both callers delete without a prompt, so a
+    named path is trusted only when it still looks like the folder `start` made for this lens.
+    """
+    if not os.path.isabs(path) or not Path(path).name.startswith(f"orko-review-{run.name}-{lens}-"):
+        return False
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+
+
+def reset_scratch(manifest: dict, run: Path, lens: str) -> None:
+    """A fresh retry gets an empty scratch folder, so it can't read its predecessor's notes."""
+    path = manifest.get("scratch", {}).get(lens)
+    if not path:
+        return
+    owned = own_scratch(path, run, lens)
+    if owned is None:
+        os.mkdir(path, 0o700)
+        return
+    if not owned:
+        print(f"warning: scratch not touched: {path}")
+        return
+    # Emptied in place: removing the folder would drop mkdtemp's 0700 mode and open a window for
+    # another local user to plant a folder or symlink at the same path.
+    for child in Path(path).iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
+
+
+def remove_scratch(manifest: dict, run: Path) -> list[str]:
+    warnings = []
+    for lens, path in manifest.get("scratch", {}).items():
+        if not path:
+            continue
+        owned = own_scratch(path, run, lens)
+        if owned is None:
+            continue
+        if not owned:
+            warnings.append(f"warning: scratch not touched: {path}")
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+        if Path(path).exists():
+            warnings.append(f"warning: scratch not removed: {path}")
+    return warnings
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -584,10 +728,13 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(f"problem: doc changed since start (original: {run / 'doc.orig.md'})\nSTATUS: blocked")
         return 3
     lenses = manifest["lenses"]
+    lenient = manifest.setdefault("lenient", {})
     retries: list[str] = []
     entries: list[dict] = []
     for lens in lenses:
         if manifest["status"][lens] == "failed":
+            entries += [{"id": f"{lens}/F-{e['n']}", "lens": lens, **e}
+                        for e in lenient.get(lens, {}).get("entries", [])]
             continue
         report = run / f"{lens}.md"
         if report.is_file():
@@ -601,31 +748,38 @@ def cmd_check(args: argparse.Namespace) -> int:
         attempts = manifest["attempts"].get(lens, 0) + 1
         manifest["attempts"][lens] = attempts
         manifest["failures"][lens] = "; ".join(errors)
+        if attempts >= 2:
+            # No retry follows, so the report stays where the apply step reads it.
+            manifest["status"][lens] = "failed"
+            found, unparsed = (parse_lenient(read_text(report), lens, manifest["doc"])
+                               if report.is_file() else ([], 0))
+            lenient[lens] = {"report": str(report) if report.is_file() else None,
+                             "entries": found, "unparsed": unparsed}
+            entries += [{"id": f"{lens}/F-{e['n']}", "lens": lens, **e} for e in found]
+            continue
         if report.is_file():
             # A retry starts from an empty path, so the new reviewer can't read its predecessor.
             report.rename(run / f"{lens}.invalid-{attempts}.md")
-        if attempts >= 2:
-            manifest["status"][lens] = "failed"
-        else:
-            manifest["status"][lens] = "retry"
-            retries.append(f"retry: {lens} — {manifest['failures'][lens]}")
+        reset_scratch(manifest, run, lens)
+        manifest["status"][lens] = "retry"
+        retries.append(f"retry: {lens} — {manifest['failures'][lens]}")
     failed = [lens for lens in lenses if manifest["status"][lens] == "failed"]
     if retries:
         manifest["index"] = None
         write_manifest(run, manifest)
         print("\n".join(retries))
         return 2
-    if len(failed) == len(lenses):
+    if len(failed) == len(lenses) and not entries:
         manifest["index"] = None
         write_manifest(run, manifest)
         print("problem: no valid reports\nSTATUS: blocked")
         return 3
-    entries.sort(key=lambda e: (SEVERITIES.index(e["severity"]), lenses.index(e["lens"]), e["n"]))
+    entries.sort(key=lambda e: (severity_rank(e["severity"]), lenses.index(e["lens"]), e["n"]))
     manifest["index"] = entries
     write_manifest(run, manifest)
     lines = index_table(entries)
     if failed:
-        lines.append(f"failed-lenses: {', '.join(failed)}")
+        lines.append(failed_lenses_line(manifest, failed))
     print("\n".join(lines))
     return 0
 
@@ -635,7 +789,7 @@ RECOMMENDED_SLOT = "<!-- orchestrator: at most 3 items, only ones that change wh
 
 
 def render_decisions(manifest: dict) -> str:
-    rows = [f"| {e['id']} | {e['severity']} | {cell(e['title'])} | {d['verdict']} | {cell(d['why'])} |"
+    rows = [f"| {e['id']} | {cell(e['severity'])} | {shown_title(e)} | {d['verdict']} | {cell(d['why'])} |"
             for e in manifest["index"] if (d := manifest["dispositions"].get(e["id"]))]
     return "\n".join([f"# Decisions — {Path(manifest['doc']).name}", "",
                       *table("| ID | Severity | Title | Verdict | Why |", rows)]) + "\n"
@@ -675,10 +829,7 @@ def cmd_decide(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_summary(args: argparse.Namespace) -> int:
-    run, manifest = open_run(args.run)
-    if manifest is None:
-        return 2
+def render_summary(run: Path, manifest: dict) -> int:
     index = manifest.get("index")
     if index is None:
         print("problem: no findings index; run check first")
@@ -697,20 +848,35 @@ def cmd_summary(args: argparse.Namespace) -> int:
     if manifest["mode"] == "file-only":
         out += ["## Findings", *index_table(index)]
         if failed:
-            out.append(f"failed-lenses: {', '.join(failed)}")
+            out.append(failed_lenses_line(manifest, failed))
         out.append(f"Apply later: /orko-review --run {run} --apply")
     else:
         def rows(verdict: str) -> list[str]:
-            return [f"| {e['id']} | {e['severity']} | {cell(e['title'])} | {cell(decided[e['id']]['why'])} |"
+            return [f"| {e['id']} | {cell(e['severity'])} | {shown_title(e)} | {cell(decided[e['id']]['why'])} |"
                     for e in index if decided[e["id"]]["verdict"] == verdict]
-        needs = rows("defer") + [f"| {lens}/— | — | lens failed twice | {cell(manifest['failures'].get(lens, ''))} |"
-                                 for lens in failed]
+        needs = rows("defer") + [failed_row(lens, manifest) for lens in failed]
         out += ["## Accepted", *table("| ID | Severity | Title | Change |", rows("accept")),
                 "## Rejected", *table("| ID | Severity | Title | Why |", rows("reject")),
                 "## Needs you", *table("| ID | Severity | Title | Why |", needs),
                 "## Recommended", RECOMMENDED_SLOT]
     print("\n".join(out))
     return 0
+
+
+def cmd_summary(args: argparse.Namespace) -> int:
+    run, manifest = open_run(args.run)
+    if manifest is None:
+        return 2
+    code = render_summary(run, manifest)
+    if manifest.get("index") is None:
+        # No findings index means reviewers may still be retrying in these folders.
+        return code
+    # Once check has stored an index, whether or not the summary rendered: the reviewers are done,
+    # and they can't delete these themselves.
+    warnings = remove_scratch(manifest, run)
+    if warnings:
+        print("\n".join(warnings))
+    return code
 
 
 def resume(run: Path, problems: list[str]) -> list[str]:
@@ -734,6 +900,30 @@ def resume(run: Path, problems: list[str]) -> list[str]:
     return [f"doc: {doc}", f"type: {manifest['type']}", *spec,
             f"evergreen: {', '.join(manifest['evergreen']) or 'none'}",
             f"resume: {run}", *index_table(manifest["index"])]
+
+
+def cmd_lint(argv: list[str]) -> int:
+    """The reviewer's own check: check's parser on one report, read-only, no lock, no hash."""
+    parser = argparse.ArgumentParser(prog="orko_review.py lint")
+    parser.add_argument("--report", required=True)
+    report = Path(parser.parse_args(argv).report).expanduser().resolve()
+    manifest = load_manifest(report.parent)
+    if manifest is None:
+        problem = f"no readable run.json beside {report}"
+    elif report.stem not in manifest["lenses"]:
+        problem = f"{report.name} is not a lens report of this run ({', '.join(manifest['lenses'])})"
+    elif not report.is_file():
+        problem = f"report missing: {report}"
+    else:
+        problem = None
+    if problem:
+        print(f"problem: {problem}")
+        return 2
+    findings, errors = parse_report(read_text(report), report.stem, manifest["doc"])
+    lines = [f"error: {e}" for e in errors]
+    lines += [f"error: F-{f['n']}: {f['malformed']}" for f in findings if f.get("malformed")]
+    print("\n".join(lines) or "ok")
+    return 1 if lines else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -760,6 +950,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_preflight(argv[1:])
     if argv[:1] == ["start"]:
         return cmd_start(argv[1:])
+    if argv[:1] == ["lint"]:
+        return cmd_lint(argv[1:])
     args = build_parser().parse_args(argv)
     return args.func(args)
 
