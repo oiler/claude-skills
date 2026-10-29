@@ -18,7 +18,7 @@ allowed-tools: >-
 
 Execute the plan with `superpowers:subagent-driven-development` (SDD). You are the orchestrator: you dispatch, review, and decide. You do not implement.
 
-This file changes SDD; it doesn't restate it. Where the two conflict, this file wins, because oiler's instructions outrank plugins. Everything not mentioned here runs as SDD says: the ledger, task briefs, review packages, the single task reviewer, the fix loop and its breaker, and the final review. Written against SDD 6.4.1.
+This file changes SDD; it doesn't restate it. Where the two conflict, this file wins, because oiler's instructions outrank plugins. Everything not mentioned here runs as SDD says: the ledger, task briefs, review packages, the single task reviewer, the fix loop and its breaker, and the final review. Written against SDD 7.0.0.
 
 Below, `<workspace>` is the directory SDD's `sdd-workspace` script prints, and `<ledger>` is the `progress.md` inside it. The `allowed-tools` grant covers the script's four subcommands only until oiler's next message; after that, a call may ask for permission.
 
@@ -37,7 +37,8 @@ If that block ends in `STATUS: blocked`, report its `problem:` lines and stop. O
 - A task that conflicts with an evergreen doc is skipped, not ruled on. Append `Task <N>: skipped — evergreen conflict — <doc>:<line> — <what conflicts>` to the ledger, then `Task <M>: skipped — depends on Task <N>` for every task that builds on it, and continue with independent work. In this run, the skip is CLAUDE.md's "halt", and the report's Follow-up line is its "ask": `report` writes one line per skipped chain on its own. For the decision oiler must make, append the ledger line `Task <N>: skip decision — <options>` for the chain's first task, and `report` puts it on that chain's line. Don't write a separate `Follow-up:` line for it.
 - You own every other decision the plan leaves open. Make it, record it as an SDD ruling on its own ledger line, and keep going; a ruling carried only in a `log --why` never reaches the report. Write each ruling as `Ruling: <what> — <why> — cost if wrong: <cost>`. When a ruling replaces an earlier one, write it as `Ruling (supersedes "<words>"): …`, quoting words from the earlier ruling, so the report marks that row superseded; the report flags a plain ruling that reads as a reversal. Don't restate a parked finding or a ruling in a `Follow-up:` line, because Decided already carries it. Ask oiler only for the actions under Stops, or when nothing else can proceed without the answer.
 - Material product, behavior, or architecture ambiguity is a ruling for you, not a reason to pick a bigger model.
-- Record anything oiler must act on after the run as a `Follow-up: <item>` ledger line, so the report carries it.
+- A ruling may depart from code or signatures the plan prescribes word for word. Name the defect in the plan's version, and the cost if the departure is wrong. With no spec, the plan is the only authority, so the ruling must say what the plan's version would break.
+- Record anything oiler must act on after the run that no `parked` or `Ruling:` line already carries as a `Follow-up: <item>` ledger line, so the report carries it. A parked finding reaches oiler through Decided.
 
 ## Models and effort
 
@@ -69,17 +70,19 @@ If `log` also prints `warning: orchestrator effort is …` on stderr, the dispat
 | `fix-tier-up` | opus/medium, opus/high; only above the task's last implementer or fix dispatch | SDD fix rounds 4-5: at least one step above the stuck implementer |
 | `final-reviewer` | opus/high; fable/high when the ledger carries `orko-sdd: release-critical` | Final review: ordinary / release-critical whole-branch review |
 | `final-fixer` | opus/medium | SDD's single final-review fix dispatch |
+| `final-refixer` | opus/high | Fix failure caused by skipped files, incomplete execution or missing verification |
 
 Choosing a role:
 
 - The task's plan text contains the complete code: `implementer-scoped`.
+- The task's plan text gives the exact signatures, the test code with its assertions, and the values the spec pins, and leaves the bodies to the implementer: also `implementer-scoped`. superpowers 7.0.0's writing-plans writes tasks this way. A task whose plan leaves open an interface between files is still `implementer-multifile`, below.
 - A prose task with a few small open points, each with one conventional reading, whose files don't have to agree with each other beyond what the plan states: `implementer-gap`, even when it touches several files. Rule on each open point before dispatch and record it as a `Ruling:` line, because Decided reads only ruling lines.
 - Changes across files that have to agree with each other, such as a shared interface or a data flow the plan leaves open: `implementer-multifile`, at opus/high only when the task is unusually difficult.
 - Downgrade on a fresh re-dispatch (NEEDS_CONTEXT, or a fix round 1-3 when the implementer can't be resumed) when the work left is transcription from the plan or a single-file mechanical fix: log it as `implementer-scoped`, whatever the task's first role was.
 - A batch of small same-shape tasks (SDD's batching rule) is one dispatch: log it with `--task 3,4,5`. Record its completion as one `Task <N>: complete (…)` line per task, because SDD's resume check reads per-task lines.
 - SDD's BLOCKED re-dispatch "with a more capable model": `fix-tier-up`. Any other fresh re-dispatch (NEEDS_CONTEXT, or a fix round 1-3 when the implementer can't be resumed) logs again under the task's original role, unless the downgrade rule applies.
 - A task review logs as `reviewer-security` (opus/high) when its dispatch gets the web-security line, and as `reviewer` (opus/medium) otherwise. A scoped re-review follows the same rule with `re-reviewer-security` and `re-reviewer`. MODELS.md puts security-sensitive review at high because that's where extra effort pays off most, and a separate role lets `log` refuse a medium review of a security diff.
-- The final whole-branch review logs as `--task final --role final-reviewer`; for an unusually large branch, `--override` to fable/high with the reason. Its single fix dispatch logs as `--task final --role final-fixer`.
+- The final whole-branch review logs as `--task final --role final-reviewer`; for an unusually large branch, `--override` to fable/high with the reason. Its single fix dispatch logs as `--task final --role final-fixer`. Its scoped re-review, and a refix re-review, log as `--task final --role re-reviewer`, or `re-reviewer-security` when the code they cover qualifies for the web-security line. A Critical or Important regression the final fix wave introduced logs as `--task final --role final-refixer` (see Fix loop).
 
 ## Fix loop
 
@@ -99,14 +102,28 @@ At SDD's breaker, add a cost to both of its formats, because the report's Decide
 
 Resuming the implementer before its first review, over its own DONE_WITH_CONCERNS, isn't a fix round, so it needs no ledger line.
 
-Send the final fixer every finding from the final review, as SDD says, including the deferred minors the final review marks must-fix. There are two exceptions. A finding that conflicts with the plan's text: rule on it first, as SDD's plan-mandated rule says, and when the ruling keeps the plan, park the finding instead of sending it. And a new Minor the final review itself marks drop or can-wait: you may park it instead of sending it, so the single fix wave stays on what the review says must change. Critical and Important findings always go to the fixer unless they conflict with the plan's text. Record each final-review finding you park, before the fix wave or after the re-review, as `Task final: parked — <finding> — Ruling: <why> — cost if wrong: <cost>`; that line is the ruling, so don't write a separate `Ruling:` line for it. `<K>` below counts every `Task final: parked` line, from before the fix wave and after it. Record the final re-review's out-of-scope observations, and any new Minor breakage it finds in the fix diff, as `Task final: minor (deferred): <one-liner>`; SDD's single fix wave leaves no round to fix them. Deferred minors the final review marks drop or can-wait need no new line. After the final re-review, append `Task final: complete (commits <fix-base7>..<head7>, review clean)`, with `<K> parked` in place of `review clean` when you parked any and `<fix-base7>` the commit the final fixer started from; when the final review comes back clean with no fix wave, append `Task final: complete (commits <merge-base7>..<head7>, review clean)`, the branch range that review saw.
+Resolve each ⚠️ "Cannot verify from diff" item from a task review yourself, as SDD says, and record it as `Task <N>: checked — <item> — <what you verified>`. A confirmed gap enters the fix loop as SDD says.
+
+Send the final fixer every finding from the final review, as SDD says, including the deferred minors the final review marks must-fix. There are two exceptions. A finding that conflicts with the plan's text: rule on it first, as SDD's plan-mandated rule says, and when the ruling keeps the plan, park the finding instead of sending it. And a new Minor the final review itself marks drop or can-wait: you may park it instead of sending it, so the single fix wave stays on what the review says must change. Critical and Important findings always go to the fixer unless they conflict with the plan's text. Record each final-review finding you park, before the fix wave or after the re-review, as `Task final: parked — <finding> — Ruling: <why> — cost if wrong: <cost>`; that line is the ruling, so don't write a separate `Ruling:` line for it. `<K>` below counts every `Task final: parked` line, from before the fix wave and after it. Record the final re-review's out-of-scope observations, and any new Minor breakage it finds in the fix diff, as `Task final: minor (deferred): <one-liner>`; Minor breakage and out-of-scope observations get no fix round. Deferred minors the final review marks drop or can-wait need no new line. A new Minor is one that has no `minor (deferred)` line yet. A deferred minor the final review lists again stays deferred and needs no new line; when the review marks it must-fix it goes to the final fixer, as this paragraph already says. After the last re-review that ran (the refix re-review when there was a refix), append `Task final: complete (commits <fix-base7>..<head7>, review clean)`, where `<head7>` is the head the last re-review saw, with `<K> parked` in place of `review clean` when you parked any and `<fix-base7>` the commit the final fixer started from; when the final review comes back clean with no fix wave, append `Task final: complete (commits <merge-base7>..<head7>, review clean)`, the branch range that review saw.
+
+Answer a final fixer's NEEDS_CONTEXT, or resolve its BLOCKED, by resuming it; that needs no log line. If it can't be resumed, dispatch it fresh: log `final-fixer` again with the reason. It is still the single fix wave.
+
+One case overrides SDD's "There is no second fix wave". When the fix re-review, the scoped re-review of the final fix wave, lists a Critical or Important item under New Breakage in the Fix Diff, that regression is the run's own defect, not a residual finding. Findings it marks NOT ADDRESSED don't trigger this: park each one as before, with its own `Task final: parked` line, even when you expect the refix to resolve it; its ruling says so. Effort buys thoroughness, not a better approach, so if a ruling you wrote before the fix wave prescribed the approach that regressed, write a superseding ruling first, taking the re-review's suggested fix as the default. Then:
+
+- Ledger the fix re-review's Minor breakage and out-of-scope observations as `Task final: minor (deferred)` lines.
+- Save the fix re-review's report as `<workspace>/final-fix-rereview.md`.
+- Dispatch one `final-refixer` with the Critical and Important new-breakage items verbatim, the saved report, the final fixer's report file (the refixer appends its report there), and your superseding ruling. Include the TDD line, and the web-security line when the code qualifies.
+- Answer the refixer's NEEDS_CONTEXT or BLOCKED by resuming it, with no log line. If it can't be resumed, or its dispatch never ran after `log`, don't dispatch again: park its items as `Task final: parked — <item> — Ruling: the refixer could not complete — cost if wrong: <cost>`. If the refixer left commits after the head the fix re-review saw, say so in the parked line.
+- If `log` refuses the `final-refixer`, park its items with the refusal as the ruling; don't backfill a dispatch line to satisfy it.
+- Run one refix re-review with `re-review-prompt.md` over the head the fix re-review saw (the final fixer's head) to the refixer's head, packaged with `review-package`. Its findings are the new-breakage items plus every original final-review finding the refix diff touches, so a refix that reverts an original fix is caught.
+- After the refix re-review, park anything still open, and ledger its Minor breakage as deferred minors. There is no third round, and `log` refuses a second `final-refixer`.
 
 ## Dispatch lines
 
 Add each of these sentences verbatim where it applies:
 
 - Every implementer and fixer dispatch, including the final fixer: "Use red/green TDD for any logic in this task: write the failing test, run it and watch it fail, then implement."
-- Every implementer, fixer, and reviewer dispatch whose code touches request handling, auth, user input, output encoding, or secrets: "Invoke the web-security skill before writing or reviewing code for this task." User input is anything the program reads from outside itself at runtime: HTTP requests, command-line arguments, stdin, files, environment variables, and responses from other services. A library function's string arguments count when the function builds paths, shell commands, SQL, HTML, or URLs from them, or parses an untrusted format; a pure transform such as a slug function doesn't, but a command-line filter that reads stdin does. The final reviewer gets the line when any task on the branch did; the final fixer and a re-reviewer get it when the code they touch qualifies.
+- Every implementer, fixer, and reviewer dispatch whose code touches request handling, auth, user input, output encoding, or secrets: "Invoke the web-security skill before writing or reviewing code for this task." User input is anything the program reads from outside itself at runtime: HTTP requests, command-line arguments, stdin, files, environment variables, and responses from other services. A library function's string arguments count when the function builds paths, shell commands, SQL, HTML, or URLs from them, or parses an untrusted format; a pure transform such as a slug function doesn't, but a command-line filter that reads stdin does. The final reviewer gets the line when any task on the branch did; the final fixer, the final refixer, and a re-reviewer get it when the code they touch qualifies.
 
 ## Branch
 
@@ -116,7 +133,7 @@ oiler's standing preference, which is the consent SDD and `superpowers:using-git
 2. If `.worktrees/` isn't ignored, add it to `.git/info/exclude`.
 3. Work from that directory: enter it with `EnterWorktree(path=…)`, loading the tool with ToolSearch first if it's deferred. Use absolute paths instead when the tool is unavailable or you decline it, or when the session is already in a worktree, where `EnterWorktree(path=…)` accepts only targets under `.claude/worktrees/`.
 
-Inside a worktree entered this way, the harness refuses Bash calls it judges too complex to verify (observed in Claude Code 2.1.280–2.1.296): `cd` or `git -C` combined with git work, but also command substitution such as `VAR=$(bash …/sdd-workspace …)`, loops with a computed command name, heredocs chained with `&&`, and `awk -v` pipelines. Run each SDD script and each git command as its own plain call, and write files with the Write tool. Finish's `verify` recipe is accepted as written.
+Inside a worktree entered this way, the harness refuses Bash calls it judges too complex to verify (observed in Claude Code 2.1.280–2.1.296): `cd` or `git -C` combined with git work, but also command substitution such as `VAR=$(bash …/sdd-workspace …)`, loops with a computed command name, heredocs chained with `&&`, and `awk -v` pipelines. Run each SDD script and each git command as its own plain call. Write new files with the Write tool, and append to the ledger with the Edit tool or a single unchained `cat >> <ledger> <<'EOF'` call. Finish's `verify` recipe is accepted as written.
 
 `<plan-slug>` is the plan file's basename without `.md`, and `<worktree>` is the worktree the run uses. Once in the worktree, pass SDD's scripts (`sdd-workspace`, `task-brief`, `review-package`) the plan's path inside the worktree, so the workspace and ledger live there. `<repo-root>` is the repository the plan changes, which the plan names when it isn't the one you started in; when it differs, take `<base-branch>` (`master`, else `main`) and the `.worktrees/` exclusion from `<repo-root>`, not from preflight. When the plan file lives outside that repository, pass SDD's scripts its absolute path and run them from the worktree; the workspace still lands in the worktree.
 
@@ -145,7 +162,7 @@ While a subagent you dispatched is running and nothing local remains, ending the
 
 ## Finish
 
-SDD deletes its workspace as soon as the final review is clean. Hold that deletion: the ledger feeds the report. Instead, after the final review and its fix wave:
+SDD deletes its workspace as soon as the final review is clean. Skip that deletion: the ledger feeds the report, and oiler cleans workspaces up. After the final review and its fix wave:
 
 1. Run each of the project's test and lint commands with its output redirected into the workspace, and record the result in the same Bash call:
 
@@ -153,7 +170,7 @@ SDD deletes its workspace as soon as the final review is clean. Hold that deleti
    <command> > <workspace>/verify-<n>.log 2>&1; python3 ${CLAUDE_SKILL_DIR}/scripts/orko_sdd.py verify --ledger <ledger> --exit $? --output <workspace>/verify-<n>.log -- '<command>'
    ```
 
-   The command runs under normal permission rules. The script only records its exit code and last output line. Don't pipe `<command>` into another program: `$?` would be the last program's exit code, so a failing suite could record exit 0. If the project has no lint command, record only its test commands.
+   The command runs under normal permission rules. The script only records its exit code and last output line. Don't pipe `<command>` into another program: `$?` would be the last program's exit code, so a failing suite could record exit 0. If the project has no lint command, record only its test commands. The plan's documented test command is the gate for `finishing-a-development-branch`'s Step 1. A failure on another interpreter or platform is a `Follow-up:` line, unless a `parked` line already carries it; it is not a red suite.
 
 2. Build the report:
 
@@ -163,6 +180,8 @@ SDD deletes its workspace as soon as the final review is clean. Hold that deleti
 
    If Follow-up flags Decided rows or lists lines not read as rulings, fix those ledger lines and run `report` once more. Paste that output, with any flags that remain.
 
-3. Invoke `superpowers:finishing-a-development-branch`. In the message that presents its options, put the report first; a one-line announcement before it is fine. Paste the script's output unchanged, from `## Done` through the Verified table, then write the Recommended items under `## Recommended` in place of the HTML comment: at most three, and only ones that would change what oiler does next. The report's Decided table is SDD's "Rulings I made" list, so don't repeat it. Merging and pushing are stops.
+3. Copy `<workspace>` to `<repo-root>/.superpowers/sdd/<plan-slug>/` in the main checkout, writing `*` to `<repo-root>/.superpowers/sdd/.gitignore` if it's missing. `finishing-a-development-branch` removes the worktree for merge and discard, and the ignored workspace goes with it: its untracked-file check doesn't list ignored files.
 
-4. Only after `finishing-a-development-branch` has completed, delete the workspace as SDD does: `rm -rf <workspace>`.
+4. Invoke `superpowers:finishing-a-development-branch`. In the message that presents its options, put the report first; a one-line announcement before it is fine. Paste the script's output unchanged, from `## Done` through the Verified table, then write the Recommended items under `## Recommended` in place of the HTML comment: at most three, and only ones that would change what oiler does next. The report's Decided table is SDD's "Rulings I made" list, so don't repeat it. Merging and pushing are stops. If you append a ledger line during this step, rerun `report` (step 2) and the copy (step 3) before presenting the options.
+
+5. Leave the workspace in place; oiler cleans it up.
