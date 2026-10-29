@@ -1,0 +1,12 @@
+{
+  "instrument": "corpus replay: every recorded invalid orko-review report through v0.1.0's and v0.1.1's parse_report",
+  "scripts": {
+    "old": "tag orko-review-v0.1.0: orko-review/scripts/orko_review.py",
+    "new": "branch feat/2026-10-28-orko-review-v0.1.1 at 40d4b81: orko-review/scripts/orko_review.py"
+  },
+  "corpus": "every *.invalid-*.md under ~/files whose path has a 'reviews' component (private projects; reports are read, never copied)",
+  "lens_and_doc": "each report's own front matter, so the replay measures finding-level handling, not run binding",
+  "pass_rule": "for every report: v0.1.0 returns errors; v0.1.1 returns no report-level errors, indexes every '### F-<n> ' heading, and marks as malformed exactly the findings v0.1.0 named in its errors",
+  "spot_check": "run 2026-10-20-110919, accuracy.invalid-2.md and design.invalid-2.md: 3 malformed each (the spec's evidence run)",
+  "command": "python3 -B replay.py <v0.1.0 orko_review.py> <candidate orko_review.py> ~/files results.json"
+}
