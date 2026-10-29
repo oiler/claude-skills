@@ -346,7 +346,8 @@ class TestStart:
             f"- Document under review: {project / SPEC_REL}\n"
             f"- Evergreen docs: {project / 'CLAUDE.md'}\n"
             f"- Reviews directory (off limits except your report): {project / 'docs/superpowers/reviews'}\n"
-            f"- Write your report to: {run / 'design.md'}\n\n"
+            f"- Write your report to: {run / 'design.md'}\n"
+            f"- Check your report with: python3 {orko_review.SCRIPT_PATH} lint --report {run / 'design.md'}\n\n"
             + (orko_review.LENS_DIR / "spec-design.md").read_text(encoding="utf-8") + "\n"
             + orko_review.CONTRACT_PATH.read_text(encoding="utf-8"))
         assert (run / "briefs" / "design.md").read_text(encoding="utf-8") == expected
@@ -736,6 +737,66 @@ class TestCheck:
         assert r"| design/F-1 | minor \| nit | malformed: severity 'minor \| nit' — " in out
 
 
+def lint(path):
+    return orko_review.main(["lint", "--report", str(path)])
+
+
+def run_files(run):
+    return {p.relative_to(run): p.read_bytes() for p in sorted(run.rglob("*")) if p.is_file()}
+
+
+class TestLint:
+    def test_valid_report_prints_ok(self, project, capsys):
+        run = started(project)
+        put_report(run, "design")
+        capsys.readouterr()
+        assert lint(run / "design.md") == 0
+        assert capsys.readouterr().out == "ok\n"
+
+    def test_finding_and_report_errors_print_error_lines(self, project, capsys):
+        run = started(project)
+        put_report(run, "design")
+        text = mutate(r"^ready with changes$", "mostly ready")(
+            mutate(r"^- Problem: .*\n", "")((run / "design.md").read_text(encoding="utf-8")))
+        write(run / "design.md", text)
+        capsys.readouterr()
+        assert lint(run / "design.md") == 1
+        assert capsys.readouterr().out.splitlines() == [
+            "error: verdict 'mostly ready' is not one of ready, ready with changes, not ready",
+            "error: F-1: missing Problem"]
+
+    def test_lint_never_writes(self, project):
+        run = started(project)
+        put_report(run, "design")
+        write(run / "design.md", mutate(r"^- Problem: .*\n", "")((run / "design.md").read_text(encoding="utf-8")))
+        before = run_files(run)
+        assert lint(run / "design.md") == 1
+        assert run_files(run) == before
+
+    @pytest.mark.parametrize("case", ["no run", "invalid name", "missing report"])
+    def test_bad_inputs_print_a_problem_and_exit_2(self, project, tmp_path, capsys, case):
+        run = started(project)
+        path = {"no run": write(tmp_path / "loose" / "design.md", "x\n"),
+                "invalid name": write(run / "design.invalid-1.md", "x\n"),
+                "missing report": run / "design.md"}[case]
+        capsys.readouterr()
+        assert lint(path) == 2
+        assert capsys.readouterr().out.startswith("problem: ")
+
+    def test_the_brief_command_runs_from_a_shell_on_a_path_with_a_space(self, tmp_path):
+        root = tmp_path / "my proj"
+        write(root / "CLAUDE.md", "# proj\n")
+        write(root / SPEC_REL, "# Widget design\n")
+        git(root, "init", "-q")
+        assert start(root.resolve()) == 0
+        run = run_dir(root.resolve())
+        write(run / "design.md", report_text("design", str(root.resolve() / SPEC_REL)))
+        brief = (run / "briefs" / "design.md").read_text(encoding="utf-8")
+        command = next(l for l in brief.splitlines() if l.startswith("- Check your report with: "))
+        proc = subprocess.run(command.split(": ", 1)[1], shell=True, capture_output=True, text=True)
+        assert (proc.returncode, proc.stdout) == (0, "ok\n")
+
+
 def checked(project, mode="apply", *extra):
     run = started(project, *extra, mode=mode)
     for lens, source in (("accuracy", "accuracy"), ("completeness", "completeness"), ("design", "design")):
@@ -968,6 +1029,10 @@ class TestSkillFiles:
 
     def frontmatter(self, skill):
         return skill.split("---", 2)[1]
+
+    def test_lint_is_not_an_orchestrator_grant(self, skill):
+        assert "lint" not in orko_review.SUBCOMMANDS
+        assert "orko_review.py lint" not in self.frontmatter(skill)
 
     def test_allowed_tools_grant_exactly_the_five_subcommands(self, skill):
         grants = re.findall(r"Bash\(([^)]*)\)", self.frontmatter(skill).split("allowed-tools:", 1)[1])

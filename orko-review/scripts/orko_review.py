@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
+SCRIPT_PATH = Path(__file__).resolve()
 LENS_DIR = SKILL_DIR / "references" / "lenses"
 CONTRACT_PATH = SKILL_DIR / "references" / "reviewer-contract.md"
 SUBCOMMANDS = ("preflight", "start", "check", "decide", "summary")
@@ -379,7 +381,9 @@ def render_brief(lens: str, res: Resolution, run: Path) -> str:
         lines.append(f"- Spec: {res.spec}")
     lines += [f"- Evergreen docs: {', '.join(map(str, res.evergreen)) or 'none'}",
               f"- Reviews directory (off limits except your report): {res.reviews}",
-              f"- Write your report to: {run / f'{lens}.md'}", ""]
+              f"- Write your report to: {run / f'{lens}.md'}",
+              f"- Check your report with: python3 {shlex.quote(str(SCRIPT_PATH))} lint "
+              f"--report {shlex.quote(str(run / f'{lens}.md'))}", ""]
     return ("\n".join(lines) + "\n" + read_text(lens_file(res.doc_type, lens)) + "\n"
             + read_text(CONTRACT_PATH))
 
@@ -823,6 +827,30 @@ def resume(run: Path, problems: list[str]) -> list[str]:
             f"resume: {run}", *index_table(manifest["index"])]
 
 
+def cmd_lint(argv: list[str]) -> int:
+    """The reviewer's own check: check's parser on one report, read-only, no lock, no hash."""
+    parser = argparse.ArgumentParser(prog="orko_review.py lint")
+    parser.add_argument("--report", required=True)
+    report = Path(parser.parse_args(argv).report).expanduser().resolve()
+    manifest = load_manifest(report.parent)
+    if manifest is None:
+        problem = f"no readable run.json beside {report}"
+    elif report.stem not in manifest["lenses"]:
+        problem = f"{report.name} is not a lens report of this run ({', '.join(manifest['lenses'])})"
+    elif not report.is_file():
+        problem = f"report missing: {report}"
+    else:
+        problem = None
+    if problem:
+        print(f"problem: {problem}")
+        return 2
+    findings, errors = parse_report(read_text(report), report.stem, manifest["doc"])
+    lines = [f"error: {e}" for e in errors]
+    lines += [f"error: F-{f['n']}: {f['malformed']}" for f in findings if f.get("malformed")]
+    print("\n".join(lines) or "ok")
+    return 1 if lines else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orko_review.py", description="orko-review helper")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -847,6 +875,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_preflight(argv[1:])
     if argv[:1] == ["start"]:
         return cmd_start(argv[1:])
+    if argv[:1] == ["lint"]:
+        return cmd_lint(argv[1:])
     args = build_parser().parse_args(argv)
     return args.func(args)
 
