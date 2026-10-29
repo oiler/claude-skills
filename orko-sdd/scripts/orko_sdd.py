@@ -41,6 +41,7 @@ ROLE_TABLE: dict[str, tuple[tuple[str, str], ...]] = {
     "fix-tier-up": (("opus", "medium"), ("opus", "high")),  # filtered in allowed_combos
     "final-reviewer": (("opus", "high"),),
     "final-fixer": (("opus", "medium"),),
+    "final-refixer": (("opus", "high"),),
 }
 RELEASE_CRITICAL_FINAL = (("fable", "high"),)
 
@@ -60,6 +61,7 @@ ROLE_SOURCE = {
     "fix-tier-up": "SDD fix rounds 4-5: at least one step above the stuck implementer",
     "final-reviewer": "Final review: ordinary / release-critical whole-branch review",
     "final-fixer": "SDD's single final-review fix dispatch",
+    "final-refixer": "Fix failure caused by skipped files, incomplete execution or missing verification",
 }
 
 DISPATCH_RE = re.compile(r"^Task (\d+(?:,\d+)*|final): dispatch (\S+) (\w+)/(\w+) — ")
@@ -342,7 +344,8 @@ LIST_ITEM_RE = re.compile(r"^(?:[-*+] |\d+[.)] )")
 PARKED_COUNT_RE = re.compile(r"(\d+) parked")
 CELL_PIPE_RE = re.compile(r"(?<!\\)\|")
 ROLE_LABELS = {"reviewer": "rev", "reviewer-security": "rev", "re-reviewer": "re-rev",
-               "re-reviewer-security": "re-rev", "final-reviewer": "rev", "final-fixer": "fix"}
+               "re-reviewer-security": "re-rev", "final-reviewer": "rev", "final-fixer": "fix",
+               "final-refixer": "refix"}
 RULING_SHAPE = "`Ruling: <what> — <why> — cost if wrong: <cost>`"
 SUPERSEDES_SHAPE = '`Ruling (supersedes "<words>"): …`'
 SKIP_DECISION_SHAPE = "`Task <N>: skip decision — <options>`"
@@ -725,6 +728,24 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+REREVIEW_PREFIXES = ("Task final: dispatch re-reviewer ", "Task final: dispatch re-reviewer-security ")
+
+
+def refix_refusal(task: str, ledger_text: str) -> str | None:
+    """Why a final-refixer dispatch is refused, or None. These rules are the cap, so --override can't lift them."""
+    if task != "final":
+        return "final-refixer is a final-review role; use --task final"
+    lines = [marker_text(line) for line in ledger_text.splitlines()]
+    fixers = [i for i, line in enumerate(lines) if line.startswith("Task final: dispatch final-fixer ")]
+    if not fixers:
+        return "final-refixer follows a final-fixer dispatch; none is in the ledger"
+    if not any(line.startswith(REREVIEW_PREFIXES) for line in lines[fixers[-1] + 1:]):
+        return "final-refixer follows the final fix re-review; none is in the ledger after the final fixer"
+    if any(line.startswith("Task final: dispatch final-refixer ") for line in lines):
+        return "one final-refixer per ledger; this ledger already has one"
+    return None
+
+
 def cmd_log(args: argparse.Namespace) -> int:
     ledger = Path(args.ledger)
     if err := ledger_error(ledger):
@@ -737,6 +758,9 @@ def cmd_log(args: argparse.Namespace) -> int:
     why = " ".join(args.why.split())
     if not why:
         print("refused: --why is empty", file=sys.stderr)
+        return 2
+    if args.role == "final-refixer" and (refusal := refix_refusal(args.task, ledger.read_text(encoding="utf-8"))):
+        print(f"refused: {refusal}", file=sys.stderr)
         return 2
     allowed = allowed_combos(args.role, args.task.split(",")[0], ledger.read_text(encoding="utf-8"))
     suffix = ""

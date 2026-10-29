@@ -69,6 +69,7 @@ If `log` also prints `warning: orchestrator effort is …` on stderr, the dispat
 | `fix-tier-up` | opus/medium, opus/high; only above the task's last implementer or fix dispatch | SDD fix rounds 4-5: at least one step above the stuck implementer |
 | `final-reviewer` | opus/high; fable/high when the ledger carries `orko-sdd: release-critical` | Final review: ordinary / release-critical whole-branch review |
 | `final-fixer` | opus/medium | SDD's single final-review fix dispatch |
+| `final-refixer` | opus/high | Fix failure caused by skipped files, incomplete execution or missing verification |
 
 Choosing a role:
 

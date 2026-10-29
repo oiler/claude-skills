@@ -19,6 +19,20 @@ def last_line(ledger):
     return ledger.read_text(encoding="utf-8").splitlines()[-1]
 
 
+FIX_AND_REREVIEW = ("Task final: dispatch final-fixer opus/medium — w",
+                    "Task final: dispatch re-reviewer-security opus/high — w")
+
+
+def append(ledger, *lines):
+    with ledger.open("a", encoding="utf-8") as fh:
+        fh.write("".join(f"{line}\n" for line in lines))
+
+
+def refix(ledger, *extra, **kw):
+    params = {"task": "final", "role": "final-refixer", "model": "opus", "effort": "high", "why": "w"} | kw
+    return run_log(ledger, *extra, **params)
+
+
 class TestLog:
     def test_on_table_dispatch_appends_line_and_prints_dispatch_params(self, ledger, capsys):
         assert run_log(ledger) == 0
@@ -129,6 +143,55 @@ class TestLog:
         with ledger.open("a", encoding="utf-8") as fh:
             fh.write("- `orko-sdd: release-critical`\n")
         assert run_log(ledger, task="final", role="final-reviewer", model="opus", why="w") == 2
+
+    def test_final_refixer_runs_at_opus_high_after_the_fix_and_its_re_review(self, ledger, capsys):
+        append(ledger, *FIX_AND_REREVIEW)
+        assert refix(ledger) == 0
+        assert last_line(ledger) == "Task final: dispatch final-refixer opus/high — w"
+        assert "subagent_type: orko-sdd-high" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("lines,message", [
+        ((), "final-refixer follows a final-fixer dispatch; none is in the ledger"),
+        (FIX_AND_REREVIEW[:1],
+         "final-refixer follows the final fix re-review; none is in the ledger after the final fixer"),
+        (FIX_AND_REREVIEW[::-1],
+         "final-refixer follows the final fix re-review; none is in the ledger after the final fixer"),
+        ((*FIX_AND_REREVIEW, "Task final: dispatch final-refixer opus/high — w"),
+         "one final-refixer per ledger; this ledger already has one"),
+    ], ids=["no-fixer", "no-re-review", "re-review-before-fixer", "second-refixer"])
+    def test_final_refixer_order_and_cap_are_refused(self, ledger, capsys, lines, message):
+        append(ledger, *lines)
+        before = ledger.read_text(encoding="utf-8")
+        assert refix(ledger) == 2
+        assert f"refused: {message}" in capsys.readouterr().err
+        assert ledger.read_text(encoding="utf-8") == before
+
+    def test_final_refixer_needs_task_final(self, ledger, capsys):
+        append(ledger, *FIX_AND_REREVIEW)
+        assert refix(ledger, task="3") == 2
+        assert "refused: final-refixer is a final-review role; use --task final" in capsys.readouterr().err
+
+    def test_override_does_not_lift_a_refix_refusal(self, ledger, capsys):
+        before = ledger.read_text(encoding="utf-8")
+        assert refix(ledger, "--override") == 2
+        assert "refused: final-refixer follows a final-fixer dispatch" in capsys.readouterr().err
+        assert ledger.read_text(encoding="utf-8") == before
+
+    def test_refix_rules_run_before_the_model_check(self, ledger, capsys):
+        assert refix(ledger, effort="medium") == 2
+        err = capsys.readouterr().err
+        assert "refused: final-refixer follows a final-fixer dispatch" in err
+        assert "rejected:" not in err
+
+    def test_final_refixer_at_opus_medium_is_off_policy(self, ledger, capsys):
+        append(ledger, *FIX_AND_REREVIEW)
+        assert refix(ledger, effort="medium") == 2
+        assert "rejected: final-refixer allows opus/high" in capsys.readouterr().err
+
+    def test_a_bulleted_final_fixer_line_still_counts(self, ledger):
+        append(ledger, "- `Task final: dispatch final-fixer opus/medium — w`",
+               "- Task final: dispatch re-reviewer opus/medium — w")
+        assert refix(ledger) == 0
 
 
 def run_verify(ledger, output, *cmd, exit_code=0):
@@ -547,6 +610,16 @@ class TestReportOnARun:
         follow_up = section(run_report(ledger, capsys), "Follow-up", "Verified")
         assert "- item 59" in follow_up
         assert "more in" not in follow_up
+
+
+    def test_the_refixer_is_labeled_refix_and_the_repeated_re_review_shows_once(self, ledger, capsys):
+        write_ledger(ledger, "Task final: dispatch final-reviewer opus/high — w",
+                     *FIX_AND_REREVIEW,
+                     "Task final: dispatch final-refixer opus/high — w",
+                     "Task final: dispatch re-reviewer-security opus/high — w")
+        out = run_report(ledger, capsys)
+        assert ("| final review | dispatched | — | "
+                "rev opus/high · fix opus/medium · re-rev opus/high · refix opus/high |") in out
 
 
 class TestRulings:
