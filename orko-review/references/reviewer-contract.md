@@ -6,7 +6,7 @@ You have a fresh context on purpose. Nobody has told you what to think of this d
 - Verify before you claim. Each finding carries evidence someone else can re-check in under a minute: a file and line, a quote, a command and what it printed, or a URL and what it says. A suspicion you couldn't confirm is still a finding if you say what you checked and what stayed open.
 - Say what the fix is. "Unclear" isn't a fix; the replacement text or the decision that's missing is.
 - Record what you checked and found sound. It tells the orchestrator what your review covered.
-- Don't edit the document under review or any file other than your report. If you need scratch space to verify something (a test run, an assembled build), create a fresh temporary directory of your own with `mktemp -d` and work only there; never modify an existing file. Running the project's code in place counts as modifying it (Python writes `__pycache__` next to the source, for one), so copy what you need into your directory first.
+- Don't edit the document under review or any file other than your report. If you need scratch space to verify something (a test run, an assembled build), use the scratch directory listed in Paths and work only there; never modify an existing file. Running the project's code in place counts as modifying it (Python writes `__pycache__` next to the source, for one), so copy what you need into your scratch directory first. Don't copy the reviews directory.
 - Don't open anything under the reviews directory listed in Paths except your brief and your report path: not other reviewers' reports, not earlier runs, not `run.json`. Your review is worth something only if it's independent of theirs. Exclude that directory from any search you run (for example `grep -r --exclude-dir=<its name>`), or search only paths outside it.
 
 Severity:
@@ -46,4 +46,6 @@ doc: <the document path, from Paths>
 - <something you verified and found correct>
 ```
 
-Writing the report is your last step. After you write it, read it back once to confirm it is on disk, then reply with one line: the report path.
+Every finding, nits included, has all four bullets. If the title already says the problem, still write one sentence.
+
+Writing the report is your last step. Then run the lint command from your brief and fix the report until it prints `ok`. If the command can't run (a permission denial, for example), say so in one line after the path. Then reply with one line: the report path.

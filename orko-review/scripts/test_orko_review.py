@@ -1116,6 +1116,20 @@ class TestSkillFiles:
     def frontmatter(self, skill):
         return skill.split("---", 2)[1]
 
+    def test_contract_carries_the_v011_rules(self):
+        contract = orko_review.CONTRACT_PATH.read_text(encoding="utf-8")
+        assert ("Every finding, nits included, has all four bullets. "
+                "If the title already says the problem, still write one sentence.") in contract
+        assert "use the scratch directory listed in Paths" in contract
+        assert "mktemp" not in contract
+        assert "run the lint command from your brief and fix the report until it prints `ok`" in contract
+        assert "read it back once" not in contract
+
+    def test_skill_reads_failed_lenses_leniently_and_decides_malformed_findings(self, skill):
+        assert "A lens that fails twice is read leniently" in skill
+        assert "dropped for the run" not in skill
+        assert "A finding whose title starts with `malformed:` is decided like any other" in skill
+
     def test_lint_is_not_an_orchestrator_grant(self, skill):
         assert "lint" not in orko_review.SUBCOMMANDS
         assert "orko_review.py lint" not in self.frontmatter(skill)

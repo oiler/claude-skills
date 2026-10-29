@@ -50,8 +50,8 @@ In one message, make one Agent call per lens, all in parallel: `subagent_type: o
 When every reviewer has returned, run `python3 ${CLAUDE_SKILL_DIR}/scripts/orko_review.py check --run <run-dir>`.
 
 - Exit 0: it prints the findings index. Continue.
-- Exit 2: for each `retry:` line, dispatch that lens again, once, with the same prompt as before, then run `check` again. A lens that fails twice is dropped for the run, and `check` then exits 0 with the rest.
-- Exit 3 (`STATUS: blocked`): report the problem lines and stop. Don't apply and don't dispatch again. A changed document means the reviews may describe a different text.
+- Exit 2: for each `retry:` line, dispatch that lens again, once, with the same prompt as before, then run `check` again. A lens that fails twice is read leniently: its findings join the index, marked malformed, and `check` then exits 0.
+- Exit 3 (`STATUS: blocked`): report the problem lines and stop. Don't apply and don't dispatch again. It means the document changed (the reviews may describe a different text) or no lens produced any finding.
 
 ## 6. File-only stop
 
@@ -66,6 +66,8 @@ For each finding in the index, open the document and the evidence the finding ci
 - `defer`: the finding needs oiler. That covers a product decision (two reasonable readings produce different observable behavior, and neither the document nor an evergreen doc picks one), a conflict with an evergreen doc that the evergreen doc may be the stale side of, and a fix that belongs in a file other than the document.
 
 When the document contradicts an evergreen doc and the document is the side at fault, bring it into line: that's an `accept` whose `--why` names the evergreen doc and the rule. Either way, a conflict is never resolved silently.
+
+A finding whose title starts with `malformed:` is decided like any other: read it in the report and judge it on its content. Its missing bullets aren't a reason to reject it.
 
 Record each one with its own Bash call, and issue the calls in parallel in one message. Don't batch them into a loop, a script, or a shell function: each call must match the skill's `allowed-tools` pattern.
 
