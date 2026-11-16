@@ -6,6 +6,7 @@ A public mirror of the Claude Code skills I use day-to-day. Each folder is a sel
 
 | Skill | What it does |
 |---|---|
+| [coding-defaults](coding-defaults/) | Default rules for writing code and tests in any language: surgical edits, no speculative abstraction or error handling, red-before-green tests where they pay off. Project rules override it. Instruction-only, so it also works in Codex via `~/.agents/skills/`. |
 | [front-end-engineer](front-end-engineer/) | Authority on HTML markup — semantically correct (MDN) HTML in a consistent personal style, with write + audit modes and routing to sibling front-end skills. |
 | [sass](sass/) | Modern CSS (2020–2025) and advanced animations for developers with strong fundamentals. |
 | [web-security](web-security/) | Application-level security for WordPress, Laravel, Django, FastAPI, and Dash. OWASP Top 10 (2021). |
