@@ -5,9 +5,9 @@ description: >-
   Dispatches fresh-context Opus reviewers, one per lens, each writing a full
   report to the project's reviews folder; then verifies every finding and applies
   the accepted ones to the doc (default), or stops after the reports (--file-only).
-  Invoke only as /orko-review <doc-path> [--apply | --file-only], or
+  Invoke only as /orko-review <doc-path> [--apply | --file-only] [--spec <spec-path>], or
   /orko-review --run <run-dir> --apply to apply an earlier file-only run.
-argument-hint: "<doc-path> [--apply | --file-only] | --run <run-dir> --apply"
+argument-hint: "<doc-path> [--apply | --file-only] [--spec <spec-path>] | --run <run-dir> --apply"
 disable-model-invocation: true
 allowed-tools: >-
   Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/orko_review.py preflight *)
@@ -23,11 +23,17 @@ Run one round of independent review on one document: fresh-context reviewers, on
 
 Below, `<run-dir>` is the `run:` path that `start` prints (or the `resume:` path from preflight). The `allowed-tools` grant covers the script's five subcommands only until oiler's next message; after that, a call may ask for permission.
 
+## Models and effort
+
+Each reviewer runs as the `orko-review-reviewer` agent on Opus, at high effort, in a fresh context. The agent file pins `effort: high`, so reviewers run at high whatever the session's effort, and preflight blocks if the installed agent doesn't pin it. Review is where extra effort pays off most. Independence comes from the fresh context, not a different model: move to a Fable review only when the document turns on a novel decision.
+
+The session stays at its current effort. Preflight adds a one-line note when it's below high; it never blocks on it.
+
 ## 1. Preflight
 
 !`python3 ${CLAUDE_SKILL_DIR}/scripts/orko_review.py preflight --effort '${CLAUDE_EFFORT}' $ARGUMENTS`
 
-If that block ends in `STATUS: blocked`, report its `problem:` and `hint:` lines and stop. Pass each `warning:` line on to oiler in one line. If it shows a `resume:` line, go to step 7 with that run directory; its table is the findings index.
+If that block ends in `STATUS: blocked`, report its `problem:` and `hint:` lines and stop. Pass its `note:` line, if any, on to oiler in one line. If it shows a `resume:` line, go to step 7 with that run directory; its table is the findings index.
 
 ## 2. Choose specialists
 
@@ -81,4 +87,4 @@ Single-quote each `--why` and write `'\''` for a literal single quote: double qu
 
 ## 8. Summary
 
-Run `python3 ${CLAUDE_SKILL_DIR}/scripts/orko_review.py summary --run <run-dir>`. Exit 2 lists findings still undecided: decide them, then run it again. Paste its output unchanged, then write at most three items under `## Recommended`, in place of the HTML comment. Include only items that would change what oiler does next. A document that turns on a novel decision belongs here, because `MODELS.md` escalates that case to a Fable review. Then stop. Don't run a second round, and don't commit.
+Run `python3 ${CLAUDE_SKILL_DIR}/scripts/orko_review.py summary --run <run-dir>`. Exit 2 lists findings still undecided: decide them, then run it again. Paste its output unchanged, then write at most three items under `## Recommended`, in place of the HTML comment. Include only items that would change what oiler does next. A document that turns on a novel decision belongs here, because that case moves to a Fable review (see Models and effort). Then stop. Don't run a second round, and don't commit.

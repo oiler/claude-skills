@@ -249,6 +249,14 @@ class TestPreflight:
     def test_missing_doc_blocks(self, project, home):
         assert blocked(pre(["--effort", "high", "docs/nope.md"], home, project))
 
+    def test_missing_doc_explains_where_paths_resolve(self, project, home):
+        lines = pre(["--effort", "high", "docs/nope.md"], home, project)
+        assert f"hint: paths resolve from the folder the session started in: {project}" in lines
+
+    def test_missing_spec_explains_where_paths_resolve(self, project, home):
+        lines = pre(["--effort", "high", PLAN_REL, "--spec", "docs/nope.md"], home, project)
+        assert f"hint: paths resolve from the folder the session started in: {project}" in lines
+
     def test_non_markdown_doc_blocks(self, project, home):
         write(project / "notes.txt", "x\n")
         lines = pre(["--effort", "high", "notes.txt"], home, project)
@@ -257,6 +265,16 @@ class TestPreflight:
     def test_two_positionals_block_and_suggest_quoting(self, project, home):
         lines = pre(["--effort", "high", "my", "spec.md"], home, project)
         assert any("wrap a path with spaces in quotes" in l for l in lines)
+
+    def test_extra_positionals_point_review_guidance_to_an_earlier_message(self, project, home):
+        lines = pre(["--effort", "high", SPEC_REL, "focus", "on", "auth"], home, project)
+        assert blocked(lines)
+        assert ("hint: put review guidance in an earlier message; "
+                "/orko-review takes only the doc path and flags") in lines
+
+    def test_missing_doc_path_gets_no_guidance_hint(self, project, home):
+        lines = pre(["--effort", "high"], home, project)
+        assert not any("review guidance" in l for l in lines)
 
     def test_unknown_flag_blocks(self, project, home):
         assert blocked(pre(["--effort", "high", SPEC_REL, "--fast"], home, project))
@@ -269,21 +287,22 @@ class TestPreflight:
         assert blocked(lines)
         assert "problem: --effort is set by the skill" in lines
 
-    def test_apply_below_high_blocks_with_effort_hint(self, project, home):
-        lines = pre(["--effort", "medium", SPEC_REL], home, project)
-        assert blocked(lines)
-        assert "hint: run /effort high, then rerun" in lines
-
-    def test_file_only_below_high_warns_and_continues(self, project, home):
-        lines = pre(["--effort", "medium", SPEC_REL, "--file-only"], home, project)
+    @pytest.mark.parametrize("mode", [[], ["--file-only"]])
+    def test_below_high_notes_and_continues(self, project, home, mode):
+        lines = pre(["--effort", "medium", SPEC_REL, *mode], home, project)
         assert lines[-1] == "STATUS: ok"
-        assert "mode: file-only" in lines
-        assert any(l.startswith("warning: session effort is medium") for l in lines)
+        assert [l for l in lines if l.startswith(("note:", "warning:", "hint:"))] == [
+            "note: session effort is medium; reviews usually run at high"]
+
+    def test_high_gets_no_effort_note(self, project, home):
+        lines = pre(["--effort", "high", SPEC_REL], home, project)
+        assert not any(l.startswith("note:") for l in lines)
 
     @pytest.mark.parametrize("value", ["", "${CLAUDE_EFFORT}"])
-    def test_unknown_effort_warns_and_does_not_block(self, project, home, value):
+    def test_unknown_effort_notes_and_does_not_block(self, project, home, value):
         lines = pre(["--effort", value, SPEC_REL], home, project)
         assert "effort: unknown" in lines
+        assert "note: session effort unknown; reviews usually run at high" in lines
         assert lines[-1] == "STATUS: ok"
 
     def test_missing_agent_blocks_with_install_hint(self, project, tmp_path):
@@ -1150,11 +1169,12 @@ class TestResume:
         lines = pre(["--effort", "high", "--run", str(run), "--apply", SPEC_REL], home, project)
         assert any(l.startswith("problem: --run takes no doc path") for l in lines)
 
-    def test_resume_below_high_blocks_without_flipping(self, project, home):
+    def test_resume_below_high_notes_and_resumes(self, project, home):
         run = checked(project, "file-only")
         lines = pre(["--effort", "medium", "--run", str(run), "--apply"], home, project)
-        assert "hint: run /effort high, then rerun" in lines
-        assert orko_review.load_manifest(run)["mode"] == "file-only"
+        assert lines[-1] == "STATUS: ok"
+        assert "note: session effort is medium; reviews usually run at high" in lines
+        assert orko_review.load_manifest(run)["mode"] == "apply"
 
 
 class TestSkillFiles:
