@@ -136,7 +136,7 @@ MODE_FLAGS = ("--apply", "--file-only")
 VALUE_OPTIONS = ("--effort", "--spec", "--run")
 AGENT_NAME = "orko-review-reviewer"
 AGENT_INSTALL = "ln -s ~/files/repo/claude-skills/orko-review/agents ~/.claude/agents/orko-review"
-USAGE = "usage: /orko-review <doc-path> [--apply | --file-only]  or  /orko-review --run <run-dir> --apply"
+USAGE = "usage: /orko-review <doc-path> [--apply | --file-only] [--spec <spec-path>]  or  /orko-review --run <run-dir> --apply"
 
 
 @dataclass
@@ -154,8 +154,9 @@ class Resolution:
 def resolve(doc_arg: str, spec_arg: str | None, cwd: Path) -> tuple[Resolution | None, list[str], list[str]]:
     """Everything about the doc that preflight and start share: (resolution, problems, hints)."""
     doc = (cwd / Path(doc_arg).expanduser()).resolve()
+    where = f"paths resolve from the folder the session started in: {cwd}"
     if not doc.is_file():
-        return None, [f"doc not found: {doc}"], []
+        return None, [f"doc not found: {doc}"], [where]
     if doc.suffix != ".md":
         return None, [f"not a Markdown doc: {doc}"], []
     root = repo_root(doc)
@@ -170,6 +171,7 @@ def resolve(doc_arg: str, spec_arg: str | None, cwd: Path) -> tuple[Resolution |
             spec = (cwd / Path(spec_arg).expanduser()).resolve()
             if not spec.is_file():
                 problems.append(f"spec not found: {spec}")
+                hints.append(where)
     elif doc_type == "plan":
         spec = resolve_spec(doc, root)
         if spec is None:
@@ -204,20 +206,14 @@ def parse_preflight_args(argv: list[str]) -> tuple[dict[str, str | None], list[s
     return opts, flags, positionals, problems
 
 
-def effort_lines(value: str | None, mode: str) -> tuple[list[str], list[str], list[str]]:
+def effort_lines(value: str | None) -> list[str]:
+    """A note, never a block: oiler stays at the current effort unless there's a clear reason to change."""
     if value not in EFFORT_ORDER:
-        return (["effort: unknown",
-                 "warning: session effort unknown; MODELS.md raises the session to high for spec and plan work"],
-                [], [])
+        return ["effort: unknown", "note: session effort unknown; reviews usually run at high"]
     out = [f"effort: {value}"]
-    if EFFORT_ORDER.index(value) >= EFFORT_ORDER.index("high"):
-        return out, [], []
-    if mode == "apply":
-        return (out,
-                [f"session effort is {value}; --apply is a verification pass, which MODELS.md raises to high"],
-                ["run /effort high, then rerun"])
-    out.append(f"warning: session effort is {value}; MODELS.md raises the session to high for spec and plan work")
-    return out, [], []
+    if EFFORT_ORDER.index(value) < EFFORT_ORDER.index("high"):
+        out.append(f"note: session effort is {value}; reviews usually run at high")
+    return out
 
 
 def agent_dirs(home: Path, cwd: Path) -> list[Path]:
@@ -279,11 +275,7 @@ def preflight_lines(argv: list[str], home: Path, cwd: Path) -> list[str]:
     if "--apply" in flags and "--file-only" in flags:
         problems.append(f"--apply and --file-only together; {USAGE}")
     mode = "file-only" if "--file-only" in flags else "apply"
-    out = [f"mode: {mode}"]
-    e_out, e_problems, e_hints = effort_lines(opts["effort"], mode)
-    out += e_out
-    problems += e_problems
-    hints += e_hints
+    out = [f"mode: {mode}", *effort_lines(opts["effort"])]
 
     if opts["run"] is not None:
         if "--apply" not in flags:
@@ -299,6 +291,8 @@ def preflight_lines(argv: list[str], home: Path, cwd: Path) -> list[str]:
     if len(positionals) != 1:
         problems.append(f"expected one doc path, got {len(positionals)} "
                         f"(wrap a path with spaces in quotes); {USAGE}")
+        if len(positionals) > 1:
+            hints.append("put review guidance in an earlier message; /orko-review takes only the doc path and flags")
     else:
         res, r_problems, r_hints = resolve(positionals[0], opts["spec"], cwd)
         problems += r_problems

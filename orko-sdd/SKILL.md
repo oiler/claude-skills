@@ -2,8 +2,8 @@
 name: orko-sdd
 description: >-
   oiler's standing orchestrator overlay for superpowers:subagent-driven-development.
-  Runs a written implementation plan under SDD with oiler's model and effort policy
-  (MODELS.md), evergreen-conflict handling, safety stops, turn-ending rules, and a
+  Runs a written implementation plan under SDD with a model and effort policy per
+  role, evergreen-conflict handling, safety stops, turn-ending rules, and a
   script-built final report. Invoke only as /orko-sdd <plan-path> [--release-critical].
 argument-hint: "<plan-path> [--release-critical]"
 disable-model-invocation: true
@@ -30,6 +30,7 @@ If that block ends in `STATUS: blocked`, report its `problem:` lines and stop. O
 
 - If the `flags:` line shows `--release-critical`, append the line `orko-sdd: release-critical` to the ledger. `log` reads it when you dispatch the final review.
 - Copy each `warning:` line into the ledger as `Follow-up: <warning>`, so the report carries it.
+- Pass a `note:` line on to oiler in one line, in the same message as your next tool call. It doesn't go in the ledger.
 
 ## Authority
 
@@ -52,9 +53,7 @@ Single-quote the `--why` text here and the command after `--` in Finish's `verif
 
 On success, the script prints `subagent_type` and `model`: dispatch with exactly those. SDD's templates say `general-purpose`; use the printed `subagent_type` instead. Exit 2 means the combination is off-policy or the call was refused; stderr says which. For an off-policy combination, choose again, or rerun with `--override` and put the reason in `--why`.
 
-If `log` also prints `warning: orchestrator effort is …` on stderr, the dispatch still went through. MODELS.md runs the orchestrator at high, and only oiler can change `/effort`, so keep going, pass the warning's fix to oiler in your next message, and append it to the ledger as `Follow-up: <warning>` unless the ledger already has an orchestrator-effort `Follow-up:` line, for example from preflight.
-
-| Role | Model/effort | MODELS.md row |
+| Role | Model/effort | Use for |
 |---|---|---|
 | `implementer-scoped` | sonnet/medium | Implementer: tightly scoped task from the approved plan |
 | `implementer-gap` | opus/low | Implementer: minor local gap with one conventional reading |
@@ -72,6 +71,18 @@ If `log` also prints `warning: orchestrator effort is …` on stderr, the dispat
 | `final-fixer` | opus/medium | SDD's single final-review fix dispatch |
 | `final-refixer` | opus/high | Fix failure caused by skipped files, incomplete execution or missing verification |
 
+Why these levels:
+
+- The orchestrator usually runs on Opus at high: it delegates well and sustains long runs with parallel subagents. Preflight notes a lower session effort in one line and carries on; the run stays at the current effort unless there's a clear reason to change.
+- `implementer-scoped` (sonnet/medium): efficient when the specification and boundaries are explicit; medium leaves room to verify.
+- `implementer-gap` (opus/low): low is close to a high-effort run on bounded coding work. The implementer makes the bounded judgment and records the assumption.
+- `implementer-multifile` (opus/medium or opus/high): medium carries a change through a large code base well; high buys extra checking.
+- `implementer-ui` (sonnet/high): adds polish to UI work. Give it concrete visual direction and a way to verify visually.
+- `implementer-ui-replication` (opus/medium): reads screenshots and layouts precisely even at low effort; image tools such as crop and zoom add more than extra thinking.
+- `fix-incomplete` (same model, one effort up): the model knew enough but didn't investigate or follow through.
+- `fix-wrong-diagnosis` (fable/high): a confident but wrong diagnosis after thorough investigation is a capability failure, not an effort failure. A fresh subagent isn't anchored by the wrong turns.
+- `final-reviewer` (opus/high, fresh context): thorough without the Fable premium. A release-critical or unusually large branch gets fable/high, the highest-capability pass. A fresh context reduces anchoring; a different model still doesn't make the errors independent.
+
 Choosing a role:
 
 - The task's plan text contains the complete code: `implementer-scoped`.
@@ -81,7 +92,7 @@ Choosing a role:
 - Downgrade on a fresh re-dispatch (NEEDS_CONTEXT, or a fix round 1-3 when the implementer can't be resumed) when the work left is transcription from the plan or a single-file mechanical fix: log it as `implementer-scoped`, whatever the task's first role was.
 - A batch of small same-shape tasks (SDD's batching rule) is one dispatch: log it with `--task 3,4,5`. Record its completion as one `Task <N>: complete (…)` line per task, because SDD's resume check reads per-task lines.
 - SDD's BLOCKED re-dispatch "with a more capable model": `fix-tier-up`. Any other fresh re-dispatch (NEEDS_CONTEXT, or a fix round 1-3 when the implementer can't be resumed) logs again under the task's original role, unless the downgrade rule applies.
-- A task review logs as `reviewer-security` (opus/high) when its dispatch gets the web-security line, and as `reviewer` (opus/medium) otherwise. A scoped re-review follows the same rule with `re-reviewer-security` and `re-reviewer`. MODELS.md puts security-sensitive review at high because that's where extra effort pays off most, and a separate role lets `log` refuse a medium review of a security diff.
+- A task review logs as `reviewer-security` (opus/high) when its dispatch gets the web-security line, and as `reviewer` (opus/medium) otherwise. A scoped re-review follows the same rule with `re-reviewer-security` and `re-reviewer`. Security-sensitive review runs at high because that's where extra effort pays off most, and a separate role lets `log` refuse a medium review of a security diff.
 - The final whole-branch review logs as `--task final --role final-reviewer`; for an unusually large branch, `--override` to fable/high with the reason. Its single fix dispatch logs as `--task final --role final-fixer`. Its scoped re-review, and a refix re-review, log as `--task final --role re-reviewer`, or `re-reviewer-security` when the code they cover qualifies for the web-security line. A Critical or Important regression the final fix wave introduced logs as `--task final --role final-refixer` (see Fix loop).
 
 ## Fix loop

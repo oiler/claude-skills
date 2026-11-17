@@ -1,5 +1,20 @@
 # orko-review — Changelog
 
+## v0.1.2 — 2026-11-17
+
+The skill no longer depends on the global `MODELS.md`, and session effort never blocks a run.
+
+### Changed
+
+- A "Models and effort" section in SKILL.md carries the reviewer model and effort: Opus at high in a fresh context, pinned by the agent file. Preflight still blocks when the installed agent doesn't pin `effort: high`.
+- Session effort below high, or unknown, prints one `note:` line and the run continues. `--apply` below high used to block, and other cases printed a `warning:` that cited `MODELS.md`.
+- `--spec <spec-path>` appears in `argument-hint`, the description's invocation line, and the usage text.
+
+### Added
+
+- When the doc or spec isn't found, preflight adds a hint that paths resolve from the folder the session started in.
+- When preflight gets more than one positional argument, it adds a hint to put review guidance in an earlier message.
+
 ## v0.1.1 — 2026-10-28
 
 A few malformed findings no longer cost a whole lens. Across 39 recorded invalid reports, every failure was a missing or empty bullet, and retries drifted the same way.

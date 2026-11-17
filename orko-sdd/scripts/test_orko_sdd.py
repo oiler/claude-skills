@@ -109,22 +109,16 @@ class TestLog:
         assert run_log(ledger, role="re-reviewer-security", model="opus", effort="high", why="w") == 0
         assert run_log(ledger, role="re-reviewer-security", model="opus", effort="medium", why="w") == 2
 
-    def test_a_dispatch_below_high_orchestrator_effort_logs_with_a_warning(self, ledger, capsys, monkeypatch):
-        monkeypatch.setenv("CLAUDE_EFFORT", "medium")
+    @pytest.mark.parametrize("level", ["medium", "high", None])
+    def test_a_dispatch_logs_silently_at_any_orchestrator_effort(self, ledger, capsys, monkeypatch, level):
+        """Preflight notes the effort once; log doesn't repeat it on every dispatch."""
+        if level is None:
+            monkeypatch.delenv("CLAUDE_EFFORT")
+        else:
+            monkeypatch.setenv("CLAUDE_EFFORT", level)
         assert run_log(ledger) == 0
         assert last_line(ledger).startswith("Task 1: dispatch implementer-scoped")
-        err = capsys.readouterr().err
-        assert "warning: orchestrator effort is medium" in err
-        assert "press `s`" in err
-
-    def test_a_dispatch_at_high_orchestrator_effort_prints_no_warning(self, ledger, capsys):
-        assert run_log(ledger) == 0
-        assert "warning" not in capsys.readouterr().err
-
-    def test_a_dispatch_with_no_effort_set_warns(self, ledger, capsys, monkeypatch):
-        monkeypatch.delenv("CLAUDE_EFFORT")
-        assert run_log(ledger) == 0
-        assert "warning: orchestrator effort is not set" in capsys.readouterr().err
+        assert capsys.readouterr().err == ""
 
     def test_fix_tier_up_must_rank_above_the_stuck_implementer(self, ledger):
         assert run_log(ledger, role="implementer-multifile", model="opus", effort="medium", why="w") == 0
@@ -293,20 +287,20 @@ class TestPreflight:
         assert out[-1] == "STATUS: ok"
 
     @pytest.mark.parametrize("level", ["low", "medium"])
-    def test_effort_below_high_warns_with_a_session_only_fix(self, fake_home, repo, monkeypatch, level):
+    def test_effort_below_high_gets_a_one_line_note(self, fake_home, repo, monkeypatch, level):
         monkeypatch.setenv("CLAUDE_EFFORT", level)
         out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
-        warning = next(line for line in out if line.startswith(f"warning: orchestrator effort is {level}"))
-        assert "press `s`" in warning
-        assert "claude --effort high" in warning
+        assert [line for line in out if "effort is" in line] == [
+            f"note: orchestrator effort is {level}; orko-sdd usually runs the orchestrator at high"]
         assert not any(line.startswith("problem:") for line in out)
         assert out[-1] == "STATUS: ok"
 
-    def test_unset_effort_warns(self, fake_home, repo, monkeypatch):
+    def test_unset_effort_gets_a_one_line_note(self, fake_home, repo, monkeypatch):
         monkeypatch.delenv("CLAUDE_EFFORT")
         out = orko_sdd.preflight_lines(["docs/plan.md"], fake_home, repo)
         assert "orchestrator-effort: not set" in out
-        assert any(line.startswith("warning: orchestrator effort is not set") for line in out)
+        assert [line for line in out if "effort is" in line] == [
+            "note: orchestrator effort is not set; orko-sdd usually runs the orchestrator at high"]
         assert out[-1] == "STATUS: ok"
 
     @pytest.mark.parametrize("level", ["xhigh", "max"])

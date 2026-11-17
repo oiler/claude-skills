@@ -25,7 +25,7 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 LEDGER_IDENTITY = "# SDD ledger — plan:"
 RELEASE_CRITICAL_MARKER = "orko-sdd: release-critical"
 
-# Role -> allowed (model, effort) pairs, from ~/.claude/MODELS.md phases 5-6.
+# Role -> allowed (model, effort) pairs. SKILL.md's "Why these levels" gives the reasons.
 ROLE_TABLE: dict[str, tuple[tuple[str, str], ...]] = {
     "implementer-scoped": (("sonnet", "medium"),),
     "implementer-gap": (("opus", "low"),),
@@ -132,17 +132,15 @@ def combos_text(role: str) -> str:
 
 
 def render_role_table() -> str:
-    rows = ["| Role | Model/effort | MODELS.md row |", "|---|---|---|"]
+    rows = ["| Role | Model/effort | Use for |", "|---|---|---|"]
     rows += [f"| `{role}` | {combos_text(role)} | {ROLE_SOURCE[role]} |" for role in ROLE_TABLE]
     return "\n".join(rows)
 
 
-# MODELS.md runs the orchestrator at high; xhigh and max are above it. Below high is a warning, not a
-# block: a medium-effort clean-room run passed every check (evals/orko-sdd/smoke-2026-10-10-medium.md).
-# `/effort high` typed as a command saves high as oiler's default, so the fix names the session-only path.
+# The orchestrator usually runs at high; xhigh and max are above it. Below high is a note, never a block:
+# oiler stays at the current effort unless there's a clear reason to change, and a medium-effort
+# clean-room run passed every check (evals/orko-sdd/smoke-2026-10-10-medium.md).
 ORCHESTRATOR_EFFORTS = ("high", "xhigh", "max")
-EFFORT_FIX = ("open `/effort`, choose high, and press `s` to apply it to this session only "
-              "(or relaunch with `claude --effort high`)")
 
 
 def orchestrator_effort() -> str:
@@ -261,8 +259,7 @@ def preflight_lines(argv: list[str], home: Path, cwd: Path) -> list[str]:
     effort = orchestrator_effort()
     out.append(f"orchestrator-effort: {effort}")
     if effort not in ORCHESTRATOR_EFFORTS:
-        out.append(f"warning: orchestrator effort is {effort}; MODELS.md runs the orchestrator at high. "
-                   f"To raise it, {EFFORT_FIX}")
+        out.append(f"note: orchestrator effort is {effort}; orko-sdd usually runs the orchestrator at high")
 
     out.append(f"final-review: {'fable/high' if '--release-critical' in known else 'opus/high'}")
     out += [f"problem: {p}" for p in problems]
@@ -775,11 +772,6 @@ def cmd_log(args: argparse.Namespace) -> int:
     line = f"Task {args.task}: dispatch {args.role} {args.model}/{args.effort} — {why}{suffix}"
     append_line(ledger, line)
     print(f"{line}\nsubagent_type: orko-sdd-{args.effort}\nmodel: {args.model}")
-    # The level can drop mid-run: oiler shifts /effort by phase, and a resume after a
-    # background-task notification runs at the session level. Warn, but don't refuse the dispatch.
-    if (effort := orchestrator_effort()) not in ORCHESTRATOR_EFFORTS:
-        print(f"warning: orchestrator effort is {effort}; MODELS.md runs the orchestrator at high. "
-              f"Tell oiler to {EFFORT_FIX}", file=sys.stderr)
     return 0
 
 

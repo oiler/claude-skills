@@ -1,5 +1,18 @@
 # orko-sdd — Changelog
 
+## v0.1.5 — 2026-11-17
+
+The skill no longer depends on the global `MODELS.md`, and orchestrator effort is a one-line note.
+
+### Changed
+
+- The role table's third column is "Use for" instead of "MODELS.md row", and a "Why these levels" list in SKILL.md carries the reasons from the old table rows the skill uses.
+- Orchestrator effort below high, or unset, prints one `note:` line at preflight instead of a `warning:` with instructions for raising it. The note goes to oiler, not the ledger.
+
+### Removed
+
+- `log`'s per-dispatch orchestrator-effort warning on stderr. Preflight's note covers it.
+
 ## v0.1.4 — 2026-10-29
 
 A regression the final fix wave introduces gets one more fix round, and the skill pins superpowers 7.0.0.
