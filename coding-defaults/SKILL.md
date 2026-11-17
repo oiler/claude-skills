@@ -27,7 +27,13 @@ Defaults for any code change. A project's own rules (its CLAUDE.md, AGENTS.md, s
 - the observable proof that a milestone works: an end-to-end run with an artifact
 - a regression test for every real bug, at the lowest level that reproduces it
 - isolated tests on a high-risk boundary (parsing, validation, security, idempotency, money) when the change adds or alters behavior there, covering the failure modes the change can trigger
+- property tests for round-trips (encode then decode returns the input), invariants, and idempotency, using a property library such as Hypothesis or fast-check
+- differential tests for migrations: run the old and new code on the same inputs and compare
 
 **Don't write** tests that restate code, check prose, or only ever run against fakes when the real thing is reachable. Scratch checks stay scratch; don't promote them into permanent test files.
+
+**Failing checks:** if a check still fails after three rounds of fixes, stop and bring me in.
+
+**Flaky tests:** don't skip them, retry until they pass, or add sleeps. Find the root cause; if you can't, delete the test and write down why.
 
 **Existing code with no test** (before a refactor, for example): prove the new test can fail by temporarily breaking the code it covers, then restore the code.
